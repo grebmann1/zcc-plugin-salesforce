@@ -20,7 +20,7 @@
   },
   "zcc": {
     "name": "Salesforce",
-    "description": "A project-aware Salesforce workbench with data exploration, Apex and logs, deployments, Agentforce, and tools beside your agents. Install with `zcc plugin install salesforce`.",
+    "description": "A project-aware Salesforce workbench with data exploration, Apex and logs, deployments, Agentforce, and tools beside your agents. Install with `zcc plugin install salesforce@official`.",
     "branding": {
       "icon": "Cloud"
     },

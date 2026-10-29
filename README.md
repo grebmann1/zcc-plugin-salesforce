@@ -1,6 +1,6 @@
 # Salesforce plugin
 
-Independent Zana plugin maintained at [grebmann1/zcc-plugin-salesforce](https://github.com/grebmann1/zcc-plugin-salesforce). Official catalogue listing (`zcc plugin install salesforce`). It is both the Salesforce
+Independent Zana plugin maintained at [grebmann1/zcc-plugin-salesforce](https://github.com/grebmann1/zcc-plugin-salesforce). Official catalogue listing (`zcc plugin install salesforce@official`). It is both the Salesforce
 DX inner loop (org picker, doctor, SOQL Explorer, Agentforce Studio) and the **platform SDK** other plugins consume.
 
 Install once and reuse the Salesforce CLI connection. Each project can select its
@@ -29,7 +29,7 @@ Built Electron tests live in `e2e/` and use the Zana host harness: `ZCC_HOST_REP
 ## Install
 
 ```
-zcc plugin install salesforce
+zcc plugin install salesforce@official
 ```
 
 Local Agentforce authoring works without Salesforce CLI or a connected org. The

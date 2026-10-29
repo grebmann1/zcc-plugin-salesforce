@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, readdirSync
 import { join, delimiter, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test as base, expect } from './fixtures/app.js';
-import { preparePluginRuntime } from '../packages/plugin-build/src/prepare-plugin-runtime.js';
 import { AGENT_SCRIPT_EXAMPLES } from '../plugins/salesforce/lib/agent-script-model.js';
 
 const test = base.extend({
@@ -11,7 +10,8 @@ const test = base.extend({
     const bundle = join(home, 'runtime-plugins'); mkdirSync(bundle);
     // Keep normal boot providers; Salesforce itself is a compiled release tree.
     for (const id of ['provider-codex', 'provider-claude-code', 'provider-acp', 'provider-pi']) cpSync(join(source, 'plugins', id), join(bundle, id), { recursive: true, filter: p => !p.split(sep).includes('node_modules') });
-    await preparePluginRuntime(join(source, 'plugins/salesforce'), join(bundle, 'salesforce'), '2.3.1');
+    if (!process.env.SALESFORCE_PLUGIN_RUNTIME) throw Error('Run via npm run test:electron');
+    cpSync(process.env.SALESFORCE_PLUGIN_RUNTIME, join(bundle, 'salesforce'), { recursive: true });
     expect(existsSync(join(bundle, 'salesforce/server.ts'))).toBe(false);
     expect(existsSync(join(bundle, 'salesforce/node_modules'))).toBe(false);
     expect(existsSync(join(bundle, 'salesforce/toolkit-runtime/sdk.mjs'))).toBe(true);
@@ -66,6 +66,7 @@ test('Salesforce toolkit: compiled SDK, realistic CLI capture, isolated context 
   writeFileSync(join(home,'sf-mode'),'success');
   // Drive the host's generated settings UI, then prove stale calls stop.
   await win.getByTestId('nav-extensions').click(); await win.getByTestId('extensions-nav-installed').click(); await win.getByRole('button', { name:'Salesforce plugin details' }).click();
+  await win.getByRole('tab', { name: 'Settings', exact: true }).click();
   const selector = win.getByLabel('Agent tool provider', { exact:true }); await expect(selector).toBeVisible();
   const probeCount = () => readFileSync(join(home,'sf-toolkit-trace.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line)).filter(r=>r.args[0]==='plugins').length;
   const before = probeCount(); writeFileSync(join(home,'sf-mode'),'timeout');

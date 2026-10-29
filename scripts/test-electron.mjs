@@ -37,7 +37,8 @@ export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => 
   symlinkSync(join(root, 'dist/plugin'), join(overlay, 'salesforce'), 'junction');
   for (const name of readdirSync(join(root, 'e2e')).filter(name => name.endsWith('.spec.ts'))) {
     let source = readFileSync(join(root, 'e2e', name), 'utf8');
-    source = source.replaceAll("'./fixtures/app.js'", "'./app.js'");
+    source = source.replaceAll("'./fixtures/salesforce-navigation.js'", "'" + join(root, "e2e/fixtures/salesforce-navigation.ts") + "'");
+    source = source.replaceAll("'./fixtures/app.js'", "'./app.js'").replaceAll('"./fixtures/app.js"', '"./app.js"');
     source = source.replaceAll("'./fixtures/", "'" + join(host, 'e2e/fixtures/')).replaceAll('"./fixtures/', '"' + join(host, 'e2e/fixtures/'));
     source = source.replaceAll("'./sdk/", "'" + join(host, 'e2e/sdk/')).replaceAll('"./sdk/', '"' + join(host, 'e2e/sdk/'));
     source = source.replaceAll("'../plugins/salesforce/", "'" + root).replaceAll("'../packages/", "'" + join(host, 'packages/'));
@@ -46,6 +47,6 @@ export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => 
     source = source.replace(/window\.cc\.extensions\.install\(\{\s*kind:\s*['"]bundled['"],\s*id:\s*['"]salesforce['"]\s*\}\)/g, "window.cc.pluginApps.setEnabled('salesforce', true)");
     writeFileSync(join(staged, name), source);
   }
-  const run = spawnSync('pnpm', ['test:e2e', '--', staged, ...process.argv.slice(2)], { cwd: host, stdio: 'inherit', env: { ...process.env, ZCC_BUNDLED_PLUGINS_DIR: overlay } });
+  const run = spawnSync('pnpm', ['test:e2e', '--', staged, ...process.argv.slice(2)], { cwd: host, stdio: 'inherit', env: { ...process.env, ZCC_BUNDLED_PLUGINS_DIR: overlay, SALESFORCE_PLUGIN_RUNTIME: join(root, 'dist/plugin') } });
   process.exitCode = run.status ?? 1;
 } finally { rmSync(staged, { recursive: true, force: true }); }

@@ -12,4 +12,4 @@ The plugin talks to Salesforce APIs from this host. Reads can run unattended. Wr
 
 ## Requirements
 
-Install with `zcc plugin install salesforce`, then authenticate the Salesforce CLI / DX org this project uses.
+Install with `zcc plugin install salesforce@official`, then authenticate the Salesforce CLI / DX org this project uses.
