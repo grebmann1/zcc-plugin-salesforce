@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -13,6 +13,7 @@ it('clones the current runtime offline using the public repository identity', as
     const source = join(home, 'source'); await mkdir(source);
     await writeFile(join(source, 'package.json'), '{"name":"@zcc-ext/salesforce"}');
     await writeFile(join(home, '.gitconfig'), '[user]\n name = Existing\n');
+    vi.stubEnv('GIT_DIR', join(home, 'untrusted-inherited-git-dir'));
     await prepareReleaseFixture(home, source);
     const config = await readFile(join(home, '.gitconfig'), 'utf8');
     expect(config).toContain('name = Existing');
@@ -20,5 +21,5 @@ it('clones the current runtime offline using the public repository identity', as
     for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
     await exec('git', ['clone', '--branch', 'runtime', 'https://github.com/grebmann1/zcc-plugin-salesforce.git', join(home, 'clone')], { env, timeout: 10000 });
     expect(await readFile(join(home, 'clone/package.json'), 'utf8')).toContain('@zcc-ext/salesforce');
-  } finally { await rm(home, { recursive: true, force: true }); }
+  } finally { vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true }); }
 });
