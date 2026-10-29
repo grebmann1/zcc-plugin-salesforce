@@ -16,21 +16,14 @@ import { test as base, expect, launchApp } from ${JSON.stringify(join(host, 'e2e
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-import { existsSync, cpSync, mkdirSync, appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
+import { prepareReleaseFixture } from ${JSON.stringify(join(root, 'scripts/release-fixture.mjs'))};
 const exec = promisify(execFile);
 export { expect, launchApp };
 export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => {
   const custom = launchEnv.ZCC_BUNDLED_PLUGINS_DIR && join(launchEnv.ZCC_BUNDLED_PLUGINS_DIR, 'salesforce');
   const source = custom && existsSync(custom) ? custom : ${JSON.stringify(join(root, 'dist/plugin'))};
-  const repository = join(home, 'salesforce-release');
-  cpSync(source, repository, { recursive: true });
-  const childEnv = { ...process.env, HOME: home };
-  for (const key of Object.keys(childEnv)) if (key.startsWith('GIT_')) delete childEnv[key];
-  for (const args of [['init', '-b', 'runtime'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid'], ['add', '.'], ['commit', '-m', 'Current compiled release']]) {
-    await exec('git', args, { cwd: repository, env: childEnv });
-  }
-  appendFileSync(join(home, '.gitconfig'), '\\n[protocol "file"]\\n  allow = always\\n[url "' + pathToFileURL(repository).href + '"]\\n  insteadOf = https://github.com/grebmann1/zcc-plugin-salesforce.git\\n');
+  await prepareReleaseFixture(home, source);
   const result = await exec(process.execPath, [${JSON.stringify(join(host, 'packages/cli/dist/bin/zcc'))}, 'plugin', 'install', 'git:https://github.com/grebmann1/zcc-plugin-salesforce.git@runtime'], {
     cwd: source, timeout: 150000, maxBuffer: 2 * 1024 * 1024,
     env: { ...process.env, HOME: home, ZCC_DATA_DIR: join(home, '.zcc'), ZCC_SERVER_URL: new URL(app.window.url()).origin,
