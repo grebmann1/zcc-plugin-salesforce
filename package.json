@@ -1,0 +1,85 @@
+{
+  "name": "@zcc-ext/salesforce",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Salesforce project workbench for ZCC: connected orgs, SOQL, Apex, deployments, Agentforce, and reusable native side panels.",
+  "engines": {
+    "zcc": ">=2.5.0",
+    "zccPluginSdk": ">=0.1.0",
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node --import tsx scripts/build-app.mjs",
+    "build:playground": "node scripts/build-playground.mjs",
+    "package": "node --import tsx scripts/package.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check:package": "node scripts/check-package.mjs",
+    "test:electron": "node scripts/test-electron.mjs"
+  },
+  "zcc": {
+    "name": "Salesforce",
+    "description": "A project-aware Salesforce workbench with data exploration, Apex and logs, deployments, Agentforce, and tools beside your agents. Install with `zcc plugin install salesforce`.",
+    "branding": {
+      "icon": "Cloud"
+    },
+    "server": "./server.ts",
+    "extra": {
+      "runtimeAssets": [
+        "playground/dist",
+        "toolkit-runtime",
+        "flow-visualizer"
+      ]
+    },
+    "app": "./app.js",
+    "skills": [
+      "skills"
+    ]
+  },
+  "exports": {
+    "./sdk": "./lib/sdk-contract.ts",
+    "./ui": "./ui.ts",
+    "./panels": "./panels.tsx"
+  },
+  "dependencies": {
+    "@salesforce/metadata-visualizer-web": "1.7.0",
+    "@sf-agentscript/agentforce": "2.10.38",
+    "@sf-agentscript/lsp": "2.6.33",
+    "@sf-agentscript/monaco": "2.4.39",
+    "@sf-agentscript/parser": "4.0.19",
+    "@xyflow/react": "^12.10.0",
+    "@zana-ai/zcc-plugin-sdk": "file:vendor/zana-ai-zcc-plugin-sdk-0.1.0.tgz",
+    "@zana-ai/zcc-ui": "file:vendor/zcc-ui",
+    "fast-xml-parser": "5.11.1",
+    "lucide-react": "^1.47.0",
+    "monaco-editor": "^0.54.0",
+    "sf-agentic-tools": "file:vendor/sf-agentic-tools-0.2.0.tgz",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@babel/preset-typescript": "^7.29.7",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^5.1.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "dts-bundle-generator": "^9.5.1",
+    "esbuild": "^0.28.1",
+    "happy-dom": "^21.0.4",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2",
+    "vitest": "^4.1.10"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grebmann1/zcc-plugin-salesforce.git"
+  }
+}

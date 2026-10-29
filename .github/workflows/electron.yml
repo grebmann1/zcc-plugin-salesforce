@@ -1,0 +1,36 @@
+name: Built Electron integration
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['app.tsx', 'lib/**', 'src/**', 'scripts/**', 'e2e/**', 'package*.json', 'vendor/**']
+jobs:
+  electron:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: plugin
+      - uses: actions/checkout@v4
+        with:
+          repository: salesforce/zana
+          path: host
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci && npm run build && npm run package
+        working-directory: plugin
+      - run: pnpm install --frozen-lockfile
+        working-directory: host
+      - run: npm run test:electron -- --grep 'Salesforce workbench|Salesforce toolkit|Salesforce hub'
+        working-directory: plugin
+        env:
+          ZCC_HOST_REPO: ${{ github.workspace }}/host
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: electron-failures
+          path: host/e2e/.artifacts

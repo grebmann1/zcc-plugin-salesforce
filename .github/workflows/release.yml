@@ -1,0 +1,50 @@
+name: Release plugin
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: plugin-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run package
+      - run: npm run check:package
+      - name: Publish compiled runtime branch, immutable tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin runtime:refs/remotes/origin/runtime || true
+          source_commit=$(git rev-parse HEAD)
+          runtime_tree=$(mktemp -d)
+          cp -R dist/plugin/. "$runtime_tree/"
+          archive="$RUNNER_TEMP/salesforce-$version.tar.gz"
+          tar -czf "$archive" -C dist/plugin .
+          git -C "$runtime_tree" init -b runtime
+          git -C "$runtime_tree" config user.name 'github-actions[bot]'
+          git -C "$runtime_tree" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git show-ref --verify --quiet refs/remotes/origin/runtime; then
+            git -C "$runtime_tree" fetch "$GITHUB_WORKSPACE" refs/remotes/origin/runtime
+            git -C "$runtime_tree" reset --soft FETCH_HEAD
+          fi
+          git -C "$runtime_tree" add -A
+          git -C "$runtime_tree" commit -m "Salesforce $version (source $source_commit)"
+          git fetch "$runtime_tree" runtime:refs/heads/release-runtime
+          git tag "v$version" release-runtime
+          git push --atomic origin release-runtime:runtime "v$version"
+          gh release create "v$version" "$archive" --title "Salesforce $version" --notes "Compiled Salesforce plugin. Source: $source_commit. Requires Zana 2.5.0 or later. Install from the official plugin catalogue."
