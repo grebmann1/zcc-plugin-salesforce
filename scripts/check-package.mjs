@@ -7,7 +7,7 @@ export function checkPackage(root) {
   assert.equal(pkg.name, '@zcc-ext/salesforce');
   assert.equal(pkg.zcc.server, './server.mjs');
   for (const key of ['scripts', 'dependencies', 'devDependencies', 'exports']) assert.equal(pkg[key], undefined, `Unexpected ${key}`);
-  for (const path of [pkg.zcc.server, pkg.zcc.app, 'app.meta.json', 'server.meta.json', 'LICENSE', ...pkg.zcc.skills, ...pkg.zcc.extra.runtimeAssets, 'flow-visualizer/light.html', 'flow-visualizer/dark.html', 'playground/dist/index.html', 'toolkit-runtime/sdk.mjs']) assert(existsSync(join(root, path)), `Missing ${path}`);
+  for (const path of [pkg.zcc.server, pkg.zcc.app, 'app.meta.json', 'server.meta.json', 'LICENSE', 'NOTICE', 'licenses/agentscript.txt', ...pkg.zcc.skills, ...pkg.zcc.extra.runtimeAssets, 'flow-visualizer/light.html', 'flow-visualizer/dark.html', 'playground/dist/index.html', 'toolkit-runtime/sdk.mjs']) assert(existsSync(join(root, path)), `Missing ${path}`);
   function walk(dir) {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, item.name);

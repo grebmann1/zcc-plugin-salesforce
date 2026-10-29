@@ -11,8 +11,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'salesforce-release-')); roots.push(root);
   const pkg = { name: '@zcc-ext/salesforce', version: '0.1.0', zcc: { server: './server.mjs', app: './app.js', skills: ['skills'], extra: { runtimeAssets: ['playground/dist', 'flow-visualizer', 'toolkit-runtime'] } } };
   await writeFile(join(root, 'package.json'), JSON.stringify(pkg));
-  for (const dir of ['skills', 'playground/dist', 'flow-visualizer', 'toolkit-runtime']) await mkdir(join(root, dir), { recursive: true });
-  for (const file of ['app.js', 'server.mjs', 'app.meta.json', 'server.meta.json', 'LICENSE', 'flow-visualizer/light.html', 'flow-visualizer/dark.html', 'playground/dist/index.html', 'toolkit-runtime/sdk.mjs']) await writeFile(join(root, file), 'fixture');
+  for (const dir of ['skills', 'playground/dist', 'flow-visualizer', 'toolkit-runtime', 'licenses']) await mkdir(join(root, dir), { recursive: true });
+  for (const file of ['app.js', 'server.mjs', 'app.meta.json', 'server.meta.json', 'LICENSE', 'NOTICE', 'licenses/agentscript.txt', 'flow-visualizer/light.html', 'flow-visualizer/dark.html', 'playground/dist/index.html', 'toolkit-runtime/sdk.mjs']) await writeFile(join(root, file), 'fixture');
   return { root, pkg };
 }
 describe('standalone release', () => {
@@ -44,7 +44,7 @@ describe('standalone release', () => {
     const { root, pkg } = await fixture(); await writeFile(join(root, 'package.json'), JSON.stringify({ ...pkg, [key]: {} }));
     expect(() => checkPackage(root)).toThrow(`Unexpected ${key}`);
   });
-  it.each(['app.js', 'flow-visualizer/light.html', 'toolkit-runtime/sdk.mjs', 'LICENSE'])('rejects missing %s', async file => {
+  it.each(['app.js', 'flow-visualizer/light.html', 'toolkit-runtime/sdk.mjs', 'LICENSE', 'NOTICE', 'licenses/agentscript.txt'])('rejects missing %s', async file => {
     const { root } = await fixture(); await rm(join(root, file)); expect(() => checkPackage(root)).toThrow('Missing');
   });
   it.each(['node_modules', '.git', '.env'])('rejects leaked %s', async file => {
