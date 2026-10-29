@@ -67,6 +67,7 @@ test('Salesforce toolkit: compiled SDK, realistic CLI capture, isolated context 
   // Drive the host's generated settings UI, then prove stale calls stop.
   await win.getByTestId('nav-extensions').click(); await win.getByTestId('extensions-nav-installed').click(); await win.getByRole('button', { name:'Salesforce plugin details' }).click();
   await win.getByRole('tab', { name: 'Settings', exact: true }).click();
+  await win.getByRole('button', { name: 'Configuration', exact: true }).click();
   const selector = win.getByLabel('Agent tool provider', { exact:true }); await expect(selector).toBeVisible();
   const probeCount = () => readFileSync(join(home,'sf-toolkit-trace.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line)).filter(r=>r.args[0]==='plugins').length;
   const before = probeCount(); writeFileSync(join(home,'sf-mode'),'timeout');
