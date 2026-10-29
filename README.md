@@ -32,6 +32,8 @@ Built Electron tests live in `e2e/` and use the Zana host harness: `ZCC_HOST_REP
 zcc plugin install salesforce@official
 ```
 
+Older Zana builds reserve Salesforce as a bundled plugin. Upgrade to a Zana release containing the independent-plugin migration before installing this distribution. That upgrade migrates existing installations while retaining settings, saved data and enablement; new profiles install Salesforce explicitly.
+
 Local Agentforce authoring works without Salesforce CLI or a connected org. The
 plugin stays running; the project overview distinguishes local readiness from org
 setup, missing CLI and connections that need attention. **Build an agent** opens
