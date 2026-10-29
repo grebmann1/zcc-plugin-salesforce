@@ -251,6 +251,28 @@ test('AgentScript windows: independent panels and assistants, main tabs, resourc
   await captureElectronScreenshot(app.electron, help, testInfo.outputPath('agent-window-help-assistant.png'));
   await captureElectronScreenshot(app.electron, orders, testInfo.outputPath('agent-window-orders-preview.png'));
 
+  // Each AgentScript persists its own native geometry through the config boundary.
+  const resourceBounds = async (path: string) => app.electron.evaluate(({ BrowserWindow }, resourceId) => {
+    const window = BrowserWindow.getAllWindows().find(item =>
+      new URL(item.webContents.getURL()).searchParams.get('resourceId') === resourceId);
+    if (!window) throw Error('Resource window is missing.');
+    return window.getNormalBounds();
+  }, path);
+  await app.electron.evaluate(({ BrowserWindow }) => {
+    for (const [resourceId, width, height] of [['force-app/Help.agent', 900, 650], ['force-app/Orders.agent', 1000, 700]] as const) {
+      const window = BrowserWindow.getAllWindows().find(item =>
+        new URL(item.webContents.getURL()).searchParams.get('resourceId') === resourceId);
+      if (!window) throw Error('Resource window is missing.');
+      window.setBounds({ width, height });
+    }
+  });
+  const helpBounds = await resourceBounds('force-app/Help.agent');
+  const ordersBounds = await resourceBounds('force-app/Orders.agent');
+  await expect.poll(() => main.evaluate(() => window.cc.config.get())).toMatchObject({ pluginViewWindowBounds: {
+    [JSON.stringify(['salesforce', 'salesforce', projectId, 'force-app/Help.agent'])]: { bounds: helpBounds },
+    [JSON.stringify(['salesforce', 'salesforce', projectId, 'force-app/Orders.agent'])]: { bounds: ordersBounds }
+  } });
+
   // Reload and close/reopen restore this script's workspace without touching the other window.
   await help.reload();
   await expect(help.getByTestId('thread-timeline')).toContainText('Review only Help.agent routing.', { timeout: 30_000 });
@@ -275,6 +297,8 @@ test('AgentScript windows: independent panels and assistants, main tabs, resourc
   await expect(panel.getByTestId('thread-timeline')).toContainText('Review only Help.agent routing.');
   await agentTabs.getByRole('button', { name: 'Open Help.agent in its own window', exact: true }).click();
   const reopened = await resourceWindow('force-app/Help.agent');
+  await expect.poll(() => resourceBounds('force-app/Help.agent')).toEqual(helpBounds);
+  expect(await resourceBounds('force-app/Orders.agent')).toEqual(ordersBounds);
   await expect(reopened.getByTestId('thread-timeline')).toContainText('Review only Help.agent routing.');
   const reopenedEditor = reopened.frameLocator('iframe[title="Agentforce playground"]');
   await reopenedEditor.locator('.monaco-editor').click({ position: { x: 120, y: 45 } });
@@ -442,10 +466,11 @@ test('Salesforce Studio window: one owner, status card, cross-window org sync an
     projectId: id, viewId, command: 'view.open', input: { view: 'agentforce', path: 'force-app/Help.agent', line: 2 },
   }), { id: projectId, viewId: lease!.id });
   expect(sent).toMatchObject({ ok: true, commandId: expect.any(String) });
-  const delivered = await main.evaluate(({ id, commandId }) => window.cc.pluginApps.callRpc('salesforce', 'control.result', {
-    projectId: id, commandId, waitMs: 3000,
-  }), { id: projectId, commandId: (sent as { commandId: string }).commandId });
-  expect(delivered).toMatchObject({ ok: true, state: 'completed' });
+  // A realtime wake can race the window's subscription; allow its 5s fallback poll too.
+  await expect.poll(() => main.evaluate(({ id, commandId }) => window.cc.pluginApps.callRpc('salesforce', 'control.result', {
+    projectId: id, commandId, waitMs: 1000,
+  }), { id: projectId, commandId: (sent as { commandId: string }).commandId }), { timeout: 15_000 })
+    .toMatchObject({ ok: true, state: 'completed' });
   await expect(studio.getByTestId('salesforce-agent-script-panel').locator('.af-document-name')).toHaveText('Help.agent');
   await expect(title).toHaveText('Agentforce · Help — dx · studio');
   await expect(studio).toHaveTitle(/^Agentforce · Help — dx · studio — /);
