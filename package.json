@@ -1,0 +1,36 @@
+{
+  "name": "@zcc-ext/salesforce",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Salesforce project workbench for ZCC: connected orgs, SOQL, Apex, deployments, Agentforce, and reusable native side panels.",
+  "engines": {
+    "zcc": ">=2.5.0",
+    "zccPluginSdk": ">=0.1.0",
+    "node": ">=22"
+  },
+  "zcc": {
+    "name": "Salesforce",
+    "description": "A project-aware Salesforce workbench with data exploration, Apex and logs, deployments, Agentforce, and tools beside your agents. Install with `zcc plugin install salesforce@official`.",
+    "branding": {
+      "icon": "Cloud"
+    },
+    "server": "./server.mjs",
+    "extra": {
+      "runtimeAssets": [
+        "playground/dist",
+        "toolkit-runtime",
+        "flow-visualizer"
+      ]
+    },
+    "app": "./app.js",
+    "skills": [
+      "skills"
+    ]
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grebmann1/zcc-plugin-salesforce.git"
+  }
+}
