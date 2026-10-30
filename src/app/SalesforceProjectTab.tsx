@@ -228,39 +228,37 @@ export function SalesforceProjectTab(props: {
       if (generation === doctorGeneration.current) setChecking(false);
     }
   }
+  const fetchButton = (
+    <button
+      className="icon-btn"
+      type="button"
+      title={alias ? "Fetch latest from org" : "Choose an org to fetch from"}
+      aria-label="Fetch latest from org"
+      disabled={!alias}
+      onClick={() => setSyncOpen(true)}
+    >
+      <CloudDownload size={15} aria-hidden="true" /><span className="sf-org-action-label">Fetch latest</span>
+    </button>
+  );
+  // Connection management lives on Overview; other sections reach it through the org menu.
+  // The Studio window has no Overview, so its org list opens under the toolbar instead.
+  const overviewAvailable = views.some(([id]) => id === 'overview');
+  const manageOrgs = () => { if (overviewAvailable) setView('overview'); setOrgsOpen(true); };
+  const orgList = (
+    <OrgPicker
+      key={props.projectId}
+      pluginId={props.pluginId}
+      projectId={props.projectId}
+      hideConnect
+      onSelect={selected}
+    />
+  );
+  const connectOrg = () => setLoginRequest(value => value + 1);
   const orgActions = <>
-    <button type="button" className="icon-btn sf-section-org-summary" aria-label="Choose Salesforce org" onClick={() => setOrgsOpen(true)}>
+    <button type="button" className="icon-btn sf-section-org-summary" aria-label="Choose Salesforce org" onClick={manageOrgs}>
       <span>{alias || 'Choose an org'}</span><ChevronDown size={13} aria-hidden="true" />
     </button>
-          <button
-            className="icon-btn"
-            type="button"
-            title={alias ? "Fetch latest from org" : "Choose an org to fetch from"}
-            aria-label="Fetch latest from org"
-            disabled={!alias}
-            onClick={() => setSyncOpen(true)}
-          >
-            <CloudDownload size={15} aria-hidden="true" /><span className="sf-org-action-label">Fetch latest</span>
-          </button>
-          <button
-            className="icon-btn"
-            type="button"
-            title="Connect org"
-            aria-label="Connect org"
-            onClick={() => setLoginRequest(value => value + 1)}
-          >
-            <Plus size={15} aria-hidden="true" /><span className="sf-org-action-label">Connect org</span>
-          </button>
-          <button
-            className="icon-btn"
-            type="button"
-            title="Org details"
-            aria-label="Org details"
-            onClick={() => setOrgsOpen(value => !value)}
-            aria-expanded={Boolean(orgsOpen)}
-          >
-            <Settings2 size={15} aria-hidden="true" /><span className="sf-org-action-label">Org details</span>
-          </button>
+    {fetchButton}
   </>;
   const workbench = (
     <>
@@ -283,8 +281,10 @@ export function SalesforceProjectTab(props: {
             key={props.projectId}
             loginRequest={loginRequest}
             onSelect={selected}
+            onConnect={connectOrg}
+            onManage={manageOrgs}
           />
-          <div className="sf-workbench-org-actions">{orgActions}</div>
+          <div className="sf-workbench-org-actions">{fetchButton}</div>
           {props.headerActions}
         </div>
       </header>
@@ -296,19 +296,8 @@ export function SalesforceProjectTab(props: {
           onClose={() => setSyncOpen(false)}
         />
       )}
-      {orgsOpen && (
-        <div
-          className="sf-scroll sf-content"
-          style={{ flex: "0 1 auto", maxHeight: 360 }}
-        >
-          <OrgPicker
-            key={props.projectId}
-            pluginId={props.pluginId}
-            projectId={props.projectId}
-            hideConnect
-            onSelect={selected}
-          />
-        </div>
+      {orgsOpen && !overviewAvailable && (
+        <div className="sf-scroll sf-content" style={{ flex: "0 1 auto", maxHeight: 360 }}>{orgList}</div>
       )}
       {(status.error || error) && (
         <ErrorState
@@ -357,7 +346,20 @@ export function SalesforceProjectTab(props: {
                   >
                     {checking ? "Checking…" : "Check project"}
                   </button>
+                  <div className="sf-summary-actions">
+                    <button className="sf-btn" type="button" disabled={!alias} title={alias ? `Fetch the latest metadata from ${alias}` : "Choose an org to fetch from"} onClick={() => setSyncOpen(true)}>
+                      <CloudDownload aria-hidden="true" />Fetch latest
+                    </button>
+                    <span className="sf-grow" />
+                    <button className="sf-btn quiet" type="button" onClick={connectOrg}>
+                      <Plus aria-hidden="true" />Connect org
+                    </button>
+                    <button className="sf-btn quiet" type="button" aria-expanded={orgsOpen} onClick={() => setOrgsOpen(value => !value)}>
+                      <Settings2 aria-hidden="true" />{orgsOpen ? "Hide orgs" : "Manage orgs"}
+                    </button>
+                  </div>
                 </div>
+                {orgsOpen && orgList}
                 {doctor && (
                   <div className="sf-notice" role="status">
                     {doctor.cliOk

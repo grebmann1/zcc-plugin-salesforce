@@ -41,14 +41,16 @@ the local editor. **Check again** refreshes connection readiness after fixing CL
 or signing in externally, without changing any project's target.
 
 Org operations require the Salesforce CLI (`sf`) on PATH. On a project's **Salesforce** tab,
-choose **Connect org**, select Production / Developer Edition, Sandbox, or
+choose **Connect org** on the Overview org card (or **Connect org…** at the end of the
+toolbar's org menu), select Production / Developer Edition, Sandbox, or
 My Domain / SSO, and choose **Sign in with browser**. An alias is optional.
 For My Domain, enter the Salesforce login host (for example,
 `https://company.my.salesforce.com` or `https://company--qa.sandbox.my.salesforce.com`).
 Finish sign-in in your browser; the new org is selected for this project automatically.
 The connection dialog can be closed while sign-in is pending; **Connect org**
-reopens its progress. **Org details** keeps the existing connections separate
-from sign-in, with search and explicit project-target selection.
+reopens its progress. **Manage orgs** (or **Manage orgs…** in the org menu) opens the
+existing connections on Overview, separate from sign-in, with search and explicit
+project-target selection. **Fetch latest** stays in the toolbar of every section.
 The picker shows **Select org** until an actual target is resolved; it does not
 silently choose the first listed connection. Selecting an existing org or signing
 in from the project changes only that project's target. A shared default is optional.

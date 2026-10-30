@@ -367,9 +367,11 @@ describe("public Salesforce panels", () => {
         focusPrompt: true,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Org details" }));
+    expect(screen.queryByRole("button", { name: "Org details" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Manage orgs" }));
     await screen.findByLabelText("Search connected orgs");
-    fireEvent.click(screen.getByRole("button", { name: "Org details" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide orgs" }));
+    expect(screen.queryByLabelText("Search connected orgs")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Explore data/ }));
     expect(screen.getByTestId("soql-editor")).toBeTruthy();
     selectSection("Apex & logs");
@@ -524,6 +526,42 @@ describe("public Salesforce panels", () => {
     expect(
       screen.getByRole("button", { name: "Check project" }),
     ).not.toHaveProperty("disabled", true);
+  });
+
+  it("keeps Fetch latest in the toolbar and moves connection actions to Overview", async () => {
+    mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" />);
+    await screen.findByText("Ready for your next change.");
+    const toolbar = document.querySelector<HTMLElement>(".sf-workbench-toolbar")!;
+    expect(within(toolbar).getByRole("button", { name: "Fetch latest from org" })).toBeTruthy();
+    expect(within(toolbar).queryByRole("button", { name: "Connect org" })).toBeNull();
+    expect(within(toolbar).queryByRole("button", { name: "Org details" })).toBeNull();
+    const card = document.querySelector<HTMLElement>(".sf-summary-actions")!;
+    fireEvent.click(within(card).getByRole("button", { name: "Fetch latest" }));
+    expect(await screen.findByRole("dialog", { name: "Fetch from org" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Cancel"));
+    // Manage orgs… in another section's org menu returns to Overview with the list open.
+    selectSection("Apex & logs");
+    const picker = screen.getByTestId("salesforce-org-picker") as HTMLSelectElement;
+    const manage = [...picker.querySelectorAll("option")].find(option => option.textContent === "Manage orgs…")!;
+    fireEvent.change(picker, { target: { value: manage.value } });
+    expect(await screen.findByText("Ready for your next change.")).toBeTruthy();
+    expect(await screen.findByLabelText("Search connected orgs")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide orgs" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens the org list under the toolbar in the Studio window, which has no Overview", async () => {
+    (globalThis as any).__ZCC_PLUGIN_RUNTIME__.useZccContext = () => ({ projectId: "p", threadId: "t", surface: "plugin-view" });
+    mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" />);
+    await screen.findByText("Agentforce script");
+    const picker = await waitFor(() => {
+      const element = screen.getByTestId("salesforce-org-picker") as HTMLSelectElement;
+      expect(element.disabled).toBe(false);
+      return element;
+    });
+    const manage = [...picker.querySelectorAll("option")].find(option => option.textContent === "Manage orgs…")!;
+    fireEvent.change(picker, { target: { value: manage.value } });
+    expect(await screen.findByLabelText("Search connected orgs")).toBeTruthy();
+    expect(screen.getByText("Agentforce script")).toBeTruthy();
   });
 
   it("opens Fetch latest on every metadata type and closes it", async () => {

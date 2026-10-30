@@ -236,8 +236,10 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
     await window.evaluate(() => window.cc.pluginApps.getSettings("salesforce")),
   ).toMatchObject({ values: { defaultOrg: "dev" } });
   // The native top layer must contain focus and restore it on Escape. The
-  // header action opens only connection setup, without expanding the org list.
-  const connectButton = workbench.locator('.sf-workbench-toolbar').getByRole('button', { name: 'Connect org', exact: true });
+  // Overview card action opens only connection setup, without expanding the org list.
+  await expect(workbench.locator('.sf-workbench-toolbar').getByRole('button', { name: 'Fetch latest from org' })).toBeVisible();
+  await expect(workbench.locator('.sf-workbench-toolbar').getByRole('button', { name: 'Connect org', exact: true })).toHaveCount(0);
+  const connectButton = workbench.locator('.sf-summary-actions').getByRole('button', { name: 'Connect org', exact: true });
   await connectButton.click();
   const connectionDialog = workbench.getByRole('dialog', { name: 'Connect an org' });
   await expect(connectionDialog).toBeVisible();
@@ -277,7 +279,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
     ['sandbox', 'browser-sandbox', 'https://test.salesforce.com'],
     ['custom', 'browser-sso', 'https://company.my.salesforce.com'],
   ]) {
-    await workbench.locator('.sf-workbench-toolbar').getByRole('button', { name: 'Connect org', exact: true }).click();
+    await connectButton.click();
     const form = workbench.getByTestId('salesforce-org-login');
     await expect(form).toBeVisible();
     const environment = instance === 'production' ? 'Production' : instance === 'sandbox' ? 'Sandbox' : 'My Domain';
@@ -304,7 +306,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
     await expect(workbench.getByRole('dialog')).toHaveCount(0);
   }
   expect(await window.evaluate(() => window.cc.pluginApps.getSettings('salesforce'))).toMatchObject({ values: { defaultOrg: 'dev' } });
-  await workbench.locator('.sf-workbench-toolbar').getByRole('button', { name: 'Connect org', exact: true }).click();
+  await connectButton.click();
   await workbench.getByLabel('Org alias').fill('fail-login');
   await workbench.getByRole('button', { name: 'Sign in with browser' }).click();
   await expect(workbench.getByRole('alert')).toContainText('Sign-in did not finish');

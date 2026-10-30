@@ -115,6 +115,7 @@ export const SALESFORCE_STYLES = `
 .sf-content h3, .sf-inspector h3 { margin:0 0 12px; font-size:13px; font-weight:600; }
 .sf-content p { margin:0 0 14px; }
 .sf-summary { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:16px; border:1px solid var(--border); border-radius:8px; margin:22px 0; }
+.sf-summary-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex:0 0 calc(100% + 32px); margin:2px -16px -16px; padding:10px 16px; border-top:1px solid var(--border); border-radius:0 0 8px 8px; background:color-mix(in srgb,var(--bg-elevated) 50%,transparent); }
 .sf-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding:12px 0; }
 .sf-row-main { flex:1; min-width:140px; overflow-wrap:anywhere; }
 .sf-row-main small { display:block; color:var(--text-muted); font-size:12px; }

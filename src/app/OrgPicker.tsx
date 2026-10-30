@@ -47,7 +47,13 @@ type OrgPickerProps = {
   loginRequest?: number;
   hideConnect?: boolean;
   onSelect?: (alias: string) => void;
+  /** Toolbar menus end with connection entries when these are provided. */
+  onConnect?: () => void;
+  onManage?: () => void;
 };
+
+const CONNECT_OPTION = '\u0000connect';
+const MANAGE_OPTION = '\u0000manage';
 
 export function OrgPicker(props: OrgPickerProps) {
   useContextChangeRelay();
@@ -178,7 +184,8 @@ export function OrgPicker(props: OrgPickerProps) {
   />;
 
   if (props.compact) {
-    const disabled = props.disabled || busy || orgs.length === 0;
+    const connections = Boolean(props.onConnect || props.onManage);
+    const disabled = props.disabled || busy || (orgs.length === 0 && !connections);
     const description = selectedOrg ? orgOptionLabel(selectedOrg) : error || (busy ? 'Loading orgs…' : selected ? `${selected} (unavailable)` : orgs.length ? 'Choose an org' : 'No connected orgs');
     const picker = <select
         className="sf-org-picker"
@@ -187,7 +194,12 @@ export function OrgPicker(props: OrgPickerProps) {
         data-testid="salesforce-org-picker"
         disabled={disabled}
         value={selected}
-        onChange={(event) => void select(event.target.value)}
+        onChange={(event) => {
+          const value = event.target.value;
+          if (value === CONNECT_OPTION) props.onConnect?.();
+          else if (value === MANAGE_OPTION) props.onManage?.();
+          else void select(value);
+        }}
       >
         {orgs.length === 0 ? (
           <option value="">{busy ? 'Loading orgs…' : error || 'No CLI orgs'}</option>
@@ -198,6 +210,10 @@ export function OrgPicker(props: OrgPickerProps) {
             </option>
           ))}</>
         )}
+        {connections && <optgroup label="Connections">
+          {props.onConnect && <option value={CONNECT_OPTION}>Connect org…</option>}
+          {props.onManage && <option value={MANAGE_OPTION}>Manage orgs…</option>}
+        </optgroup>}
       </select>;
     return (
       <>
