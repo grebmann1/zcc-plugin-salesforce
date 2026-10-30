@@ -1,6 +1,6 @@
 {
   "name": "@zcc-ext/salesforce",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Salesforce project workbench for ZCC: connected orgs, SOQL, Apex, deployments, Agentforce, and reusable native side panels.",

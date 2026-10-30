@@ -3,7 +3,7 @@
   "sdkVersion": "0.1.0",
   "artifactFormatVersion": 1,
   "pluginId": "salesforce",
-  "pluginVersion": "0.1.2",
+  "pluginVersion": "0.1.3",
   "builtWith": {
     "zccVersion": "2.5.0",
     "pluginSdkVersion": "0.1.0"
