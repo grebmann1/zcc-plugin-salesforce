@@ -146,7 +146,7 @@ describe('salesforce plugin contract', () => {
     expect(set.threadPanelActions.find(row => row.id === 'preview')).toMatchObject({ title: 'Preview', layout: 'flush' });
     expect(set.newThreadPanelActions).toEqual([]);
     expect(set.navPanels).toMatchObject([
-      { id: 'orgs', title: 'Salesforce', icon: 'Cloud', placement: 'unlisted' }
+      { id: 'orgs', title: 'Salesforce', icon: 'Cloud', placement: 'sidebar' }
     ]);
     expect(set.sidebarFooterActions).toMatchObject([{ id: 'orgs', title: 'Salesforce', icon: 'Cloud' }]);
     const footerToPanel = vi.fn();

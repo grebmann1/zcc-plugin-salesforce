@@ -347,7 +347,7 @@ test('Salesforce hub: project tools, recent agents, themes, narrow layout and St
     await expect(hub.getByRole('combobox', { name: 'Project', exact: true })).toHaveValue(projectId);
   };
   // The plugin runtime can be running before its navigation contribution reaches the renderer.
-  await main.getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await main.getByTestId('nav-salesforce/orgs').click();
   await openHub();
   for (const [tile, tab] of [['Data', 'Data'], ['Apex & logs', 'Apex & logs'], ['Deployments', 'Deployments'], ['Project home', 'Overview']] as const) {
     await hub.locator('.sf-hub-tile').filter({ has: main.getByText(tile, { exact: true }) }).click();

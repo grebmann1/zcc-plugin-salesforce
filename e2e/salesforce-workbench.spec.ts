@@ -170,6 +170,27 @@ async function route(window: Page, path: string) {
   }, path);
 }
 
+test('Salesforce sidebar: opens the hub from the main navigation', async ({ app }, testInfo) => {
+  const window = app.window;
+  expect(await window.evaluate(() => window.cc.extensions.install({ kind: 'bundled', id: 'salesforce' }))).toMatchObject({ ok: true });
+  await expect.poll(() => window.evaluate(async () =>
+    (await window.cc.pluginApps.list()).find(row => row.id === 'salesforce')?.status,
+  ), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+
+  const navigation = window.getByRole('navigation', { name: 'Main navigation' });
+  // Hosts render rail destinations as buttons or links; both expose the label when collapsed.
+  const salesforce = navigation.getByRole('button', { name: 'Salesforce', exact: true })
+    .or(navigation.getByRole('link', { name: 'Salesforce', exact: true }));
+  await expect(salesforce).toBeVisible();
+  await salesforce.click();
+  await expect(window).toHaveURL(/\/plugins\/salesforce\/orgs$/);
+  const hub = window.getByTestId('salesforce-orgs-panel');
+  await expect(hub).toBeVisible();
+  await expect(hub.getByRole('heading', { name: 'Agentforce Studio', exact: true })).toBeVisible();
+  await expect(hub.getByRole('heading', { name: 'Connected orgs', exact: true })).toBeVisible();
+  await screenshot(window, { path: testInfo.outputPath('salesforce-sidebar.png') });
+});
+
 test("Salesforce workbench: real plugin, project targeting, data, operations and native panels", async ({
   app,
   home,

@@ -76,6 +76,7 @@ menu and choose an **Icon**. The project color is preserved.
 | Surface | What it does |
 | --- | --- |
 | Plugins → Salesforce | CLI-connected org list, default alias, API version, DX root |
+| Sidebar → Salesforce | Project launcher for Agentforce Studio and tools, plus connected orgs |
 | Salesforce tab | Overview, Data, Apex & logs, Deployments, and Agentforce workbench |
 | Add project → Salesforce project | Browser login → create a connected Salesforce DX project |
 | Salesforce → Data | Schema, SOQL queries, saved history, retained drafts, and record inspectors |

@@ -98,7 +98,7 @@ export default definePluginApp((app) => {
     id: 'orgs',
     title: 'Salesforce',
     icon: 'Cloud',
-    placement: 'unlisted',
+    placement: 'sidebar',
     component: SalesforceOrgsPanel
   });
   app.slots.sidebarFooterAction({
