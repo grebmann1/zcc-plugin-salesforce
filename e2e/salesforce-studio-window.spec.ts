@@ -220,13 +220,16 @@ test('AgentScript windows: independent panels and assistants, main tabs, resourc
       expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
       await expect(popup.locator('[data-section="agentforce"]')).toBeVisible();
       await popup.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      if (headerBounds.availableWidth <= 360) await expect(popup.getByRole('button', { name: 'Org details', exact: true })).toBeVisible();
+      if (headerBounds.availableWidth <= 360) await expect(popup.getByRole('button', { name: 'Fetch latest from org', exact: true })).toBeVisible();
       await captureElectronScreenshot(app.electron, help, testInfo.outputPath(`salesforce-launcher-${theme}-${width}.png`));
+      await help.keyboard.press('Escape');
       if (width === 480 && theme === 'dark') {
-        await popup.getByRole('button', { name: 'Connect org', exact: true }).click();
+        // Connection entries live at the end of the org menu.
+        const orgMenu = tools.getByTestId('salesforce-org-picker');
+        await orgMenu.selectOption({ label: 'Connect org…' });
         await expect(help.getByRole('dialog', { name: 'Connect an org' })).toBeVisible();
         await help.getByRole('button', { name: 'Close connection dialog' }).click();
-      } else await help.keyboard.press('Escape');
+      }
     }
   }
   await help.setViewportSize({ width: 1440, height: 950 });
