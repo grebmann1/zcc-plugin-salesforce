@@ -25,7 +25,7 @@ jobs:
         working-directory: plugin
       - run: pnpm install --frozen-lockfile
         working-directory: host
-      - run: npm run test:electron -- --grep 'Salesforce workbench|Salesforce toolkit|Salesforce hub'
+      - run: npm run test:electron -- --grep 'Salesforce workbench|Salesforce toolkit|Salesforce hub|Salesforce sidebar'
         working-directory: plugin
         env:
           ZCC_HOST_REPO: ${{ github.workspace }}/host
