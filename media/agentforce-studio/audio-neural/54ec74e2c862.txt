@@ -1,0 +1,1 @@
+Ask the assistant to improve it. It proposes a fix, and tests every attempt against the same batch, without touching your file.

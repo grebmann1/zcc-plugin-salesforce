@@ -1,0 +1,7 @@
+# Renders and intermediates; rebuild with render.py. The published copies live in
+# Zana's content/videos/media/ (hash-named, see each README).
+*.mp4
+*.wav
+*/audio-neural/intro-app.jpg
+*/audio-neural/music-cues.json
+*/v1/recording/

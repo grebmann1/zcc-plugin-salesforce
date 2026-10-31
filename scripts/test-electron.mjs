@@ -46,6 +46,8 @@ export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => 
     source = source.replaceAll("'../plugins/salesforce/", "'" + root).replaceAll("'../packages/", "'" + join(host, 'packages/'));
     source = source.replaceAll("join(root, 'plugins/salesforce'", "join(" + JSON.stringify(root) + "").replaceAll("join(root, 'plugins/salesforce/package.json')", "join(" + JSON.stringify(root) + ", 'package.json')");
     source = source.replaceAll("join(source, 'plugins/salesforce')", JSON.stringify(root));
+    // Fixture servers import plugin modules by subpath, e.g. join(root, 'plugins/salesforce/lib/plugin.ts').
+    source = source.replaceAll("join(root, 'plugins/salesforce/", "join(" + JSON.stringify(root) + ", '");
     source = source.replace(/window\.cc\.extensions\.install\(\{\s*kind:\s*['"]bundled['"],\s*id:\s*['"]salesforce['"]\s*\}\)/g, "Promise.resolve({ ok: true })");
     writeFileSync(join(staged, name), source);
   }

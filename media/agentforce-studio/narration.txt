@@ -1,0 +1,31 @@
+Building agents used to be complicated and painful.
+
+Meet Agentforce Studio in Zana: build, test, and fix your agents in one place.
+
+Here's Northstar Support, open in Agentforce Studio: real Agent Script, with a compiler that checks every line.
+
+Graph view shows the whole conversation at a glance.
+
+Each action opens in its own tab, down to the Apex behind it,
+
+and the Flow, drawn as its real canvas.
+
+The order lookup returns a Lightning Type: its schema, and the card component that renders it.
+
+Compile, then preview. Can I return an item after twenty-one days? The agent says fourteen days. Our policy is thirty.
+
+Now hand it to the agent. Ask for test scenarios, and they land in the shared Scenarios tab, each with a persona, a goal and the criteria a judge will check.
+
+Ask it to run them. Three customers, in parallel, each scored by the judge.
+
+Two pass. The judge shows exactly why the return policy failed.
+
+Ask it to improve the failing one. It tests every attempt against the same batch, without touching your file.
+
+Baseline two of three. Best, three of three.
+
+You review the change as a diff. Accept it, and save.
+
+Ask it to check again: thirty days. And the batch now passes, three of three.
+
+That's Agentforce Studio. Build, see, test, and fix your agents, with the evidence to ship them.

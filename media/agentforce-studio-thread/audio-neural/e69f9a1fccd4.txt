@@ -1,0 +1,1 @@
+Pi runs the five scenarios as simulated customers, four at a time. Five of five pass.

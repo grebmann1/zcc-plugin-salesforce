@@ -1,0 +1,1 @@
+The order lookup returns a Lightning Type: its schema, and the card component that renders it.

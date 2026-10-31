@@ -1,0 +1,58 @@
+[
+  {
+    "id": "studio",
+    "ms": 7438
+  },
+  {
+    "id": "graph",
+    "ms": 3251
+  },
+  {
+    "id": "apex",
+    "ms": 4463
+  },
+  {
+    "id": "flow",
+    "ms": 3064
+  },
+  {
+    "id": "type",
+    "ms": 5857
+  },
+  {
+    "id": "preview",
+    "ms": 9324
+  },
+  {
+    "id": "scenarios",
+    "ms": 10662
+  },
+  {
+    "id": "batch",
+    "ms": 5328
+  },
+  {
+    "id": "failure",
+    "ms": 4894
+  },
+  {
+    "id": "heal",
+    "ms": 6791
+  },
+  {
+    "id": "best",
+    "ms": 3263
+  },
+  {
+    "id": "review",
+    "ms": 4236
+  },
+  {
+    "id": "confirm",
+    "ms": 5208
+  },
+  {
+    "id": "outro",
+    "ms": 7474
+  }
+]
