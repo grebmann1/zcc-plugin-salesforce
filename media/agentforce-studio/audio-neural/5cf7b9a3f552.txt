@@ -1,0 +1,1 @@
+Now hand it to the agent. Ask for test scenarios, and they land in the shared Scenarios tab, each with a persona, a goal and the criteria a judge will check.

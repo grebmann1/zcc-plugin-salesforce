@@ -1,0 +1,1 @@
+Then it runs three simulated customers in parallel. Three of three pass.

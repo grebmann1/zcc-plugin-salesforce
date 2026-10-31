@@ -1,0 +1,1 @@
+Each action opens in its own tab, down to the Apex behind it,

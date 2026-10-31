@@ -1,0 +1,31 @@
+How to build an Agentforce agent in Zana.
+
+Use Pi with the SF-Pi plugin. It builds, previews, and tests the agent for you.
+
+Start a thread on the Pi harness, in your Salesforce project, and describe the agent you want.
+
+Pi plans it, writes the Agent Script, and compiles it, right in the thread.
+
+It hands back a card for the new agent.
+
+Click it, and the agent opens beside the thread: the script, and its conversation graph.
+
+Ask what the return window is. Pi previews the agent and links the run.
+
+The run opens in the same panel. Fourteen days. Our policy is thirty.
+
+Ask for thirty days, and five test scenarios. Pi edits the file, then writes the scenarios itself.
+
+Open it again, and the script reads thirty.
+
+Pi runs the five scenarios as simulated customers, four at a time. Five of five pass.
+
+Check it yourself, right in the panel: thirty days.
+
+When you want the full workbench, open it in Agentforce Studio: the same script, thirty days and all.
+
+Every action is one click away, like the return Flow, drawn as its real canvas.
+
+And the Lightning Type the order lookup returns, with the card that renders it.
+
+Built, previewed, and tested, from one conversation.

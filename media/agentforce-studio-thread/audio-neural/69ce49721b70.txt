@@ -1,0 +1,1 @@
+It hands back a card for the new agent.

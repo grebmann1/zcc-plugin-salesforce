@@ -1,0 +1,167 @@
+<!doctype html>
+<!-- Agentforce Studio V2 opener, 1440 × 900. Deterministic: render(t) draws second t; intro.cjs captures it frame by frame.
+     The title → a thread asks Pi for an agent → Pi answers with the agent card → the app rises. -->
+<html><head><meta charset="utf-8">
+<style>
+  :root { --ink: #111827; --muted: #5b6475; --blue: #2563eb; --sans: -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1440px; height: 900px; overflow: hidden; font-family: var(--sans); color: var(--ink); background: #eef2f9; }
+  #bg { position: absolute; inset: 0; background: linear-gradient(160deg, #f4f7fc 0%, #e9eef8 55%, #eae8f8 100%); overflow: hidden; }
+  .glow { position: absolute; width: 700px; height: 700px; border-radius: 50%; filter: blur(90px); opacity: .55; }
+  #grid { position: absolute; inset: -100px; background-image: linear-gradient(rgba(37,99,235,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(37,99,235,.05) 1px, transparent 1px); background-size: 48px 48px; }
+
+  /* Scene A: the title */
+  #logo { position: absolute; left: 720px; top: 250px; width: 120px; height: 120px; margin: -60px 0 0 -60px; filter: drop-shadow(0 18px 38px rgba(30,41,80,.32)); }
+  #title { position: absolute; left: 0; right: 0; top: 360px; text-align: center; font-weight: 800; letter-spacing: -0.04em; line-height: 1.06; transform-origin: 50% 0; }
+  #title .l1 { font-size: 64px; color: #374151; }
+  #title .l2 { font-size: 92px; }
+  #title .g { background: linear-gradient(120deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; background-clip: text; color: transparent; padding: 0 4px; }
+  #title .w { display: inline-block; }
+
+  /* Scene B: a thread asks Pi */
+  #chat { position: absolute; left: 330px; top: 250px; width: 780px; height: 470px; border-radius: 18px; background: #fff; overflow: hidden;
+          box-shadow: 0 30px 80px rgba(30,41,80,.24), 0 0 0 1px rgba(15,23,42,.08); }
+  #chat .bar { height: 40px; display: flex; align-items: center; gap: 7px; padding: 0 14px; background: #f6f7fa; border-bottom: 1px solid #e5e8ee; font-size: 13.5px; font-weight: 600; color: #4a5568; }
+  #chat .dot { width: 10px; height: 10px; border-radius: 50%; }
+  #chat .bar b { margin-left: 8px; } #chat .bar .pw { font-size: 12px; font-weight: 700; color: #7c3aed; background: #f1ebff; border-radius: 999px; padding: 3px 9px; } #chat .bar small { margin-left: auto; font-size: 12px; font-weight: 600; color: #7c8597; background: #eef1f6; border-radius: 999px; padding: 3px 10px; }
+  #msgs { position: absolute; left: 0; right: 0; top: 40px; bottom: 96px; padding: 22px 26px; }
+  .msg { position: absolute; left: 26px; right: 26px; }
+  #you { display: flex; justify-content: flex-end; }
+  #you div { max-width: 560px; padding: 12px 16px; border-radius: 16px 16px 4px 16px; background: #2563eb; color: #fff; font-size: 16.5px; line-height: 1.45; }
+  #pi { display: flex; gap: 12px; align-items: flex-start; }
+  #pi .av { flex: none; width: 34px; height: 34px; border-radius: 50%; background: #f5b83d; color: #241a00; display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+  #pi .txt { font-size: 16px; line-height: 1.5; color: #1f2937; padding-top: 6px; }
+  #dots { display: flex; gap: 5px; padding-top: 14px; } #dots i { width: 8px; height: 8px; border-radius: 50%; background: #9aa3b2; }
+  #card { margin-top: 12px; width: 440px; display: flex; align-items: center; gap: 14px; padding: 13px 16px; border-radius: 14px; background: #f8faff; box-shadow: 0 0 0 1px #d6e0f5, 0 8px 20px rgba(37,99,235,.10); }
+  #card .ic { width: 40px; height: 40px; border-radius: 11px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; display: grid; place-items: center; font-size: 19px; font-weight: 800; }
+  #card b { display: block; font-size: 16px; } #card span { font-size: 13px; color: var(--muted); }
+  #card em { margin-left: auto; font-style: normal; font-size: 12.5px; font-weight: 700; color: #0b6b3a; background: #dcf7e8; border-radius: 999px; padding: 4px 10px; }
+  #composer { position: absolute; left: 18px; right: 18px; bottom: 18px; height: 62px; border-radius: 14px; background: #f6f7fa; box-shadow: inset 0 0 0 1px #e1e5ec; display: flex; align-items: center; padding: 0 16px; font-size: 16.5px; color: #1f2937; }
+  #typed { white-space: nowrap; overflow: hidden; }
+  #caret { width: 2px; height: 22px; background: var(--blue); margin-left: 2px; }
+  #ph { position: absolute; left: 16px; color: #9aa3b2; }
+  #send { position: absolute; right: 12px; width: 38px; height: 38px; border-radius: 10px; background: #c7cfdd; color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 18px; }
+
+  .member { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 10px; border-radius: 999px; background: #fff; box-shadow: 0 10px 26px rgba(30,41,80,.16), 0 0 0 1px rgba(15,23,42,.07); font-size: 17px; font-weight: 700; color: #1f2937; white-space: nowrap; }
+  .member i { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 14px; color: #fff; font-weight: 800; }
+
+  /* Scene C: the app rises */
+  #win { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; transform-origin: 0 0; overflow: hidden; background: #111 center / cover no-repeat;
+         box-shadow: 0 2px 6px rgba(15,23,42,.08), 0 30px 80px rgba(30,41,80,.28), 0 0 0 1px rgba(15,23,42,.08); }
+  #white { position: absolute; inset: 0; background: #f4f7fc; pointer-events: none; }
+</style></head>
+<body>
+<div id="bg">
+  <div class="glow" id="glow1" style="background:#bfe3ff"></div><div class="glow" id="glow2" style="background:#d6ccff"></div>
+  <div id="grid"></div>
+</div>
+
+<img id="logo" src="../zana-mark.svg">
+<div id="title"><div class="l1"><span class="w">How</span> <span class="w">to</span> <span class="w">build</span> <span class="w">an</span></div><div class="l2"><span class="w g">Agentforce Agent</span> <span class="w">in Zana</span></div></div>
+
+<div id="chat">
+  <div class="bar"><i class="dot" style="background:#ff5f57"></i><i class="dot" style="background:#febc2e"></i><i class="dot" style="background:#28c840"></i><b>New thread · Pi</b><span class="pw">SF-Pi plugin</span><small>Salesforce project</small></div>
+  <div id="msgs">
+    <div class="msg" id="you" style="top:22px"><div id="youtext"></div></div>
+    <div class="msg" id="pi" style="top:150px"><div class="av">π</div><div>
+      <div id="dots"><i></i><i></i><i></i></div>
+      <div class="txt" id="pitext">Done. Northstar Support is written and compiles.</div>
+      <div id="card"><div class="ic">✦</div><div><b>Northstar Support</b><span>Northstar.agent · Agent Script</span></div><em>✓ Compiled</em></div>
+    </div></div>
+  </div>
+  <div id="composer"><span id="ph">Ask Pi anything…</span><span id="typed"></span><i id="caret"></i><div id="send">↑</div></div>
+</div>
+
+<div class="member" id="m0"><i style="background:#f5b83d;color:#241a00">✎</i>Ask in a thread</div>
+<div class="member" id="m1"><i style="background:#3b82f6">◇</i>See it in the side panel</div>
+<div class="member" id="m2"><i style="background:#8b5cf6">▶</i>Preview</div>
+<div class="member" id="m3"><i style="background:#0ea5a4">✓</i>Test</div>
+
+<div id="win"></div>
+<div id="white"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const p = (t, s, e) => clamp((t - s) / (e - s));
+const lerp = (a, b, k) => a + (b - a) * k;
+const eOut = (x) => 1 - Math.pow(1 - clamp(x), 3);
+const eIO = (x) => { x = clamp(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const eBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const set = (el, o, tr) => { el.style.opacity = o; if (tr !== undefined) el.style.transform = tr; el.style.visibility = o <= 0.001 ? 'hidden' : 'visible'; };
+
+// ?app=<image> is the recording's first frame; the opener ends on it full screen.
+const params = new URLSearchParams(location.search);
+$('win').style.backgroundImage = `url("${params.get('app') || 'preview-catalogue.jpg'}")`;
+
+// Timeline (seconds). VO start times are where render.py places the spoken lines.
+const VO = [
+  [0.5, 2.83, 'How to build an Agentforce agent in Zana.'],
+  [3.6, 6.44, 'Use Pi with the SF-Pi plugin. It builds, previews, and tests the agent for you.'],
+];
+const DURATION = 11.0;
+window.TIMING = { VO, DURATION };
+
+const ASK = 'Build a Northstar support agent for order status and returns.';
+const TYPE0 = 3.7, TYPE1 = 5.6, SEND = 5.85;
+const MEM = [{ id: 'm0', x: 345, y: 790 }, { id: 'm1', x: 630, y: 790 }, { id: 'm2', x: 885, y: 790 }, { id: 'm3', x: 1060, y: 790 }];
+MEM.forEach((m, i) => { m.el = $(m.id); m.w = m.el.offsetWidth; m.h = m.el.offsetHeight; m.at = 7.9 + i * 0.18; });
+
+function render(t) {
+  $('glow1').style.transform = `translate(${-150 + Math.sin(t * 0.3) * 90}px, ${-230 + Math.cos(t * 0.25) * 60}px)`;
+  $('glow2').style.transform = `translate(${940 + Math.cos(t * 0.27) * 105}px, ${430 + Math.sin(t * 0.33) * 68}px)`;
+  $('grid').style.transform = `translate(${(t * 6) % 48}px, ${(t * 4) % 48}px)`;
+  const out = eIO(p(t, 9.5, 10.3));
+
+  // ---------- Scene A: logo and title, which then lift to the top ----------
+  const up = eIO(p(t, 3.0, 3.7));
+  const lk = eBack(p(t, 0.15, 0.85));
+  set($('logo'), p(t, 0.15, 0.3) * (1 - up), `scale(${lerp(0.5, 1, lk) * lerp(1, 0.5, up)}) rotate(${lerp(-12, 0, lk)}deg) translateY(${-up * 120}px)`);
+  document.querySelectorAll('#title .w').forEach((wd, i) => {
+    const s = 0.45 + i * 0.16, k = eOut(p(t, s, s + 0.45));
+    wd.style.opacity = k; wd.style.transform = `translateY(${(1 - k) * 26}px)`;
+  });
+  set($('title'), 1 - out, `translateY(${lerp(0, -300, up) - out * 60}px) scale(${lerp(1, 0.56, up)})`);
+
+  // ---------- Scene B: the thread ----------
+  const ck = eOut(p(t, 3.2, 3.9));
+  set($('chat'), ck * (1 - out), `translateY(${(1 - ck) * 60 - out * 70}px) scale(${lerp(0.94, 1, ck)})`);
+  const n = Math.round(ASK.length * p(t, TYPE0, TYPE1));
+  const sent = t >= SEND;
+  $('typed').textContent = sent ? '' : ASK.slice(0, n);
+  $('ph').style.opacity = (n === 0 || sent) ? 1 : 0;
+  $('caret').style.opacity = sent ? 0 : (Math.floor(t * 2.4) % 2 ? 0.25 : 1);
+  $('send').style.background = n > 0 && !sent ? '#2563eb' : '#c7cfdd';
+  $('youtext').textContent = ASK;
+  const yk = eOut(p(t, SEND, SEND + 0.35));
+  set($('you'), yk, `translateY(${(1 - yk) * 30}px)`);
+  const think = p(t, 6.25, 6.4) * (1 - p(t, 7.0, 7.1));
+  set($('pi'), p(t, 6.25, 6.45));
+  $('dots').style.display = t < 7.05 ? 'flex' : 'none';
+  document.querySelectorAll('#dots i').forEach((d, i) => { d.style.opacity = think * (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 9 - i * 0.9))); });
+  const tk = eOut(p(t, 7.05, 7.4)); set($('pitext'), tk);
+  $('pitext').style.display = t < 7.05 ? 'none' : 'block';
+  const cardk = eBack(p(t, 7.3, 7.85)); set($('card'), p(t, 7.3, 7.45), `scale(${lerp(0.85, 1, cardk)})`);
+  $('card').style.display = t < 7.3 ? 'none' : 'flex';
+
+  MEM.forEach((m) => {
+    const k = eBack(p(t, m.at, m.at + 0.5)), o = p(t, m.at, m.at + 0.2) * (1 - out);
+    set(m.el, o, `translate(${m.x - m.w / 2}px, ${m.y - m.h / 2 + (1 - eOut(p(t, m.at, m.at + 0.5))) * 24 - out * 60}px) scale(${lerp(0.5, 1, k)})`);
+  });
+
+  // ---------- Scene C: the app rises and fills the frame ----------
+  const rise = eOut(p(t, 9.8, 10.6)), fill = eIO(p(t, 10.2, DURATION - 0.05));
+  const win = $('win');
+  if (rise <= 0) win.style.display = 'none';
+  else {
+    win.style.display = 'block'; win.style.opacity = clamp(rise * 1.6);
+    const sc = lerp(0.74, 1, fill), x = (1440 - 1440 * sc) / 2, y = (900 - 900 * sc) / 2 + (1 - rise) * 200;
+    win.style.transform = `translate(${x}px, ${y}px) scale(${sc})`;
+    win.style.borderRadius = `${lerp(16, 0, fill) / sc}px`;
+  }
+  $('white').style.opacity = 1 - p(t, 0, 0.35);
+}
+window.render = render;
+render(0);
+</script>
+</body></html>

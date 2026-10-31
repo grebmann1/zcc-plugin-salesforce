@@ -1,0 +1,1 @@
+Batch simulations catch that at scale: three customers, running in parallel, each scored by a judge.

@@ -1,0 +1,1 @@
+Click it, and the agent opens beside the thread: the script, and its conversation graph.

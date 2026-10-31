@@ -1,0 +1,16 @@
+[
+  {"id": "studio", "line": "Here's Northstar Support, open in Agentforce Studio: real Agent Script, with a compiler that checks every line."},
+  {"id": "graph", "line": "Graph view shows the whole conversation at a glance."},
+  {"id": "apex", "line": "Each action opens in its own tab, down to the Apex behind it,"},
+  {"id": "flow", "line": "and the Flow, drawn as its real canvas."},
+  {"id": "type", "line": "The order lookup returns a Lightning Type: its schema, and the card component that renders it."},
+  {"id": "preview", "line": "Compile, then preview. Can I return an item after twenty-one days? The agent says fourteen days. Our policy is thirty."},
+  {"id": "scenarios", "line": "Now hand it to the agent. Ask for test scenarios, and they land in the shared Scenarios tab, each with a persona, a goal and the criteria a judge will check."},
+  {"id": "batch", "line": "Ask it to run them. Three customers, in parallel, each scored by the judge."},
+  {"id": "failure", "line": "Two pass. The judge shows exactly why the return policy failed."},
+  {"id": "heal", "line": "Ask it to improve the failing one. It tests every attempt against the same batch, without touching your file."},
+  {"id": "best", "line": "Baseline two of three. Best, three of three."},
+  {"id": "review", "line": "You review the change as a diff. Accept it, and save."},
+  {"id": "confirm", "line": "Ask it to check again: thirty days. And the batch now passes, three of three."},
+  {"id": "outro", "line": "That's Agentforce Studio. Build, see, test, and fix your agents, with the evidence to ship them."}
+]

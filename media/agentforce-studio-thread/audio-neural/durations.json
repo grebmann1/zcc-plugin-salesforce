@@ -1,0 +1,58 @@
+[
+  {
+    "id": "thread",
+    "ms": 6032
+  },
+  {
+    "id": "working",
+    "ms": 4850
+  },
+  {
+    "id": "built",
+    "ms": 2262
+  },
+  {
+    "id": "panel",
+    "ms": 6095
+  },
+  {
+    "id": "ask",
+    "ms": 5305
+  },
+  {
+    "id": "run",
+    "ms": 5788
+  },
+  {
+    "id": "fix",
+    "ms": 7130
+  },
+  {
+    "id": "reopen",
+    "ms": 2536
+  },
+  {
+    "id": "tests",
+    "ms": 6603
+  },
+  {
+    "id": "confirm",
+    "ms": 2960
+  },
+  {
+    "id": "outro",
+    "ms": 6935
+  },
+  {
+    "id": "studio-flow",
+    "ms": 5948
+  },
+  {
+    "id": "studio-type",
+    "ms": 4708
+  },
+  {
+    "id": "studio-end",
+    "ms": 3836
+  }
+]

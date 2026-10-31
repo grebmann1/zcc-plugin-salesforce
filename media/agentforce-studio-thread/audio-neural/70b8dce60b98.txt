@@ -1,0 +1,1 @@
+Open it again, and the script reads thirty.
