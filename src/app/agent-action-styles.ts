@@ -89,12 +89,25 @@ ${STUDIO_TOKENS}.af-action-workspace { flex:1; min-width:0; min-height:0; displa
 .af-flow-dialog::backdrop { background:rgba(0,0,0,.5); }
 .af-flow-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 16px; border-bottom:1px solid var(--sf-border); }
 .af-flow-dialog > header div { min-width:0; }
-.af-flow-dialog-actions { display:flex; gap:4px; flex-shrink:0; }
+.af-flow-dialog-title { display:flex; align-items:center; gap:10px; }
+.af-flow-dialog-title > svg { flex-shrink:0; color:var(--sf-accent); }
 .af-flow-dialog strong { font-size:14px; overflow-wrap:anywhere; }
 .af-flow-dialog small { display:block; font-size:11px; color:var(--sf-muted); margin-top:3px; }
 .af-flow-toolbar { display:flex; flex-shrink:0; gap:4px; padding:6px 12px; align-items:center; font-size:10px; color:var(--sf-muted); }
 .af-flow-toolbar[hidden] { display:none; }
-.af-flow-toolbar span { margin-right:auto; }
+.af-flow-toolbar > span { margin-right:auto; }
+.af-flow-toolbar-official { gap:12px; padding:8px 12px; border-bottom:1px solid var(--sf-border); font-size:11px; }
+.af-flow-title { display:flex; align-items:center; gap:8px; min-width:0; }
+.af-flow-title > svg { flex-shrink:0; color:var(--sf-accent); }
+.af-flow-title > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.af-flow-view-controls { display:flex; flex-shrink:0; align-items:center; gap:6px; }
+.af-flow-view-controls > .af-flow-control { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:6px; height:30px; padding:0 9px; border:1px solid var(--sf-border); border-radius:6px; background:var(--sf-surface); color:var(--sf-text); font:inherit; font-size:11px; line-height:1; cursor:pointer; overflow:visible; white-space:nowrap; }
+.af-flow-view-controls > .af-flow-control-icon { width:30px; padding:0; }
+.af-flow-control > svg { flex-shrink:0; }
+.af-flow-control:hover { background:var(--sf-elevated); border-color:var(--sf-muted); }
+.af-flow-control:focus-visible { outline:2px solid var(--sf-accent); outline-offset:2px; }
+.af-flow-control::after { content:attr(data-tooltip); position:absolute; z-index:2; top:calc(100% + 7px); right:0; padding:6px 8px; border:1px solid var(--sf-border); border-radius:5px; background:var(--sf-elevated); color:var(--sf-text); box-shadow:0 3px 10px #0002; font-size:11px; line-height:1.4; white-space:nowrap; pointer-events:none; visibility:hidden; opacity:0; }
+.af-flow-control:is(:hover,:focus-visible)::after { visibility:visible; opacity:1; }
 .af-flow-viewport { flex:1; overflow:auto; min-height:150px; background-image:radial-gradient(var(--sf-border) .7px, transparent .7px); background-size:16px 16px; }
 .af-flow-viewport svg { display:block; margin:0 auto; color:var(--sf-muted); }
 .af-flow-node { cursor:pointer; }

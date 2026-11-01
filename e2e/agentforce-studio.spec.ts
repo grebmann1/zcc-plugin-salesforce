@@ -1354,9 +1354,17 @@ test('Salesforce Flow visualizer: official canvas, branches, details, themes and
   await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   await expect(detail.locator('.af-flow-toolbar')).toHaveCount(1);
   await expect(detail.locator('.af-flow-toolbar').getByRole('button', { name: 'Fit view', exact: true })).toBeVisible();
+  const expandFlow = detail.getByRole('button', { name: 'Expand Flow', exact: true });
+  await expect(expandFlow.locator('svg')).toBeVisible();
+  expect(await expandFlow.innerText()).toBe('');
+  expect(await expandFlow.evaluate(el => el.getBoundingClientRect().height)).toBeCloseTo(30, 1);
+  await expandFlow.hover();
+  await expect.poll(() => expandFlow.evaluate(el => getComputedStyle(el, '::after').visibility)).toBe('visible');
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('flow-compact-toolbar-dark.png'));
   await expect(flow.getByRole('button', { name: 'Select components to edit with AI' })).toHaveCount(0);
-  await detail.getByRole('button', { name: 'Expand Flow', exact: true }).click();
+  await expandFlow.click();
   await expect(page.getByRole('dialog', { name: 'Expanded Flow' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Expanded Flow' }).getByRole('button', { name: 'Close Flow', exact: true }).locator('svg')).toBeVisible();
   await expect(flow.getByText('Each order item', { exact: true })).toBeVisible();
   // Expanding moves the canvas into the dialog; on a slow runner its first click can land before it is wired.
   await expect(async () => {
@@ -1390,6 +1398,14 @@ test('Salesforce Flow visualizer: official canvas, branches, details, themes and
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'Expanded Flow' })).toHaveCount(0);
   await expect(detail.getByRole('button', { name: 'Expand Flow', exact: true })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  const fitFlow = detail.getByRole('button', { name: 'Fit view', exact: true });
+  await expect(fitFlow).toBeFocused();
+  expect(await fitFlow.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('solid');
+  await expect.poll(() => fitFlow.evaluate(el => getComputedStyle(el, '::after').visibility)).toBe('visible');
+  expect(await detail.locator('.af-flow-toolbar').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await expect(flow.getByText('Each order item', { exact: true })).toBeVisible();
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('flow-compact-toolbar-narrow-light.png'));
   // A failed local asset must leave a usable map and the complete source.
   await page.route('**/assets/flow-visualizer/*.html', route => route.abort());
   await detail.getByRole('button', { name: 'Refresh implementation' }).click();
