@@ -11,6 +11,29 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstub
 const request = (frame: HTMLIFrameElement, patch = {}) => fireEvent(window, new MessageEvent('message', { origin: 'null', source: frame.contentWindow, data: { type: 'REQUEST_PLUGIN_DATA' }, ...patch }));
 
 describe('official Flow frame', () => {
+  it('labels its compact icon controls and shares them with the expanded viewer', () => {
+    render(<FlowVisualization {...props} />);
+    const expand = screen.getByRole('button', { name: 'Expand Flow' });
+    const fit = screen.getByRole('button', { name: 'Fit view' });
+    expect(expand.textContent).toBe('');
+    expect(expand.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(expand.dataset.tooltip).toBe('Expand Flow');
+    expect(fit.dataset.tooltip).toBe('Fit the Flow to the current space');
+    // CSS-generated tooltip text must not change the control's accessible name.
+    expect(fit.getAttribute('aria-label')).toBe('Fit view');
+    expect(fit.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(expand.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(expand);
+    const close = screen.getByRole('button', { name: 'Close Flow' });
+    expect(close.textContent).toBe('');
+    expect(close.dataset.tooltip).toBe('Exit expanded view (Esc)');
+    const before = screen.getByTitle('Salesforce Flow visualizer');
+    fireEvent.click(screen.getByRole('button', { name: 'Fit view' }));
+    expect(screen.getByTitle('Salesforce Flow visualizer')).not.toBe(before);
+    expect(screen.getByRole('dialog', { name: 'Expanded Flow' })).toBeTruthy();
+    fireEvent.click(close);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
   it('only sends the snapshot to its sandboxed frame and ignores edit/navigation requests', () => {
     render(<FlowVisualization {...props} />);
     const frame = screen.getByTitle('Salesforce Flow visualizer') as HTMLIFrameElement;

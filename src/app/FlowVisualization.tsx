@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Maximize2, Minimize2, Scan, Workflow } from 'lucide-react';
 import type { FlowVisualization as VisualizationData } from '../../lib/flow-visualizer.js';
 import { ActionFlowMap } from './ActionFlowMap.js';
 import type { FlowModel } from './action-flow.js';
@@ -63,6 +64,19 @@ function OfficialFlowFrame({ visualization, pluginId, theme, onFailure, onClose 
   </div>;
 }
 
+function FlowViewControls({ expanded = false, onFit, onToggle }: { expanded?: boolean; onFit(): void; onToggle(): void }) {
+  const ToggleIcon = expanded ? Minimize2 : Maximize2;
+  return <div className="af-flow-view-controls">
+    <button type="button" className="af-flow-control" aria-label="Fit view" data-tooltip="Fit the Flow to the current space" onClick={onFit}>
+      <Scan size={15} aria-hidden="true" /><span>Fit view</span>
+    </button>
+    <button type="button" className="af-flow-control af-flow-control-icon" aria-label={expanded ? 'Close Flow' : 'Expand Flow'}
+      aria-haspopup={expanded ? undefined : 'dialog'} data-tooltip={expanded ? 'Exit expanded view (Esc)' : 'Expand Flow'} onClick={onToggle}>
+      <ToggleIcon size={15} aria-hidden="true" />
+    </button>
+  </div>;
+}
+
 function ExpandedFlow({ title, children, onClose, onFit }: { title: string; children: ReactNode; onClose(): void; onFit(): void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -72,7 +86,7 @@ function ExpandedFlow({ title, children, onClose, onFit }: { title: string; chil
     return () => { element.close(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
   }, []);
   return <dialog ref={dialog} className="af-flow-dialog" aria-label="Expanded Flow" onCancel={event => { event.preventDefault(); onClose(); }}>
-    <header><div><strong>{title}</strong><small>Read only</small></div><div className="af-flow-dialog-actions"><button className="sf-btn quiet" onClick={onFit}>Fit view</button><button className="sf-btn quiet" onClick={onClose}>Close Flow</button></div></header>
+    <header><div className="af-flow-dialog-title"><Workflow size={18} aria-hidden="true" /><div><strong>{title}</strong><small>Read only</small></div></div><FlowViewControls expanded onFit={onFit} onToggle={onClose} /></header>
     <div className="af-flow">{children}</div>
   </dialog>;
 }
@@ -104,7 +118,10 @@ export function FlowVisualization({ visualization, error, model, pluginId, sourc
     </div></details>}
   </>;
   return <div className="af-flow">
-    <div className="af-flow-toolbar" hidden={expanded}><span>Salesforce Flow</span><button title="Fit the Flow to the current space" onClick={() => setViewportVersion(v => v + 1)}>Fit view</button><button onClick={() => setExpanded(true)}>Expand Flow</button></div>
+    <div className="af-flow-toolbar af-flow-toolbar-official" hidden={expanded}>
+      <span className="af-flow-title"><Workflow size={16} aria-hidden="true" /><span>Salesforce Flow</span></span>
+      <FlowViewControls onFit={() => setViewportVersion(v => v + 1)} onToggle={() => setExpanded(true)} />
+    </div>
     {expanded ? <ExpandedFlow title={sourceLabel || visualization.fileName.replace(/\.flow-meta\.xml$/, '')} onClose={close} onFit={() => setViewportVersion(v => v + 1)}>{canvas}</ExpandedFlow> : canvas}
   </div>;
 }
