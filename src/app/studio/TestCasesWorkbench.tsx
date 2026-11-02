@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Trash2 } from 'lucide-react';
 import type { CaseOutcome, CaseResult, ScenarioCase, SuiteEval, SuiteProgress } from '../../../lib/studio-contract.js';
 import { caseChecks, failureReason } from '../../../lib/case-checks.js';
 import { TEST_CASES_STYLES } from './test-cases-styles.js';
+import { ConversationScope } from './ConversationScope.js';
 
 export type CaseStatus = CaseOutcome | 'stopped' | 'not-run' | 'setup' | 'running' | 'queued';
 export type CaseFilter = 'all' | CaseStatus;
@@ -69,6 +71,7 @@ export function TestCasesWorkbench(props: Props) {
   const technical = checks.filter(check => check.kind !== 'criteria');
   const conversation = evidence?.conversation;
   const reason = failureReason(evidence);
+  const coverage = evidence && conversation?.length ? <ConversationScope turns={conversation} plannedTurns={selected!.utterances.length} truncated={evidence.conversationTruncated} /> : null;
 
   useEffect(() => {
     if (!opened && returnFocus.current) {
@@ -119,7 +122,7 @@ export function TestCasesWorkbench(props: Props) {
       {selected ? <>
         <header className="sf-cases-detail-head">
           <button type="button" className="sf-tp-btn sf-cases-back" onClick={() => { returnFocus.current = selected.id; setOpened(false); }}>← All cases</button>
-          <div className="sf-cases-meta"><Badge status={status} /><span>Simulate · {selected.utterances.length} {selected.utterances.length === 1 ? 'turn' : 'turns'}</span></div>
+          <div className="sf-cases-meta"><Badge status={status} /><span>Simulate · {selected.utterances.length} {selected.utterances.length === 1 ? 'turn' : 'turns'}</span><button type="button" className="sf-cases-remove" aria-label="Remove case" disabled={running || cases.length < 2} title={cases.length < 2 ? 'A suite keeps at least one case.' : 'Remove case'} onClick={() => props.onRemove(selected.id)}><Trash2 size={14} aria-hidden="true" /></button></div>
           <h3 ref={heading} tabIndex={-1}>{selected.name}</h3>
           <div className="sf-tp-bar"><button type="button" className="sf-tp-btn sf-cases-run" disabled={running || !sourceReady} onClick={() => props.onRun(selected.id)}>{status === 'running' ? 'Running…' : evidence ? 'Run case again' : 'Run case'}</button>
             {props.onFix && status === 'fail' && <button type="button" className="sf-tp-btn" onClick={() => props.onFix?.(selected)}>Fix this case</button>}
@@ -134,7 +137,8 @@ export function TestCasesWorkbench(props: Props) {
               : pending ? <div className="sf-cases-callout"><strong>{status === 'running' ? 'This case is running' : 'Waiting to run'}</strong><p>The result will appear here when this attempt finishes.</p></div>
               : !evidence ? <div className="sf-cases-callout"><strong>This case has not run yet</strong><p>Run this case to see the agent’s reply and its assessment.</p></div>
               : <><div className={`sf-cases-callout is-${status}`}><strong>{LABEL[status]}</strong><p>{status === 'fail' && reason ? reason : status === 'inconclusive' ? reason || 'There was not enough evidence to reach a verdict. Review the checks or run this case again.' : status === 'setup' ? 'Prepare the required context before replaying this case.' : 'The recorded response met this case’s expectations.'}</p></div>
-                {checks.some(check => check.kind === 'criteria') && <><h4>Assessment</h4><ul className="sf-cases-checks">{checks.filter(check => check.kind === 'criteria').map(check => <li key={`${check.kind}:${check.target}`}><span className={`sf-cases-check-mark is-${check.state}`} aria-label={check.state === 'ok' ? 'Passed' : check.state === 'ko' ? 'Failed' : 'Not assessed'}>{check.state === 'ok' ? '✓' : check.state === 'ko' ? '✕' : '–'}</span><div><strong>{check.kind === 'criteria' ? 'AI assessment' : check.expected}</strong><p>{check.actual}</p></div></li>)}</ul></>}
+                {coverage}
+                {checks.some(check => check.kind === 'criteria') && <><h4>Assessment</h4><ul className="sf-cases-checks">{checks.filter(check => check.kind === 'criteria').map(check => <li key={`${check.kind}:${check.target}`}><span className={`sf-cases-check-mark is-${check.state}`} aria-label={check.state === 'ok' ? 'Passed' : check.state === 'ko' ? 'Failed' : 'Not assessed'}>{check.state === 'ok' ? '✓' : check.state === 'ko' ? '✕' : '–'}</span><div><strong>AI assessment</strong><p>{check.actual}</p>{evidence.judgeEvidence?.length ? <ul aria-label="AI assessment evidence">{evidence.judgeEvidence.map((item, index) => <li key={index}>{item}</li>)}</ul> : null}</div></li>)}</ul></>}
                 {evidence.reply && <><h4>Agent reply</h4><p className="sf-cases-message">{evidence.reply}</p></>}
               </>}
             {(!evidence || status === 'stopped') && <><h4>Expected behavior</h4><p>{selected.expect.criteria || 'Open Expectations to see the checks configured for this case.'}</p></>}
@@ -143,9 +147,13 @@ export function TestCasesWorkbench(props: Props) {
               {lastEval && <div><h4>Org eval{!lastEval.perCase ? ' (totals)' : ''}</h4><p>{lastEval.results[selected.id] ? LABEL[lastEval.results[selected.id]!.outcome] : 'No per-case result'} · {lastEval.org}</p>{selected.utterances.length > 1 && <p className="sf-tp-sub">{lastEval.historyReplay ? 'Final-turn replay with recorded history; earlier replies are fixed context.' : 'This older evaluation tested only the opening message.'} Use Simulate to rerun the entire conversation.</p>}</div>}
               {proposal && <div><h4>Proposal</h4><p>{proposal[selected.id] ? LABEL[proposal[selected.id]!] : 'Not run'} · These results are not saved.</p></div>}
             </div>}
-            {evidence && status !== 'stopped' && <details className="sf-cases-technical"><summary>Run evidence{technical.length ? ` · ${technical.length} checks` : ''}</summary>{technical.length > 0 && <ul>{technical.map(check => <li key={`${check.kind}:${check.target}`}><strong>{check.expected}</strong><p>{check.actual}</p></li>)}</ul>}<p>Deterministic checks: {evidence.deterministic ?? 'not recorded'} · AI opinion: {evidence.judge ?? 'not evaluated'} · Trace: {evidence.observed?.traceComplete === false ? 'incomplete' : evidence.observed?.traced ? 'available' : 'unavailable'}</p>{evidence.latencyMs !== undefined && <p>Maximum response time: {evidence.latencyMs} ms</p>}</details>}
+            {evidence && status !== 'stopped' && <details className="sf-cases-technical"><summary><span>Run evidence</span>{technical.length > 0 && <span className="sf-cases-count">{technical.length} {technical.length === 1 ? 'check' : 'checks'}</span>}</summary><div className="sf-cases-disclosure-body">
+              {technical.length > 0 && <ul className="sf-cases-checks">{technical.map(check => <li key={`${check.kind}:${check.target}`}><span className={`sf-cases-check-mark is-${check.state}`} aria-label={check.state === 'ok' ? 'Passed' : check.state === 'ko' ? 'Failed' : 'Not verified'}>{check.state === 'ok' ? '✓' : check.state === 'ko' ? '✕' : '–'}</span><div><strong>{check.expected}</strong><p>{check.actual}</p></div></li>)}</ul>}
+              <dl className="sf-cases-facts"><div><dt>Deterministic checks</dt><dd>{evidence.deterministic ? LABEL[evidence.deterministic] : 'Not recorded'}</dd></div><div><dt>AI assessment</dt><dd>{evidence.judge ? LABEL[evidence.judge] : 'Not evaluated'}</dd></div><div><dt>Runtime trace</dt><dd>{evidence.observed?.traceComplete === false ? 'Incomplete' : evidence.observed?.traced ? 'Available' : 'Unavailable'}</dd></div>{evidence.latencyMs !== undefined && <div><dt>Maximum response time</dt><dd>{evidence.latencyMs} ms</dd></div>}</dl>
+            </div></details>}
           </>}
           {tab === 'Conversation' && <>
+            {coverage}
             {conversation?.length ? <>{conversation.map((turn, index) => <div className={`sf-cases-bubble is-${turn.role}`} key={index}><strong>{turn.role === 'user' ? 'Customer' : 'Agent'}</strong><p>{turn.message}</p></div>)}{evidence?.conversationTruncated && <p className="sf-tp-sub">This saved conversation was shortened to fit the storage limit.</p>}</>
               : evidence?.reply ? <><p className="sf-tp-sub">Only the final reply was saved for this older run.</p><div className="sf-cases-bubble is-agent"><strong>Agent · final reply</strong><p>{evidence.reply}</p></div></>
               : <div className="sf-cases-callout"><strong>No conversation recorded</strong><p>{pending ? 'Messages will appear once this case completes.' : status === 'stopped' ? 'The run stopped before a conversation was saved. Run this case again to record one.' : 'Run this case to record the customer and agent messages.'}</p></div>}
@@ -156,10 +164,9 @@ export function TestCasesWorkbench(props: Props) {
             {technical.length > 0 && <details className="sf-cases-technical"><summary>Technical checks · {technical.length}</summary><ul>{technical.map(check => <li key={`${check.kind}:${check.target}`}>{check.expected}</li>)}</ul></details>}
           </>}
         </div>
-        <footer className="sf-cases-footer"><span className="sf-tp-sub">{evidence ? `Last attempt: ${LABEL[status].toLowerCase()}` : 'No completed attempt'}</span><div className="sf-tp-bar">
+        <footer className="sf-cases-footer"><span className="sf-tp-sub">{evidence ? `Last attempt: ${LABEL[status].toLowerCase()}` : 'No completed attempt'}</span>
           {props.onShowPath && <button type="button" className="sf-tp-btn" onClick={() => props.onShowPath?.(selected.id)}>Show path on graph</button>}
-          <details className="sf-cases-options"><summary>Case options</summary><button type="button" className="sf-tp-btn is-danger" disabled={running || cases.length < 2} title={cases.length < 2 ? 'A suite keeps at least one case.' : undefined} onClick={() => props.onRemove(selected.id)}>Remove case</button></details>
-        </div></footer>
+        </footer>
       </> : <p className="sf-tp-empty">Select a case to see its details.</p>}
     </section>
   </div>;

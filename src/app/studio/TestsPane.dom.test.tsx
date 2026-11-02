@@ -69,6 +69,19 @@ function setup(overrides: Partial<TestsPaneProps> = {}, handlers: Record<string,
 const button = (name: RegExp | string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 const calls = (call: ReturnType<typeof setup>['call'], method: string) => call.mock.calls.filter(([, m, args]) => method === 'studio.suites.run' ? m === 'studio.suites.start' && !(args as Record<string, unknown>).compare : method === 'studio.suites.compare' ? m === 'studio.suites.start' && (args as Record<string, unknown>).compare === true : m === method).map(([, , args]) => args as Record<string, unknown>);
 
+it('puts test guidance behind a header icon instead of using case inspector space', async () => {
+  const { view } = setup({ dirty: true });
+  await screen.findByTestId('tests-row-refund');
+  const help = button('How these tests work');
+  expect(help.closest('.sf-tp-head')).toBeTruthy();
+  expect(view.container.querySelector('.sf-tp-cases-scroll .sf-tp-help')).toBeNull();
+  expect(screen.queryByRole('dialog', { name: 'How these tests work' })).toBeNull();
+  fireEvent.click(help);
+  expect(screen.getByRole('dialog', { name: 'How these tests work' }).textContent).toContain('including unsaved changes');
+  fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+  expect(document.activeElement).toBe(help);
+});
+
 it('saves a reused preset on one case with the suite revision and preserves all other case data', async () => {
   const { call } = setup({}, { 'studio.suites.save': args => ({ ok: true, suite: suite({ cases: args.cases as ScenarioCase[], sha256: 'sha-2' } as any) }) });
   await screen.findByTestId('tests-row-refund'); fireEvent.click(button('Details for Refund'));
@@ -359,7 +372,6 @@ it('adds a case, validates the form and removes a case', async () => {
   expect(saved.expectedSha256).toBe('sha-1');
   expect((saved.cases as unknown[]).at(-1)).toEqual({ id: 'refund-2', name: 'Refund', utterances: ['Money back', 'Now'], expect: { topic: 'Billing', actions: ['Refund', 'Log'], contains: ['refund'], criteria: 'Polite' } });
   fireEvent.click(screen.getByTestId('tests-row-refund'));
-  fireEvent.click(screen.getByText('Case options'));
   fireEvent.click(button('Remove case'));
   await waitFor(() => expect(calls(call, 'studio.suites.save')).toHaveLength(2));
   expect((calls(call, 'studio.suites.save')[1]!.cases as Array<{ id: string }>).map(c => c.id)).toEqual(['late', 'refund-2']);
@@ -453,7 +465,9 @@ it('blocks the fix loop while the file is unsaved and reports start or stop fail
   });
   await screen.findByTestId('tests-loop');
   expect(button('Make these pass').title).toContain('Save first');
+  fireEvent.click(button('How these tests work'));
   expect(screen.getByText(/including unsaved changes/)).toBeTruthy();
+  fireEvent.click(button('Close test help'));
   fireEvent.click(button('Stop'));
   expect(await screen.findByText('The fix loop could not stop.')).toBeTruthy();
   view.rerender(<TestsPane {...props} dirty={false} />);
@@ -672,7 +686,10 @@ it('shows setup separately, passes explicit preparation and exposes recovered jo
   expect(within(screen.getByTestId('tests-row-setup')).getByText('Setup required')).toBeTruthy();
   fireEvent.click(screen.getByTestId('tests-row-setup'));
   expect(screen.getByText('Never calls Send')).toBeTruthy();
-  expect(screen.getByText(/Deterministic checks: pass · AI opinion: fail · Trace: incomplete/)).toBeTruthy();
+  const facts = screen.getByText('Deterministic checks').closest('dl')!;
+  expect(facts.textContent).toContain('Deterministic checksPassed');
+  expect(facts.textContent).toContain('AI assessmentFailed');
+  expect(facts.textContent).toContain('Runtime traceIncomplete');
   fireEvent.click(screen.getByLabelText('I prepared this case for this session'));
   fireEvent.click(button('Run all in Simulate'));
   await waitFor(() => expect(calls(call, 'studio.suites.run')[0]).toMatchObject({ preparedCaseIds: ['setup'] }));

@@ -17,6 +17,7 @@ import { CaseVariables } from './CaseVariables.js';
 import { ScenariosView } from './ScenariosView.js';
 import { useScenarioLibrary, type ScenarioLibraryControls, type ScenarioSelection } from './useScenarioLibrary.js';
 import { sameContext } from '../../../lib/preview-context-preset-contract.js';
+import { TestsHeader, type TestsView } from './TestsHeader.js';
 
 /**
  * The Tests tool: a scenario catalogue with a selected case inspector. Simulate runs the
@@ -55,7 +56,6 @@ export interface TestsPaneProps {
 
 type Suite = ScenarioSuite & { sha256?: string };
 interface Detail extends CaseResult { caseId: string; turns: Array<{ role: 'user' | 'agent'; text: string }> }
-type TestsView = 'scenarios' | 'cases' | 'org' | 'simulations' | 'roleplay';
 type Notice = Message & { allowReads?: boolean };
 type Reply = { ok?: boolean; code?: string; error?: string; summary?: string } & Record<string, unknown>;
 
@@ -179,7 +179,7 @@ export function runSummary(cases: readonly ScenarioCase[], results: ScenarioSuit
 function evidenceOf(detail: Detail | undefined, saved: CaseResult | undefined): CaseResult | undefined {
   if (!detail) return saved;
   const reply = [...detail.turns].reverse().find(turn => turn.role === 'agent')?.text;
-  return { outcome: detail.outcome, runId: saved?.runId ?? '', at: saved?.at ?? Date.now(), notes: detail.notes, ...(detail.deterministic || saved?.deterministic ? { deterministic: detail.deterministic ?? saved?.deterministic } : {}), ...(detail.setupBlocked ? { setupBlocked: true } : {}), ...(detail.stopped ? { stopped: true } : {}), ...(detail.turns.length ? { conversation: detail.turns.map(turn => ({ role: turn.role, message: turn.text })) } : saved?.conversation ? { conversation: saved.conversation } : {}), ...(saved?.conversationTruncated ? { conversationTruncated: true } : {}), ...(saved?.assertions ? { assertions: saved.assertions } : {}), ...(detail.observed ? { observed: detail.observed } : {}), ...(detail.judge ? { judge: detail.judge } : {}), ...(reply ? { reply } : {}) };
+  return { outcome: detail.outcome, runId: saved?.runId ?? '', at: saved?.at ?? Date.now(), notes: detail.notes, ...(detail.deterministic || saved?.deterministic ? { deterministic: detail.deterministic ?? saved?.deterministic } : {}), ...(detail.setupBlocked ? { setupBlocked: true } : {}), ...(detail.stopped ? { stopped: true } : {}), ...(detail.turns.length ? { conversation: detail.turns.map(turn => ({ role: turn.role, message: turn.text })) } : saved?.conversation ? { conversation: saved.conversation } : {}), ...(saved?.conversationTruncated ? { conversationTruncated: true } : {}), ...(saved?.assertions ? { assertions: saved.assertions } : {}), ...(detail.observed ? { observed: detail.observed } : {}), ...(detail.judge ? { judge: detail.judge } : {}), ...(detail.judgeEvidence || saved?.judgeEvidence ? { judgeEvidence: detail.judgeEvidence ?? saved?.judgeEvidence } : {}), ...(reply ? { reply } : {}) };
 }
 
 const shortDate = (at: number) => new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -451,15 +451,7 @@ export function TestsPane(props: TestsPaneProps) {
   };
   useEffect(() => { if (props.simulationsFocus && !props.casesOnly) { setView('simulations'); setSimulationsShown(true); } }, [props.simulationsFocus, props.casesOnly]);
   useEffect(() => { if (props.roleplayFocus !== undefined && !props.casesOnly) { setView('roleplay'); setRoleplayShown(true); } }, [props.roleplayFocus, props.casesOnly]);
-  const switcher = props.casesOnly ? null : (
-    <div className="sf-tp-seg" role="group" aria-label="Tests view">
-      <button type="button" title="Create reusable customer setups and starting variables." aria-pressed={view === 'scenarios'} onClick={() => showView('scenarios')}>Scenarios</button>
-      <button type="button" title="Replay saved scenarios and check expected outcomes for this agent." aria-pressed={view === 'cases'} onClick={() => showView('cases')}>Test cases</button>
-      <button type="button" title="Run multiple AI customer conversations across scenarios and repeats." aria-pressed={view === 'simulations'} onClick={() => showView('simulations')}>Batch simulations</button>
-      <button type="button" title="Explore one AI customer conversation with its setup, chat and traces." aria-pressed={view === 'roleplay'} onClick={() => showView('roleplay')}>Role-play</button>
-    </div>
-  );
-  const browse = !props.casesOnly && <button className="sf-tp-btn" type="button" aria-pressed={view === 'org'} onClick={() => showView('org')}>Browse tests</button>;
+  const header = <TestsHeader view={view} onViewChange={showView} dirty={dirty} suite={suite} casesOnly={props.casesOnly} />;
   const controls: ScenarioLibraryControls = { ...library, onManage: () => showView('scenarios') };
   const scenariosView = scenariosShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'scenarios'}>{path ? <ScenariosView key={JSON.stringify([pluginId, projectId, path])} library={controls} pluginId={pluginId} projectId={projectId} path={path} source={source} call={call}
     onRoleplay={scenario => { setRoleplayScenario({ scenario, seq: ++scenarioSequence.current }); showView('roleplay'); }}
@@ -472,7 +464,7 @@ export function TestsPane(props: TestsPaneProps) {
 
   if (!path) {
     return <section className="sf-tp" data-view={view} aria-label="Tests" data-testid="studio-tests-pane"><style>{STYLES}</style>
-      <div className="sf-tp-head"><h2>Tests</h2><span className="sf-tp-spacer" />{switcher}{browse}</div>
+      {header}
       {view === 'cases' && <div className="sf-tp-empty">Open an agent file to test it.</div>}
       {scenariosView}
       {orgView}
@@ -503,12 +495,7 @@ export function TestsPane(props: TestsPaneProps) {
   return (
     <section className="sf-tp" data-view={view} aria-label="Tests" data-testid="studio-tests-pane">
       <style>{STYLES}</style>
-      <div className="sf-tp-head">
-        <h2>Tests</h2>
-        {suite && <span className="sf-tp-sub">{suite.path} · {cases.length} case{cases.length === 1 ? '' : 's'}</span>}
-        <span className="sf-tp-spacer" />
-        {switcher}{browse}
-      </div>
+      {header}
       <div className="sf-tp-cases-view" hidden={view !== 'cases'}>
         {summary.ran > 0 && <div className="sf-tp-summary" data-testid="tests-summary">
           <span className="sf-tp-score" aria-label={`${summary.pass} of ${summary.ran} pass`}>{summary.pass}/{summary.ran}</span>
@@ -593,7 +580,6 @@ export function TestsPane(props: TestsPaneProps) {
             } finally { if (alive.current && target === comparisonTarget.current) setBusy(null); }
           }} />}
           onRemove={id => void perform('remove', () => save(cases.filter(c => c.id !== id)))} />}
-        <details className="sf-tp-foot"><summary>About Simulate and org eval</summary><p>Simulate runs the editor source{dirty ? ', including unsaved changes' : ''}. Org eval runs <code>sf agent test run-eval</code> against the agent published on the org. Multi-turn exports replay the final message with captured history; Simulate reruns all turns. A pass counts as Release eval evidence for the exported checks only.</p></details>
         </div>
       </div>
       {scenariosView}

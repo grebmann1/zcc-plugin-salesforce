@@ -360,3 +360,12 @@ describe('registerSimulations', () => {
     expect(batchSummary({ lanes: [lane] } as SimulationBatch).lanes[0]!.turns).toEqual([]);
   });
 });
+
+it.each(['pass', 'fail', 'inconclusive'] as const)('preserves a single-exchange judge verdict of %s with its evidence', async outcome => {
+  const t = setup({ 'hi from A': outcome });
+  await t.batches.start(start({}, parseSimulationRequest({ scenarios: [scenario('A', 1)] })));
+  const done = await t.batches.get('p1', 'b1', 1000);
+  expect(done.lanes[0]).toMatchObject({ status: outcome, verdict: { outcome, reason: `judged ${outcome}`, evidence: ['turn 1'] } });
+  expect(done.lanes[0]!.turns).toHaveLength(2);
+  expect(t.lab.next).not.toHaveBeenCalled();
+});

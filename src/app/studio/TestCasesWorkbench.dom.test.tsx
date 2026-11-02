@@ -164,7 +164,7 @@ it('keeps progress cases visible under filters and suppresses their old results'
   expect(screen.getByText('Waiting to run')).toBeTruthy();
 });
 
-it('shows failure evidence, fix and graph actions, while keeping removal in case options', () => {
+it('shows failure evidence, fix and graph actions, with compact removal in the header', () => {
   const { props } = setup({ results: { quote: result({ outcome: 'fail', notes: ['AI: Address skipped'], judge: 'fail', observed: { topics: [], actions: [], traced: true, traceComplete: true }, latencyMs: 321 }) } });
   select();
   expect(screen.getByText('Judge: Address skipped')).toBeTruthy();
@@ -174,11 +174,11 @@ it('shows failure evidence, fix and graph actions, while keeping removal in case
   expect(props.onFix).toHaveBeenCalledWith(cases[0]);
   fireEvent.click(screen.getByRole('button', { name: 'Show path on graph' }));
   expect(props.onShowPath).toHaveBeenCalledWith('quote');
-  fireEvent.click(screen.getByText('Case options'));
   fireEvent.click(screen.getByRole('button', { name: 'Remove case' }));
   expect(props.onRemove).toHaveBeenCalledWith('quote');
   fireEvent.click(screen.getByText(/Run evidence/));
-  expect(screen.getByText('Maximum response time: 321 ms')).toBeTruthy();
+  expect(screen.getByText('Maximum response time')).toBeTruthy();
+  expect(screen.getByText('321 ms')).toBeTruthy();
 });
 
 it('exposes prerequisites, accepts preparation, and protects the final case', () => {
@@ -189,7 +189,6 @@ it('exposes prerequisites, accepts preparation, and protects the final case', ()
   fireEvent.click(screen.getByLabelText('I prepared this case for this session'));
   expect(props.onPreparedChange).toHaveBeenCalledWith('quote', false);
   expect((screen.getByRole('button', { name: 'Run case again' }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByText('Case options'));
   expect((screen.getByRole('button', { name: 'Remove case' }) as HTMLButtonElement).disabled).toBe(true);
   rerender(<TestCasesWorkbench {...props} prepared={[]} />);
   fireEvent.click(screen.getByLabelText('I prepared this case for this session'));
@@ -225,4 +224,33 @@ it('shows passing checks, a passing reply, and assertion-only criteria', () => {
   expect(screen.getByText('Asked for address')).toBeTruthy();
   select('Billing stays in scope'); tab('Expectations');
   expect(screen.getByText('Meet the configured checks below.')).toBeTruthy();
+});
+
+
+it('uses a compact labelled header action without a separate options section', () => {
+  const { props, rerender } = setup(); select();
+  const remove = screen.getByRole('button', { name: 'Remove case' });
+  expect(remove.closest('.sf-cases-detail-head')).toBeTruthy();
+  expect(remove.textContent).toBe('');
+  expect(remove.title).toBe('Remove case');
+  expect(screen.queryByText('Case options')).toBeNull();
+  expect(screen.queryByText('Remove this case from the saved suite.')).toBeNull();
+  select('Billing stays in scope');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove case' }));
+  expect(props.onRemove).toHaveBeenCalledWith('billing');
+  rerender(<TestCasesWorkbench {...props} running />);
+  expect((screen.getByRole('button', { name: 'Remove case' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+
+it('shows the scope of a one-exchange pass and keeps the judge evidence visible', () => {
+  setup({ cases: [{ ...cases[0]!, utterances: ['Create a quote'] }], results: { quote: result({ notes: ['AI: Asked for account'], judgeEvidence: ['Reply 1 asks which account the quote is for.'], conversation: [{ role: 'user', message: 'Create a quote' }, { role: 'agent', message: 'Which account?' }] }) } });
+  select();
+  expect(screen.getByText('Reply 1 asks which account the quote is for.')).toBeTruthy();
+  expect(screen.getByLabelText('AI assessment evidence')).toBeTruthy();
+  expect(screen.getByText('1 of 1 customer turn · 1 agent reply')).toBeTruthy();
+  expect(screen.getByText(/One exchange only/)).toBeTruthy();
+  tab('Conversation');
+  expect(screen.getByText(/One exchange only/)).toBeTruthy();
+  expect(screen.getByText('Which account?')).toBeTruthy();
 });

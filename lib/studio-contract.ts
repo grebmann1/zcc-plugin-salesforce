@@ -65,6 +65,8 @@ export interface CaseResult { outcome: CaseOutcome; runId: string; at: number; n
   /** This attempt was explicitly cancelled, so it has no evaluation verdict. */
   stopped?: boolean;
   deterministic?: CaseOutcome;
+  /** Bounded transcript evidence returned by the AI assessment. Absent on older runs. */
+  judgeEvidence?: string[];
   latencyMs?: number; assertions?: AssertionResult[]; sourceHash?: string; caseHash?: string;
   /** Complete preceding messages for a final-turn org replay. Omitted when evidence is incomplete or too large. */
   history?: ConversationMessage[];

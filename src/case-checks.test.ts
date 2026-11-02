@@ -26,9 +26,9 @@ describe('caseChecks', () => {
   });
   it('says when a run had no trace, and reads results saved before evidence was kept', () => {
     const untraced: CaseResult = { ...at, outcome: 'inconclusive', notes: ['Topic/action checks need a Simulate runtime trace.'], observed: { topics: [], actions: [], traced: false } };
-    expect(caseChecks({ topic: 'Quotes', contains: ['hi'] }, untraced).map(c => [c.state, c.actual])).toEqual([['na', 'No runtime trace'], ['ok', 'Mentioned']]);
+    expect(caseChecks({ topic: 'Quotes', contains: ['hi'] }, untraced).map(c => [c.state, c.actual])).toEqual([['na', 'No runtime trace'], ['na', 'Not recorded']]);
     const legacyPass: CaseResult = { ...at, outcome: 'pass' };
-    expect(caseChecks({ topic: 'Quotes', actions: ['Price'], contains: ['x'], criteria: 'c' }, legacyPass).map(c => c.state)).toEqual(['ok', 'ok', 'ok', 'na']);
+    expect(caseChecks({ topic: 'Quotes', actions: ['Price'], contains: ['x'], criteria: 'c' }, legacyPass).map(c => c.state)).toEqual(['na', 'na', 'na', 'na']);
     const legacyFail: CaseResult = { ...at, outcome: 'fail' };
     expect(caseChecks({ topic: 'Quotes', contains: ['x'], criteria: 'c' }, legacyFail).map(c => [c.state, c.actual])).toEqual([['na', 'Not recorded'], ['na', 'Not recorded'], ['na', 'Not evaluated']]);
     expect(caseChecks({ criteria: 'c' }, { ...at, outcome: 'pass', notes: ['AI: fine'] })[0]).toMatchObject({ state: 'ok', actual: 'fine' });
@@ -65,4 +65,16 @@ it('renders deterministic assertion evidence without inventing results for missi
     { label: labels[1]!, outcome: 'fail', actual: 'true' }
   ] };
   expect(caseChecks(checks, result).map(c => [c.state, c.actual])).toEqual([['ok', '200 ms maximum'], ['ko', 'true'], ['na', 'Not recorded']]);
+});
+
+
+it('checks text against recorded agent replies and never infers it from a generic verdict', () => {
+  const base: CaseResult = { ...at, outcome: 'pass', observed: { traced: true, actions: [], topics: [] } };
+  expect(caseChecks({ contains: ['quote'] }, base)[0]).toMatchObject({ state: 'na', actual: 'Not recorded' });
+  const conversation = [{ role: 'user' as const, message: 'quote' }, { role: 'agent' as const, message: 'Which account?' }];
+  expect(caseChecks({ contains: ['quote'] }, { ...base, conversation })[0]).toMatchObject({ state: 'ko' });
+  expect(caseChecks({ contains: ['ACCOUNT'] }, { ...base, conversation })[0]).toMatchObject({ state: 'ok' });
+  expect(caseChecks({ contains: ['quote'] }, { ...base, conversation, conversationTruncated: true })[0]).toMatchObject({ state: 'na' });
+  expect(caseChecks({ contains: ['quote'] }, { ...base, conversation, conversationTruncated: true, notes: ['Missing text: "quote"'] })[0]).toMatchObject({ state: 'ko' });
+  expect(caseChecks({ contains: ['account'] }, { ...base, reply: 'Which ACCOUNT?' })[0]).toMatchObject({ state: 'ok' });
 });

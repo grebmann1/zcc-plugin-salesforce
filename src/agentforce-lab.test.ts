@@ -376,3 +376,18 @@ it('includes final state but marks evidence shortened to the judging budget inco
   expect(JSON.stringify(evidence.steps)).not.toContain('Do not use response text');
   expect(JSON.stringify(evidence.steps).length).toBeLessThan(6100);
 });
+
+it('gives the judge explicit coverage and a rubric for short conversations without accepting client evidence', async () => {
+  const { lab, args, request } = setup();
+  const run = await lab.start({ ...args, scenario: { ...args.scenario, maxTurns: 1, criteria: 'Ask for the order number' } });
+  await lab.send({ id: run.id, text: 'Find my order' });
+  request.mockResolvedValueOnce({ host: 'test.api.salesforce.com', body: { steps: [] } } as never);
+  request.mockResolvedValueOnce({ host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: JSON.stringify({ outcome: 'pass', reason: 'Clarification asked', evidence: ['Agent asks for the order number'] }) }] } } } as never);
+  const evaluated = await lab.evaluate({ id: run.id, coverage: { recordedReplies: 99 } });
+  expect(evaluated.verdict.outcome).toBe('pass');
+  const messages = (request.mock.calls.at(-1)![2] as { messages: Array<{ content: string }> }).messages;
+  expect(messages[0]!.content).toContain('A single exchange can pass a clarification or refusal criterion');
+  expect(messages[0]!.content).toContain('If the conversation ends while required work is still pending, use inconclusive');
+  expect(JSON.parse(messages[1]!.content).coverage).toEqual({ configuredCustomerTurns: 1, recordedCustomerTurns: 1, recordedReplies: 1 });
+  expect(JSON.parse(messages[1]!.content).transcript).toHaveLength(3); // Includes the greeting, which is not a reply.
+});

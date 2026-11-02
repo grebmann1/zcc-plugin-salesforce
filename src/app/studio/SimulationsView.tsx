@@ -9,6 +9,7 @@ import { SimulationScenarios, type EditableScenario } from './SimulationScenario
 import { IMPROVEMENT_STYLES, SIMULATION_STYLES } from './simulation-styles.js';
 import { callPluginRpc, useRealtime } from '@zana-ai/zcc-plugin-sdk/app';
 import { SelfHealingPanel } from './SelfHealingPanel.js';
+import { ConversationScope } from './ConversationScope.js';
 import { LAB_SCENARIOS, type LabEngine } from '../../../lib/agentforce-lab-contract.js';
 import { CONTEXT_PRESETS_CHANGED, sameContext, type ContextPreset } from '../../../lib/preview-context-preset-contract.js';
 import { parsePreviewContext, validateContextEntries, type PreviewContextField, type PreviewContextVariable } from '../../../lib/preview-context.js';
@@ -362,6 +363,7 @@ function AgentSimulations(props: SimulationsViewProps) {
     {lane && <section className="sf-sim-detail" aria-label={`Conversation ${lane.name}`}>
       <h3>{lane.name}{lane.repeat > 1 ? ` #${lane.repeat}` : ''} <StatusChip status={lane.status} /></h3>
       <div className="sf-tp-sub"><b>Goal:</b> {lane.scenario.goal}<br /><b>Criteria:</b> {lane.scenario.criteria}</div>
+      <ConversationScope turns={lane.turns} plannedTurns={lane.scenario.maxTurns} />
       <details className="sf-sim-applied-context"><summary>Starting variables · {lane.contextVariables?.length ?? batch?.contextVariables?.length ?? 0}</summary>
         <dl>{(lane.contextVariables ?? batch?.contextVariables ?? []).map(row => <div key={row.name}><dt>{row.name} <small>{row.type}</small></dt><dd>{typeof row.value === 'string' ? row.value : JSON.stringify(row.value)}</dd></div>)}</dl>
       </details>

@@ -499,6 +499,29 @@ describe('registerStudioPreview', () => {
       expect((await h.call(STUDIO_RPC.suites, { agentPath })).suites[0]).not.toHaveProperty('lastResults');
     });
 
+    it('finishes a maximum-size comparison job with long conversations inside the display limit', async () => {
+      const h = wired();
+      const cases = Array.from({ length: SUITE_LIMITS.cases }, (_, i) => ({ ...caseA, id: `c${i}`, utterances: Array(8).fill('Please help') }));
+      h.files.set(`${ROOT}/tests/Bot.scenario.json`, JSON.stringify({ cases }));
+      h.lab.send.mockResolvedValue({ turns: Array.from({ length: 16 }, (_, i) => ({ role: i % 2 ? 'agent' : 'user', text: 'refund '.repeat(570) })) } as never);
+      const job = await h.call(STUDIO_RPC.suiteStart, { agentPath, source: 'draft', compare: true });
+      let completed: Record<string, any> = {};
+      await vi.waitFor(async () => {
+        completed = await h.call(STUDIO_RPC.suiteResult, { jobId: job.jobId });
+        expect(completed.status).toBe('completed');
+      });
+      expect(completed.result).toMatchObject({ ok: true, comparison: { referenceHash: sha256Hex('config: disk'), candidateHash: sha256Hex('draft') } });
+      expect(Object.keys(completed.result.comparison.reference)).toHaveLength(50);
+      expect(Object.keys(completed.result.comparison.candidate)).toHaveLength(50);
+      expect(completed.result.comparison.candidate.c49.reply).toHaveLength(EVIDENCE_LIMITS.reply);
+      expect(completed.result.comparison.candidate.c49).not.toHaveProperty('conversation');
+      expect(completed.result).not.toHaveProperty('details');
+      expect(completed.result).not.toHaveProperty('results');
+      expect(completed.result.suite).not.toHaveProperty('lastResults');
+      expect(JSON.stringify(completed.result).length).toBeLessThan(750_000);
+      expect((await h.call(STUDIO_RPC.suites, { agentPath })).suites[0]).not.toHaveProperty('lastResults');
+    });
+
     it('imports a spec, writes it and runs the org eval with the agent API name', async () => {
       const h = wired();
       expect(await h.call(STUDIO_RPC.suiteImport, { agentPath, text: 'testCases:\n  - utterance: Cancel my order\n' })).toMatchObject({ ok: true, imported: 1, suite: { cases: [{ id: 'refund' }, { id: 'late' }, { id: 'cancel-my-order' }] } });
@@ -622,11 +645,19 @@ describe('comparison and faithful multi-turn evidence', () => {
     s.lab.send.mockResolvedValue({ turns: [{ role: 'user', text: 'q' }, { role: 'agent', text: 'ok', latencyMs: 500 }] } as never);
     expect((await s.suites.run({ path: 'tests/Bot.scenario.json', source: 'saved', engine: 'preview' })).results.refund?.outcome).toBe('fail');
   });
-  it('rejects comparisons that would silently omit cases', async () => {
+  it.each([22, SUITE_LIMITS.cases])('compares all %i cases on both source snapshots without silently omitting any', async count => {
     const s = store();
-    await s.suites.save({ agentPath: 'Bot.agent', cases: Array.from({ length: 21 }, (_, i) => ({ ...caseA, id: `c${i}` })) });
-    await expect(s.suites.run({ path: 'tests/Bot.scenario.json', source: 'draft', referenceSource: 'saved', engine: 'preview' })).rejects.toThrow(/at most 20/);
-    expect(s.lab.start).not.toHaveBeenCalled();
+    const cases = Array.from({ length: count }, (_, i) => ({ ...caseA, id: `c${i}` }));
+    await s.suites.save({ agentPath: 'Bot.agent', cases });
+    const before = structuredClone(s.kv);
+    const run = await s.suites.run({ path: 'tests/Bot.scenario.json', source: 'draft', referenceSource: 'saved', engine: 'preview' });
+    expect(Object.keys(run.comparison!.reference)).toEqual(cases.map(c => c.id));
+    expect(Object.keys(run.comparison!.candidate)).toEqual(cases.map(c => c.id));
+    expect(run.comparison!.suiteHash).toBe(sha256Hex(JSON.stringify(cases)));
+    expect(s.lab.start.mock.calls.map(([args]) => args.source)).toEqual([...Array(count).fill('saved'), ...Array(count).fill('draft')]);
+    expect(s.lab.end).toHaveBeenCalledTimes(count * 2);
+    expect(run.comparison!.candidate.c0).not.toHaveProperty('conversation');
+    expect(s.kv).toEqual(before);
   });
 });
 
@@ -679,4 +710,17 @@ it('retains completed messages when a later turn is stopped, without assigning a
   await h.suites.save({ agentPath: 'A.agent', cases: [{ ...caseA, utterances: ['First', 'Second'] }] });
   await expect(h.suites.run({ path: 'tests/A.scenario.json', source: 'source', engine: 'preview', signal: controller.signal })).rejects.toThrow();
   expect((await h.suites.list())[0]?.lastResults?.refund).toMatchObject({ outcome: 'inconclusive', stopped: true, conversation: [{ role: 'user', message: 'First' }, { role: 'agent', message: 'Recorded reply' }] });
+});
+
+it('preserves bounded AI citations with saved verdicts and keeps failed deterministic checks authoritative', async () => {
+  const h = store();
+  const scenario = { ...caseA, expect: { actions: ['CreateRefund'], criteria: 'Complete the refund' } };
+  h.lab.evaluate.mockResolvedValue({ verdict: { outcome: 'pass', reason: 'Claimed complete', evidence: ['Agent said it was done', ...Array(9).fill('x'.repeat(500))] } });
+  await h.suites.save({ agentPath: 'A.agent', cases: [scenario] });
+  const run = await h.suites.run({ path: 'tests/A.scenario.json', source: 'source', engine: 'preview' });
+  expect(run.results.refund).toMatchObject({ outcome: 'fail', deterministic: 'fail', judge: 'pass' });
+  const saved = (await h.suites.list())[0]!.lastResults!.refund!;
+  expect(saved.judgeEvidence).toHaveLength(8);
+  expect(saved.judgeEvidence![0]).toBe('Agent said it was done');
+  expect(saved.judgeEvidence!.every(item => item.length <= EVIDENCE_LIMITS.note)).toBe(true);
 });

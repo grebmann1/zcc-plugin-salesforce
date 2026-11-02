@@ -14,11 +14,6 @@ const NO_TRACE = 'Topic/action checks need a Simulate runtime trace.';
 const quoted = (value: string) => `"${value}"`;
 const STATE: Record<CaseOutcome, CheckState> = { pass: 'ok', fail: 'ko', inconclusive: 'na' };
 
-/** Whether the judge ran at all: an error during the run leaves only its message in the notes. */
-function judged(result: CaseResult): boolean {
-  return Boolean(result.observed) || result.outcome === 'pass';
-}
-
 function reached(kind: 'topic' | 'action', name: string, result: CaseResult | undefined): Pick<CaseCheck, 'actual' | 'state'> {
   if (!result) return { actual: 'Not run', state: 'na' };
   const notes = result.notes ?? [];
@@ -29,7 +24,7 @@ function reached(kind: 'topic' | 'action', name: string, result: CaseResult | un
     const others = kind === 'topic' && seen?.length ? ` · saw ${seen.join(', ')}` : '';
     return { actual: `${kind === 'topic' ? 'Not entered' : 'Not called'}${others}`, state: 'ko' };
   }
-  if (result.observed?.traced || (result.outcome === 'pass' && !notes.includes(NO_TRACE))) return { actual: kind === 'topic' ? `Routed to ${name}` : `Called ${name}`, state: 'ok' };
+  if (result.observed?.traced) return { actual: kind === 'topic' ? `Routed to ${name}` : `Called ${name}`, state: 'ok' };
   return { actual: notes.includes(NO_TRACE) || result.observed ? 'No runtime trace' : 'Not recorded', state: 'na' };
 }
 
@@ -44,9 +39,12 @@ export function caseChecks(expect: ScenarioCase['expect'], result?: CaseResult):
   }
   for (const text of expect.contains ?? []) {
     const missing = result?.notes?.includes(`Missing text: ${quoted(text)}`);
+    const replies = result?.conversation?.filter(turn => turn.role === 'agent').map(turn => turn.message).join('\n') ?? result?.reply;
+    const mentioned = replies?.toLocaleLowerCase().includes(text.toLocaleLowerCase());
+    const complete = Boolean(result?.conversation?.length && !result.conversationTruncated);
     checks.push({
       kind: 'contains', target: text, expected: `Mentions ${quoted(text)}`,
-      ...(!result ? { actual: 'Not run', state: 'na' as const } : missing ? { actual: 'Not in the reply', state: 'ko' as const } : judged(result) ? { actual: 'Mentioned', state: 'ok' as const } : { actual: 'Not recorded', state: 'na' as const })
+      ...(!result ? { actual: 'Not run', state: 'na' as const } : mentioned ? { actual: 'Mentioned', state: 'ok' as const } : missing || complete ? { actual: 'Not in the reply', state: 'ko' as const } : { actual: 'Not recorded', state: 'na' as const })
     });
   }
   if (expect.criteria) {

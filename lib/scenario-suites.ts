@@ -21,7 +21,7 @@ import { labRecord, type LabEngine, type LabScenario } from './agentforce-lab-co
 import type { AgentforceLab } from './agentforce-lab.js';
 import type { SalesforceDeps } from './types.js';
 
-export const SUITE_LIMITS = { cases: 50, utterances: 8, text: 4000, runCases: 50, comparisonCases: 20, stored: 40, fileBytes: 256_000 } as const;
+export const SUITE_LIMITS = { cases: 50, utterances: 8, text: 4000, runCases: 50, stored: 40, fileBytes: 256_000 } as const;
 const SUITE_PATH = /^tests\/[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\.scenario\.json$/;
 const SPEC_PATH = /^tests\/[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\.eval\.yaml$/;
 const SUFFIX = '.scenario.json';
@@ -29,6 +29,11 @@ type Outcome = CaseOutcome;
 export type SuiteResults = NonNullable<ScenarioSuite['lastResults']>;
 export interface SuiteEntry extends ScenarioSuite { sha256: string }
 export interface CaseRunDetail extends CaseResult { caseId: string; notes: string[]; turns: Array<{ role: 'user' | 'agent'; text: string }> }
+/** Comparison rows use bounded replies and checks; replay histories stay out of the job response. */
+function comparisonResult(result: CaseResult): CaseResult {
+  const { conversation, conversationTruncated, history, ...summary } = result;
+  return summary;
+}
 /** Per-case evidence kept in kv: up to 40 suites × 50 cases, with at most 12,000 transcript characters per case. */
 export const EVIDENCE_LIMITS = { notes: 5, note: 240, reply: 480, names: 10, name: 100, conversationChars: 12000, conversationTurns: 16, message: 4000 } as const;
 
@@ -55,6 +60,7 @@ export function caseResult(detail: CaseRunDetail): CaseResult {
     ...(detail.stopped ? { stopped: true } : {}),
     ...(detail.deterministic ? { deterministic: detail.deterministic } : {}),
     ...(detail.judge ? { judge: detail.judge } : {}),
+    ...(detail.judgeEvidence?.length ? { judgeEvidence: detail.judgeEvidence.slice(0, 8).map(item => item.slice(0, EVIDENCE_LIMITS.note)) } : {}),
     ...(detail.sourceHash ? { sourceHash: detail.sourceHash, caseHash: detail.caseHash } : {}),
     ...(detail.latencyMs !== undefined ? { latencyMs: detail.latencyMs } : {}),
     ...(detail.assertions ? { assertions: detail.assertions } : {}),
@@ -335,7 +341,6 @@ export class ScenarioSuites {
     try {
       const suite = (await this.list()).find(s => s.path === input.path);
       if (!suite) throw new AgentFilesError('not_found', `Scenario suite not found: ${input.path}`);
-      if (input.referenceSource !== undefined && suite.cases.length > SUITE_LIMITS.comparisonCases) throw new AgentFilesError('invalid_input', `Comparisons support at most ${SUITE_LIMITS.comparisonCases} cases. Split this suite before comparing.`);
       const cases = suite.cases.filter(c => !input.caseIds?.length || input.caseIds.includes(c.id)).slice(0, SUITE_LIMITS.runCases);
       if (!cases.length) throw new AgentFilesError('invalid_input', 'No matching cases to run.');
       const results: SuiteResults = input.store === false || input.referenceSource !== undefined ? {} : { ...(suite.lastResults ?? {}) };
@@ -351,7 +356,7 @@ export class ScenarioSuites {
         for (const c of cases) {
           input.signal?.throwIfAborted();
           update({ currentCaseId: c.id, stage: 'starting', turn: 0, totalTurns: c.utterances.length });
-          reference[c.id] = caseResult(await this.runCase(c, { ...input, source: input.referenceSource }, update));
+          reference[c.id] = comparisonResult(caseResult(await this.runCase(c, { ...input, source: input.referenceSource }, update)));
           update({ completed: Object.keys(reference).length, results: { ...reference } });
         }
         update({ comparisonPhase: 'candidate', completed: 0, results: {} });
@@ -361,7 +366,7 @@ export class ScenarioSuites {
         update({ currentCaseId: c.id, stage: 'starting', turn: 0, totalTurns: c.utterances.length });
         const detail = await this.runCase(c, input, update);
         details.push(detail);
-        results[c.id] = caseResult(detail);
+        results[c.id] = input.referenceSource !== undefined ? comparisonResult(caseResult(detail)) : caseResult(detail);
         if (input.store !== false && input.referenceSource === undefined) await this.storeResults(suite.id, results);
         update({ completed: details.length, results: { ...progress.results, [c.id]: results[c.id]! } });
       }
@@ -435,7 +440,7 @@ export class ScenarioSuites {
       let ai: { outcome: Outcome; reason: string } | undefined;
       if (c.expect.criteria) {
         update({ stage: 'judging' });
-        try { const v = (await lab.evaluate({ id })).verdict; ai = { outcome: v.outcome, reason: v.reason }; } catch { /* leaves criteria inconclusive */ }
+        try { const v = (await lab.evaluate({ id })).verdict; ai = { outcome: v.outcome, reason: v.reason }; detail.judgeEvidence = v.evidence; } catch { /* leaves criteria inconclusive */ }
       }
       const agentTurns = responses;
       if (agentTurns.some(t => !t.planId)) completeTrace = false;
@@ -556,7 +561,10 @@ export function registerStudioPreview(studio: StudioServerContext, options: Stud
     const reference = await agentAt(agentPath);
     const row = labRecord(args);
     if (typeof row.source !== 'string' || !row.source.trim() || row.source.length > 10 * 1024 * 1024) throw new AgentFilesError('invalid_input', 'Provide the candidate editor source (at most 10 MB).');
-    return { ok: true, ...await suites.run({ path: suitePathForAgent(agentPath), agentPath, source: row.source, referenceSource: reference.source, signal, preparedCaseIds: caseIdsOf(row.preparedCaseIds), engine: 'preview', store: false, startedByUser: row.startedByUser === true, threadId: rpcString(args, 'threadId') || undefined }) };
+    const compared = await suites.run({ path: suitePathForAgent(agentPath), agentPath, source: row.source, referenceSource: reference.source, signal, preparedCaseIds: caseIdsOf(row.preparedCaseIds), engine: 'preview', store: false, startedByUser: row.startedByUser === true, threadId: rpcString(args, 'threadId') || undefined });
+    // Return one comparison, without duplicating transcripts or ordinary saved results.
+    const { id, path, cases, sha256 } = compared.suite;
+    return { ok: true, suite: { id, path, cases, sha256 }, comparison: compared.comparison };
   });
   studio.registerRpc(STUDIO_RPC.suiteCompare, args => compareSuite(args));
   const runSuite = (args: unknown, signal?: AbortSignal) => guard(async () => {

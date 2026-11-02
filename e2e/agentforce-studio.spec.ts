@@ -3061,7 +3061,7 @@ test('Agentforce improvements: cache-safe discovery, source jumps, draft compari
   const listed = await page.evaluate(projectId => window.cc.pluginApps.callRpc('salesforce', 'agentFiles.list', { projectId }), projectId);
   expect(listed).toMatchObject({ ok: true, truncated: false, files: expect.arrayContaining([expect.objectContaining({ path: 'force-app/Support.agent' })]) });
   const savedSource = readFileSync(join(home, 'dx/force-app/Support.agent'), 'utf8');
-  expect(await page.evaluate(projectId => window.cc.pluginApps.callRpc('salesforce', 'actions.run', { projectId, action: 'suites.save', input: { agentPath: 'force-app/Support.agent', cases: [{ id: 'comparison', name: 'Comparison acceptance', utterances: ['Comparison acceptance'], expect: { contains: ['comparison success'], maxLatencyMs: 30000 } }] } }), projectId)).toMatchObject({ ok: true });
+  expect(await page.evaluate(projectId => window.cc.pluginApps.callRpc('salesforce', 'actions.run', { projectId, action: 'suites.save', input: { agentPath: 'force-app/Support.agent', cases: Array.from({ length: 22 }, (_, i) => ({ id: `comparison-${i}`, name: `Comparison acceptance ${i + 1}`, utterances: ['Comparison acceptance'], expect: { contains: ['comparison success'], maxLatencyMs: 30000 } })) } }), projectId)).toMatchObject({ ok: true });
   const frame = page.frameLocator('iframe[title="Agentforce playground"]');
   await expect(frame.getByTestId('agent-script-ide')).toBeVisible();
   await frame.locator('.monaco-editor').click({ position: { x: 120, y: 45 } });
@@ -3072,9 +3072,10 @@ test('Agentforce improvements: cache-safe discovery, source jumps, draft compari
   const tests = viewPane(page, 'tests').getByTestId('studio-tests-pane');
   await tests.getByRole('button', { name: 'Compare saved vs draft', exact: true }).click();
   const comparison = tests.getByRole('region', { name: 'Saved source versus editor draft' });
-  await expect(comparison).toContainText('0/1 → 1/1 pass', { timeout: 30000 });
-  await expect(comparison).toContainText('1 improved · 0 regressed · 0 unclear');
-  await comparison.locator('summary').click();
+  await expect(comparison).toContainText('0/22 → 22/22 pass', { timeout: 60000 });
+  await expect(comparison).toContainText('22 improved · 0 regressed · 0 unclear');
+  await expect(comparison.locator('summary')).toHaveCount(22);
+  await comparison.locator('summary').first().click();
   await expect(comparison).toContainText('comparison baseline');
   await expect(comparison).toContainText('comparison success');
   expect(readFileSync(join(home, 'dx/force-app/Support.agent'), 'utf8')).toBe(savedSource);
@@ -3430,6 +3431,37 @@ test('Agentforce case details and list scrolling keep controls and progress in v
   const inspector = tests.getByRole('region', { name: 'Case details', exact: true });
   await expect(inspector.getByRole('heading', { name: 'Order lookup scenario 1', exact: true })).toBeVisible();
   await expect(list).toBeHidden();
+  // A single secondary action needs no standalone settings card or popup.
+  const removeCase = inspector.getByRole('button', { name: 'Remove case', exact: true });
+  await expect(removeCase).toBeVisible();
+  const removeBox = (await removeCase.boundingBox())!;
+  expect(removeBox.width).toBeLessThanOrEqual(30);
+  expect(removeBox.height).toBeLessThanOrEqual(30);
+  expect(await removeCase.evaluate(el => el.closest('.sf-cases-detail-head') !== null)).toBe(true);
+  await expect(inspector.getByText('Case options', { exact: true })).toHaveCount(0);
+  expect(await inspector.getByRole('heading', { name: 'Order lookup scenario 1', exact: true }).evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
+  expect(await inspector.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('tests-case-header-narrow-light.png'));
+  const help = tests.getByRole('button', { name: 'How these tests work', exact: true });
+  const contentHeight = await inspector.locator('.sf-cases-content').evaluate(el => el.clientHeight);
+  const helpBox = (await help.boundingBox())!;
+  expect(helpBox.width).toBeLessThanOrEqual(28);
+  expect(helpBox.height).toBeLessThanOrEqual(28);
+  await expect(tests.locator('.sf-tp-cases-scroll .sf-tp-help')).toHaveCount(0);
+  await help.click();
+  const helpPopup = tests.getByRole('dialog', { name: 'How these tests work', exact: true });
+  await expect(helpPopup).toBeVisible();
+  expect(await helpPopup.evaluate(el => el.matches(':popover-open'))).toBe(true);
+  expect(await inspector.locator('.sf-cases-content').evaluate(el => el.clientHeight)).toBe(contentHeight);
+  const popupBox = (await helpPopup.boundingBox())!;
+  const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  expect(popupBox.x).toBeGreaterThanOrEqual(0);
+  expect(popupBox.x + popupBox.width).toBeLessThanOrEqual(viewport.width);
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('tests-help-popover-narrow-light.png'));
+  expect(await tests.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await page.keyboard.press('Escape');
+  await expect(helpPopup).toBeHidden();
+  await expect(help).toBeFocused();
   await inspector.getByRole('tab', { name: 'Conversation', exact: true }).click();
   await expect(inspector).toContainText('Order 42');
   await inspector.getByRole('tab', { name: 'Expectations', exact: true }).click();
@@ -3665,6 +3697,83 @@ test('Agentforce Studio: pane dividers resize smoothly, persist and adapt to nar
   await drag(preview.getByRole('separator', { name: 'Resize scenario list and details' }), 80);
   await expect.poll(async () => (await scenarioList.boundingBox())!.width).toBeGreaterThan(casesBefore + 60);
   await expect(iframe).toHaveAttribute('data-resize-identity', 'original');
+});
+
+test('Tests navigation keeps its header, selection and drafts stable in side panel and Studio window', async ({ app, home }, testInfo) => {
+  const main = app.window;
+  const errors: string[] = [];
+  main.on('pageerror', error => errors.push(error.message));
+  expect(await main.evaluate(() => window.cc.extensions.install({ kind: 'bundled', id: 'salesforce' }))).toMatchObject({ ok: true });
+  await expect.poll(() => main.evaluate(async () => (await window.cc.pluginApps.list()).find(p => p.id === 'salesforce')?.status)).toBe('running');
+  const projectId = await main.evaluate(async path => { const result = await window.cc.projects.add(path); if (!result.ok) throw Error(result.message); return result.value.id; }, join(home, 'dx'));
+  await main.evaluate(async id => {
+    await window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' });
+    history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
+  }, projectId);
+  await main.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await selectSalesforceSection(main.getByTestId('salesforce-workbench'), 'agentforce');
+  await studioIn(main).getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+
+  for (const surface of ['side-panel', 'studio-window'] as const) {
+    let page = main;
+    if (surface === 'studio-window') {
+      await main.setViewportSize({ width: 1440, height: 1000 });
+      await sidePanel(main).getByRole('button', { name: 'Hide right panel', exact: true }).click();
+      await main.getByTestId('salesforce-workbench').getByTestId('plugin-tab-open-in-window').click();
+      await expect.poll(() => app.electron.windows().some(window => !window.isClosed() && window.url().includes('surface=plugin-view') && window.url().includes('pluginId=salesforce'))).toBe(true);
+      page = app.electron.windows().find(window => !window.isClosed() && window.url().includes('surface=plugin-view') && window.url().includes('pluginId=salesforce'))!;
+      page.on('pageerror', error => errors.push(error.message));
+      await expect(studioIn(page).getByRole('tab', { name: /^Script/ })).toBeVisible();
+    }
+    await openTool(studioIn(page), 'Tests');
+    const tests = viewPane(page, 'tests').getByTestId('studio-tests-pane');
+    const header = tests.getByTestId('tests-header').first();
+    const navigation = header.getByRole('group', { name: 'Tests view' });
+    const help = header.getByRole('button', { name: 'How these tests work', exact: true });
+    for (const width of [1440, 900]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      const bounds = (await header.boundingBox())!;
+      const helpBounds = (await help.boundingBox())!;
+      const selectedBackground = await header.evaluate(el => {
+        const probe = document.createElement('span'); probe.style.backgroundColor = 'var(--sf-soft)'; el.append(probe);
+        const value = getComputedStyle(probe).backgroundColor; probe.remove(); return value;
+      });
+      for (const [name, view] of [['Scenarios', 'scenarios'], ['Test cases', 'cases'], ['Batch simulations', 'simulations'], ['Role-play', 'roleplay'], ['Test cases', 'cases']] as const) {
+        const button = navigation.getByRole('button', { name, exact: true });
+        await button.click();
+        await expect(tests).toHaveAttribute('data-view', view);
+        await expect(button).toHaveAttribute('aria-pressed', 'true');
+        await expect(navigation.locator('[aria-pressed="true"]')).toHaveCount(1);
+        await expect(help).toBeVisible();
+        const current = (await header.boundingBox())!;
+        expect(current.y).toBeCloseTo(bounds.y, 0);
+        expect(current.height).toBeCloseTo(bounds.height, 0);
+        expect((await help.boundingBox())!.x).toBeCloseTo(helpBounds.x, 0);
+        await expect.poll(() => button.evaluate(el => getComputedStyle(el).backgroundColor)).toBe(selectedBackground);
+        expect(await button.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
+        expect(await tests.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+      }
+      await help.click();
+      await expect(header.getByRole('dialog', { name: 'How these tests work' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(help).toBeFocused();
+      await page.keyboard.press('Tab');
+      const focused = navigation.getByRole('button', { name: 'Scenarios', exact: true });
+      await expect(focused).toBeFocused();
+      expect(await focused.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('solid');
+      expect(await focused.evaluate(el => parseFloat(getComputedStyle(el).outlineOffset))).toBeLessThan(0);
+      await page.keyboard.press('Enter');
+      await expect(tests).toHaveAttribute('data-view', 'scenarios');
+      const opening = tests.getByRole('textbox', { name: 'Scenario 1 opening', exact: true });
+      await opening.fill(`Keep this draft in ${surface} at ${width}`);
+      await navigation.getByRole('button', { name: 'Batch simulations', exact: true }).click();
+      await navigation.getByRole('button', { name: 'Scenarios', exact: true }).click();
+      await expect(opening).toHaveValue(`Keep this draft in ${surface} at ${width}`);
+      await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`tests-navigation-${surface}-${width}.png`));
+    }
+  }
+  expect(errors).toEqual([]);
 });
 
 test('Agentforce Studio: copied code pastes as a selection reference in the assistant', async ({ app, home }) => {
