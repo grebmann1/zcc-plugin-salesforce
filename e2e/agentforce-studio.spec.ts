@@ -1126,7 +1126,7 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await scenarios.getByRole('tab', { name: 'Variables', exact: true }).click();
   await scenarios.getByLabel('Variable preset', { exact: true }).selectOption(presetId);
   await scenarios.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(scenarios.getByRole('status')).toContainText('revision 1');
+  await expect(scenarios.getByRole('status').filter({ hasText: 'Saved “Reusable customer”' })).toContainText('revision 1');
   await scenarios.getByLabel('Scenario actions', { exact: true }).click();
   await scenarios.getByRole('button', { name: 'Duplicate scenario…', exact: true }).click();
   const copyDialog = page.getByRole('dialog', { name: 'Duplicate scenario', exact: true });
@@ -1143,7 +1143,7 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await scenarios.getByRole('tab', { name: 'Setup', exact: true }).click();
   await scenarios.getByLabel('Scenario 4 goal', { exact: true }).fill('Updated shared goal');
   await scenarios.getByRole('button', { name: 'Save changes', exact: true }).click();
-  await expect(scenarios.getByRole('status')).toContainText('revision 2');
+  await expect(scenarios.getByRole('status').filter({ hasText: 'Saved “Reusable customer”' })).toContainText('revision 2');
   await tests.getByRole('button', { name: 'Role-play', exact: true }).click();
   await expect(lab.getByRole('textbox', { name: 'Customer goal', exact: true })).toHaveValue('Understand supported requests');
   await expect(lab.getByText(/Based on Reusable customer · revision 1/)).toBeVisible();
@@ -1166,6 +1166,7 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await tests.getByRole('button', { name: 'Scenarios', exact: true }).click();
   await scenarios.getByRole('button', { name: 'Edit Reusable customer', exact: true }).click();
   await expect(scenarios.getByLabel('Scenario 4 goal', { exact: true })).toHaveValue('Updated shared goal');
+  await scenarios.getByRole('tab', { name: 'Variables', exact: true }).click();
   await expect(scenarios.getByLabel('retryCount value', { exact: true })).toHaveValue('0');
   await app.electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1920, 1080));
   await page.setViewportSize({ width: 1920, height: 1080 });
