@@ -17,7 +17,8 @@ function Harness({ initial = [row('Returns'), row('Orders')], disabled = false }
 }
 it('focuses one scenario, retains edits across selections and independently includes conversations', () => {
   render(<Harness />);
-  expect(screen.getAllByRole('textbox').length).toBe(6);
+  expect(screen.getAllByRole('textbox')).toHaveLength(5);
+  expect(screen.getByRole('searchbox', { name: 'Search scenarios' })).toBeTruthy();
   fireEvent.click(screen.getByRole('checkbox', { name: 'Returns' }));
   expect((screen.getByRole('checkbox', { name: 'Returns' }) as HTMLInputElement).checked).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: 'Edit Orders' }));
@@ -38,7 +39,7 @@ it('searches, filters failures and clears filters when creating a scenario', () 
   fireEvent.change(screen.getByLabelText('Search scenarios'), { target: { value: '' } });
   expect(screen.getByRole('button', { name: 'Edit Returns' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Edit Orders' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'All 2' }));
+  fireEvent.click(screen.getByRole('button', { name: 'All scenarios' }));
   fireEvent.change(screen.getByLabelText('Search scenarios'), { target: { value: 'missing' } });
   expect(screen.getByText('No matching scenarios.')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Add scenario' }));
@@ -60,9 +61,10 @@ it('locks editing during a run while preserving navigation and caps scenario cre
   const view = render(<Harness disabled />);
   expect((screen.getByRole('checkbox', { name: 'Returns' }) as HTMLInputElement).disabled).toBe(true);
   expect((screen.getByRole('button', { name: 'Add scenario' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByLabelText('Scenario 1 name').closest('fieldset')!.disabled).toBe(true);
+  expect((screen.getByLabelText('Scenario 1 name') as HTMLInputElement).disabled).toBe(true);
+  expect(screen.getByLabelText('Scenario 1 persona').closest('fieldset')!.disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Edit Orders' }));
   expect(screen.getByLabelText('Scenario 2 name')).toBeTruthy();
-  view.rerender(<SimulationScenarios scenarios={Array.from({ length: 12 }, (_, i) => row(String(i)))} included={[]} activeKey="0" attention={new Set()} disabled={false} onSelect={vi.fn()} onToggle={vi.fn()} onEdit={edit} onAdd={vi.fn()} onRemove={vi.fn()} />);
+  view.rerender(<SimulationScenarios scenarios={Array.from({ length: 30 }, (_, i) => row(String(i)))} included={[]} activeKey="0" attention={new Set()} disabled={false} onSelect={vi.fn()} onToggle={vi.fn()} onEdit={edit} onAdd={vi.fn()} onRemove={vi.fn()} />);
   expect((screen.getByRole('button', { name: 'Add scenario' }) as HTMLButtonElement).disabled).toBe(true);
 });

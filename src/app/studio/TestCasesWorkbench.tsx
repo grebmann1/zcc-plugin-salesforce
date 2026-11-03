@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { CaseOutcome, CaseResult, ScenarioCase, SuiteEval, SuiteProgress } from '../../../lib/studio-contract.js';
 import { caseChecks, failureReason } from '../../../lib/case-checks.js';
 import { TEST_CASES_STYLES } from './test-cases-styles.js';
 import { ConversationScope } from './ConversationScope.js';
+import { useStudioSplit } from './StudioResize.js';
 
 export type CaseStatus = CaseOutcome | 'stopped' | 'not-run' | 'setup' | 'running' | 'queued';
 export type CaseFilter = 'all' | CaseStatus;
@@ -24,6 +25,7 @@ function Badge({ status }: { status: CaseStatus }) {
 }
 
 interface Props {
+  storageKey?: string;
   cases: ScenarioCase[];
   results: Record<string, CaseResult | undefined>;
   progress?: SuiteProgress;
@@ -55,7 +57,11 @@ export function TestCasesWorkbench(props: Props) {
   const [tab, setTab] = useState<Tab>('Result');
   const tabs = props.renderVariables ? TABS : TABS.slice(0, 3);
   const root = useRef<HTMLDivElement>(null);
+  const split = useStudioSplit({ storageKey: props.storageKey, initial: 36, breakpoint: 760, stack: false, minPane: 170 });
+  const splitRef = split.ref;
+  const setRoot = useCallback((element: HTMLDivElement | null) => { root.current = element; splitRef(element); }, [splitRef]);
   const heading = useRef<HTMLHeadingElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const rows = useRef(new Map<string, HTMLButtonElement>());
   const returnFocus = useRef<string | null>(null);
   const statusOf = (c: ScenarioCase): CaseStatus => {
@@ -71,8 +77,11 @@ export function TestCasesWorkbench(props: Props) {
   const technical = checks.filter(check => check.kind !== 'criteria');
   const conversation = evidence?.conversation;
   const reason = failureReason(evidence);
+  const summarized = (actual: string) => (status === 'fail' || status === 'inconclusive') && Boolean(reason?.includes(actual));
+  const assessment = checks.filter(check => check.kind === 'criteria' && (!summarized(check.actual) || evidence?.judgeEvidence?.length));
   const coverage = evidence && conversation?.length ? <ConversationScope turns={conversation} plannedTurns={selected!.utterances.length} truncated={evidence.conversationTruncated} /> : null;
 
+  useEffect(() => { if (content.current) content.current.scrollTop = 0; }, [selected?.id, tab]);
   useEffect(() => {
     if (!opened && returnFocus.current) {
       rows.current.get(returnFocus.current)?.focus();
@@ -98,7 +107,7 @@ export function TestCasesWorkbench(props: Props) {
     event.currentTarget.querySelectorAll<HTMLButtonElement>('[role=tab]')[index]?.focus();
   }
 
-  return <div ref={root} className={`sf-cases${opened && selected ? ' has-selection' : ''}`} data-testid="tests-cases-workbench">
+  return <div ref={setRoot} style={split.style} className={`sf-cases sf-tests-workspace${opened && selected ? ' has-selection' : ''}`} data-testid="tests-cases-workbench">
     <style>{TEST_CASES_STYLES}</style>
     <div className="sf-cases-catalogue">
       <div className="sf-cases-search">
@@ -118,6 +127,7 @@ export function TestCasesWorkbench(props: Props) {
       </div>
       <p className="sf-cases-hint">↑ ↓ to move between cases · Enter to open</p>
     </div>
+    {split.divider('Resize case catalogue and details')}
     <section id={`${prefix}-detail`} className="sf-cases-detail" aria-label="Case details">
       {selected ? <>
         <header className="sf-cases-detail-head">
@@ -129,7 +139,7 @@ export function TestCasesWorkbench(props: Props) {
           </div>
           <div className="sf-cases-tabs" role="tablist" aria-label="Case detail" onKeyDown={navigateTabs}>{tabs.map(name => <button key={name} id={`${prefix}-${name}`} type="button" role="tab" aria-selected={tab === name} aria-controls={`${prefix}-content`} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name}</button>)}</div>
         </header>
-        <div className="sf-cases-content" id={`${prefix}-content`} role="tabpanel" aria-labelledby={`${prefix}-${tab}`} tabIndex={0}>
+        <div ref={content} className="sf-cases-content" id={`${prefix}-content`} role="tabpanel" aria-labelledby={`${prefix}-${tab}`} tabIndex={0}>
           {tab === 'Variables' && props.renderVariables?.(selected)}
           {selected.prerequisites?.length ? <div className="sf-cases-callout"><strong>Setup required</strong><p>{selected.prerequisites.join('; ')}</p><label><input type="checkbox" checked={prepared.includes(selected.id)} onChange={e => props.onPreparedChange(selected.id, e.target.checked)} /> I prepared this case for this session</label><p className="sf-tp-sub">Message replay does not submit forms or complete asynchronous work. Simulated results do not prove live delivery.</p></div> : null}
           {tab === 'Result' && <>
@@ -138,7 +148,7 @@ export function TestCasesWorkbench(props: Props) {
               : !evidence ? <div className="sf-cases-callout"><strong>This case has not run yet</strong><p>Run this case to see the agent’s reply and its assessment.</p></div>
               : <><div className={`sf-cases-callout is-${status}`}><strong>{LABEL[status]}</strong><p>{status === 'fail' && reason ? reason : status === 'inconclusive' ? reason || 'There was not enough evidence to reach a verdict. Review the checks or run this case again.' : status === 'setup' ? 'Prepare the required context before replaying this case.' : 'The recorded response met this case’s expectations.'}</p></div>
                 {coverage}
-                {checks.some(check => check.kind === 'criteria') && <><h4>Assessment</h4><ul className="sf-cases-checks">{checks.filter(check => check.kind === 'criteria').map(check => <li key={`${check.kind}:${check.target}`}><span className={`sf-cases-check-mark is-${check.state}`} aria-label={check.state === 'ok' ? 'Passed' : check.state === 'ko' ? 'Failed' : 'Not assessed'}>{check.state === 'ok' ? '✓' : check.state === 'ko' ? '✕' : '–'}</span><div><strong>AI assessment</strong><p>{check.actual}</p>{evidence.judgeEvidence?.length ? <ul aria-label="AI assessment evidence">{evidence.judgeEvidence.map((item, index) => <li key={index}>{item}</li>)}</ul> : null}</div></li>)}</ul></>}
+                {assessment.length > 0 && <><h4>Assessment</h4><ul className="sf-cases-checks">{assessment.map(check => <li key={`${check.kind}:${check.target}`}><span className={`sf-cases-check-mark is-${check.state}`} aria-label={check.state === 'ok' ? 'Passed' : check.state === 'ko' ? 'Failed' : 'Not assessed'}>{check.state === 'ok' ? '✓' : check.state === 'ko' ? '✕' : '–'}</span><div><strong>AI assessment</strong>{!summarized(check.actual) && <p>{check.actual}</p>}{evidence.judgeEvidence?.length ? <ul aria-label="AI assessment evidence">{evidence.judgeEvidence.map((item, index) => <li key={index}>{item}</li>)}</ul> : null}</div></li>)}</ul></>}
                 {evidence.reply && <><h4>Agent reply</h4><p className="sf-cases-message">{evidence.reply}</p></>}
               </>}
             {(!evidence || status === 'stopped') && <><h4>Expected behavior</h4><p>{selected.expect.criteria || 'Open Expectations to see the checks configured for this case.'}</p></>}

@@ -319,6 +319,11 @@ async function widenSidePanel(page: Page) {
   await page.mouse.up();
   await expect.poll(async () => (await panel.boundingBox())!.width).toBeGreaterThan(1100);
 }
+async function editScenario(pane: Locator, name: string) {
+  const back = pane.getByRole('button', { name: '← All scenarios', exact: true });
+  if (await back.isVisible()) await back.click();
+  await pane.getByRole('button', { name: `Edit ${name}`, exact: true }).click();
+}
 /** Opens a Studio tool through the host's New Tab launcher or an existing host tab. */
 async function openTool(studio: Locator, name: string) {
   const page = studio.page();
@@ -1103,13 +1108,13 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await tests.getByRole('button', { name: 'Batch simulations', exact: true }).click();
   const simulations = tests.getByTestId('studio-simulations');
   await simulations.getByRole('button', { name: /^Batch setup/ }).click();
-  await simulations.getByText('Adjust for this batch', { exact: true }).click();
+  await editScenario(simulations, 'Happy path');
   await expect(simulations.getByLabel('Variable preset', { exact: true })).toBeEnabled();
   await simulations.getByLabel('Variable preset', { exact: true }).selectOption(presetId);
   await expect(simulations.getByLabel('retryCount value', { exact: true })).toHaveValue('0');
-  await simulations.getByRole('button', { name: 'Edit Missing details', exact: true }).click();
+  await editScenario(simulations, 'Missing details');
   await expect(simulations.getByLabel('retryCount value', { exact: true })).toHaveCount(0);
-  await simulations.getByRole('button', { name: 'Edit Happy path', exact: true }).click();
+  await editScenario(simulations, 'Happy path');
   await expect(simulations.getByLabel('retryCount value', { exact: true })).toHaveValue('0');
   await captureElectronScreenshot(app.electron, page, testInfo.outputPath('scenario-variable-presets.png'));
   await tests.getByRole('button', { name: 'Scenarios', exact: true }).click();
@@ -1118,6 +1123,7 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await scenarios.getByLabel('Scenario 4 name', { exact: true }).fill('Reusable customer');
   for (const [field, value] of [['persona', 'A customer requesting support'], ['goal', 'Understand supported requests'], ['opening', 'Can you help?'], ['criteria', 'Explain how to help']]) await scenarios.getByLabel(`Scenario 4 ${field}`, { exact: true }).fill(value);
   await scenarios.getByLabel('Scenario 4 maximum turns', { exact: true }).fill('1');
+  await scenarios.getByRole('tab', { name: 'Variables', exact: true }).click();
   await scenarios.getByLabel('Variable preset', { exact: true }).selectOption(presetId);
   await scenarios.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(scenarios.getByRole('status')).toContainText('revision 1');
@@ -1134,6 +1140,7 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await expect(lab.getByRole('textbox', { name: 'Customer goal', exact: true })).toHaveValue('Understand supported requests');
   await expect(lab.getByLabel('retryCount value', { exact: true })).toHaveValue('0');
   await lab.getByRole('button', { name: 'Manage scenarios', exact: true }).click();
+  await scenarios.getByRole('tab', { name: 'Setup', exact: true }).click();
   await scenarios.getByLabel('Scenario 4 goal', { exact: true }).fill('Updated shared goal');
   await scenarios.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(scenarios.getByRole('status')).toContainText('revision 2');
@@ -1142,6 +1149,7 @@ ${['accountId', 'accountName', 'currentObjectApiName', 'currentRecordId', 'oppor
   await expect(lab.getByText(/Based on Reusable customer · revision 1/)).toBeVisible();
   await lab.getByRole('button', { name: 'Manage scenarios', exact: true }).click();
   await scenarios.getByRole('button', { name: 'Add to batch', exact: true }).click();
+  if (await simulations.getByRole('button', { name: '← All scenarios', exact: true }).isVisible()) await simulations.getByRole('button', { name: '← All scenarios', exact: true }).click();
   for (const name of ['Happy path', 'Missing details', 'Stay in scope']) await simulations.getByRole('checkbox', { name, exact: true }).uncheck();
   await simulations.getByRole('button', { name: 'Run 1 conversation', exact: true }).click();
   await expect(simulations.getByTestId('simulation-summary')).toContainText('Done', { timeout: 30_000 });
@@ -3094,13 +3102,15 @@ test('Agentforce improvements: cache-safe discovery, source jumps, draft compari
   await openTool(studio, 'Tests');
   await tests.getByRole('button', { name: 'Batch simulations', exact: true }).click();
   const simulations = tests.getByTestId('studio-simulations');
-  await simulations.getByText('Adjust for this batch', { exact: true }).click();
+  await simulations.getByRole('button', { name: 'Edit Happy path', exact: true }).click();
   await expect(simulations.getByLabel('Scenario 1 name', { exact: true })).toBeVisible();
+  if (await simulations.getByRole('button', { name: '← All scenarios', exact: true }).isVisible()) await simulations.getByRole('button', { name: '← All scenarios', exact: true }).click();
   await simulations.getByLabel('Search scenarios').fill('missing');
   await expect(simulations.getByRole('button', { name: 'Edit Happy path', exact: true })).toBeHidden();
-  await simulations.getByRole('button', { name: 'Edit Missing details', exact: true }).click();
+  await editScenario(simulations, 'Missing details');
   await expect(simulations.getByLabel('Scenario 2 persona', { exact: true })).toBeVisible();
   await expect(simulations.getByLabel('Scenario 1 persona', { exact: true })).toHaveCount(0);
+  if (await simulations.getByRole('button', { name: '← All scenarios', exact: true }).isVisible()) await simulations.getByRole('button', { name: '← All scenarios', exact: true }).click();
   await simulations.getByLabel('Search scenarios').fill('');
   await simulations.getByRole('button', { name: 'Edit Happy path', exact: true }).click();
   await simulations.getByLabel('Scenario 1 name', { exact: true }).fill('Custom return');
@@ -3110,14 +3120,15 @@ test('Agentforce improvements: cache-safe discovery, source jumps, draft compari
   await simulations.getByLabel('New scenario variable type', { exact: true }).selectOption('Boolean');
   await simulations.getByRole('button', { name: 'Add override', exact: true }).click();
   await expect(simulations.getByLabel('scenarioVerified value', { exact: true })).toHaveValue('false');
-  await simulations.getByRole('button', { name: 'Edit Missing details', exact: true }).click();
+  await editScenario(simulations, 'Missing details');
   await simulations.getByRole('button', { name: 'Add variable', exact: true }).click();
   await simulations.getByLabel('New scenario variable name', { exact: true }).fill('scenarioVerified');
   await simulations.getByLabel('New scenario variable type', { exact: true }).selectOption('Boolean');
   await simulations.getByRole('button', { name: 'Add override', exact: true }).click();
   await simulations.getByLabel('scenarioVerified value', { exact: true }).selectOption('true');
-  await simulations.getByRole('button', { name: 'Edit Custom return', exact: true }).click();
+  await editScenario(simulations, 'Custom return');
   await expect(simulations.getByLabel('scenarioVerified value', { exact: true })).toHaveValue('false');
+  if (await simulations.getByRole('button', { name: '← All scenarios', exact: true }).isVisible()) await simulations.getByRole('button', { name: '← All scenarios', exact: true }).click();
   await simulations.getByLabel('Stay in scope', { exact: true }).uncheck();
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -3142,6 +3153,7 @@ test('Agentforce improvements: cache-safe discovery, source jumps, draft compari
   expect(await studioPanel(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   await captureElectronScreenshot(app.electron, page, testInfo.outputPath('studio-custom-scenarios-narrow-light.png'));
   await simulations.getByRole('button', { name: /^Batch setup/ }).click();
+  await editScenario(simulations, 'Custom return');
   await expect(simulations.getByLabel('Scenario 1 opening', { exact: true })).toHaveValue('What is the return policy?');
   expect(await simulations.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   await simulations.locator('summary').filter({ hasText: 'Run settings' }).click();
@@ -3152,8 +3164,8 @@ test('Agentforce improvements: cache-safe discovery, source jumps, draft compari
   await app.electron.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(400, 400); win.setSize(560, 800); });
   await page.setViewportSize({ width: 560, height: 800 });
   await expect.poll(() => simulations.evaluate(el => el.clientWidth)).toBeLessThan(460);
-  const stacked = await simulations.evaluate(el => { const list = el.querySelector('.sf-sim-catalogue')!.getBoundingClientRect(), editor = el.querySelector('.sf-sim-editor')!.getBoundingClientRect(); return { listBottom: list.bottom, editorTop: editor.top }; });
-  expect(stacked.editorTop).toBeGreaterThanOrEqual(stacked.listBottom - 1);
+  await expect(simulations.getByRole('button', { name: '← All scenarios', exact: true })).toBeVisible();
+  await expect(simulations.getByRole('complementary', { name: 'Scenario catalogue' })).toBeHidden();
   expect(await simulations.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   await captureElectronScreenshot(app.electron, page, testInfo.outputPath('studio-scenario-editor-compact-light.png'));
   expect(errors).toEqual([]);
@@ -3766,6 +3778,7 @@ test('Tests navigation keeps its header, selection and drafts stable in side pan
       await page.keyboard.press('Enter');
       await expect(tests).toHaveAttribute('data-view', 'scenarios');
       const opening = tests.getByRole('textbox', { name: 'Scenario 1 opening', exact: true });
+      if (!await opening.isVisible()) await tests.getByRole('button', { name: 'Edit Happy path', exact: true }).click();
       await opening.fill(`Keep this draft in ${surface} at ${width}`);
       await navigation.getByRole('button', { name: 'Batch simulations', exact: true }).click();
       await navigation.getByRole('button', { name: 'Scenarios', exact: true }).click();
@@ -3773,6 +3786,102 @@ test('Tests navigation keeps its header, selection and drafts stable in side pan
       await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`tests-navigation-${surface}-${width}.png`));
     }
   }
+  expect(errors).toEqual([]);
+});
+
+test('Tests scenario selection: all shared setups, bounded runs and matching catalogue/detail layouts', async ({ app, home }, testInfo) => {
+  const main = app.window;
+  const errors: string[] = [];
+  main.on('pageerror', error => errors.push(error.message));
+  expect(await main.evaluate(() => window.cc.extensions.install({ kind: 'bundled', id: 'salesforce' }))).toMatchObject({ ok: true });
+  await expect.poll(() => main.evaluate(async () => (await window.cc.pluginApps.list()).find(p => p.id === 'salesforce')?.status)).toBe('running');
+  const projectId = await main.evaluate(async path => { const result = await window.cc.projects.add(path); if (!result.ok) throw Error(result.message); return result.value.id; }, join(home, 'dx'));
+  await main.evaluate(async id => {
+    await window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' });
+    history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
+  }, projectId);
+  await main.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await selectSalesforceSection(main.getByTestId('salesforce-workbench'), 'agentforce');
+  await studioIn(main).getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  const seeded = await main.evaluate(async projectId => {
+    for (let index = 0; index < 24; index++) {
+      const result = await window.cc.pluginApps.callRpc('salesforce', 'studio.scenarios.save', { projectId, agentPath: 'force-app/Support.agent', name: `Journey ${index + 1}`, persona: 'A customer requesting a quote.', goal: 'Collect the account details and confirm the next step.', opening: 'Help me create a quote', criteria: 'Ask for required information before taking action.', maxTurns: 4,
+        contextVariables: Array.from({ length: 19 }, (_, i) => ({ name: `value${i}`, type: 'Text', value: `Starting value ${i}` })) });
+      if (!result?.ok) return result;
+    }
+    return window.cc.pluginApps.callRpc('salesforce', 'studio.suites.save', { projectId, agentPath: 'force-app/Support.agent', cases: Array.from({ length: 27 }, (_, index) => ({ id: `case-${index}`, name: `Saved quote case ${index + 1}`, utterances: ['Create a quote'], expect: { criteria: 'Collect account information and confirm the next step. '.repeat(40) } })) });
+  }, projectId);
+  expect(seeded).toMatchObject({ ok: true });
+  await main.getByTestId('salesforce-workbench').getByTestId('plugin-tab-open-in-window').click();
+  await expect.poll(() => app.electron.windows().some(window => !window.isClosed() && window.url().includes('surface=plugin-view') && window.url().includes('pluginId=salesforce'))).toBe(true);
+  const page = app.electron.windows().find(window => !window.isClosed() && window.url().includes('surface=plugin-view') && window.url().includes('pluginId=salesforce'))!;
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1760, height: 1100 });
+  await openTool(studioIn(page), 'Tests');
+  await widenSidePanel(page);
+  const tests = viewPane(page, 'tests').getByTestId('studio-tests-pane');
+  const header = tests.getByTestId('tests-header').first();
+  const navigation = header.getByRole('group', { name: 'Tests view' });
+  await navigation.getByRole('button', { name: 'Batch simulations', exact: true }).click();
+  const simulations = tests.getByTestId('studio-simulations');
+  await expect(header).toContainText('27 shared scenarios');
+  await expect(header).not.toContainText('.scenario.json');
+  await expect(simulations.getByRole('checkbox')).toHaveCount(27);
+  await expect(simulations).toContainText('27 of 27 scenarios · 0 selected');
+  await simulations.getByRole('button', { name: 'Select all', exact: true }).click();
+  await expect(simulations.getByRole('alert')).toContainText('27 selected × 1 repeat = 27 conversations');
+  await expect(simulations.getByRole('button', { name: 'Run 27 conversations', exact: true })).toBeDisabled();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('batch-select-all-limit.png'));
+  await simulations.getByRole('button', { name: 'Clear selection', exact: true }).click();
+  await simulations.getByRole('searchbox', { name: 'Search scenarios' }).fill('Journey 24');
+  await simulations.getByRole('button', { name: 'Select matching', exact: true }).click();
+  await expect(simulations.getByRole('button', { name: 'Run 1 conversation', exact: true })).toBeEnabled();
+  await simulations.getByRole('button', { name: 'Edit Journey 24', exact: true }).click();
+  const batchGoal = simulations.getByLabel('Scenario 27 goal', { exact: true });
+  await batchGoal.fill('Preserve my batch edit');
+  await simulations.getByRole('button', { name: 'Manage scenarios', exact: true }).click();
+  const scenarios = tests.getByTestId('studio-scenarios');
+  await scenarios.getByRole('button', { name: 'Edit Journey 24', exact: true }).click();
+  await expect(scenarios.getByRole('tab', { name: 'Setup', exact: true })).toBeVisible();
+  await scenarios.getByRole('tab', { name: 'Variables', exact: true }).click();
+  const scenarioBody = scenarios.locator('.sf-sim-editor-body');
+  const scenarioActions = scenarios.locator('footer[aria-label="Scenario editing actions"]');
+  await scenarioBody.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(scenarios.getByRole('tab', { name: 'Variables', exact: true })).toBeInViewport();
+  await expect(scenarioActions.getByRole('button', { name: 'Save changes', exact: true })).toBeInViewport();
+  await scenarios.getByRole('button', { name: 'Edit Happy path', exact: true }).click();
+  expect(await scenarioBody.evaluate(el => el.scrollTop)).toBe(0);
+  await navigation.getByRole('button', { name: 'Batch simulations', exact: true }).click();
+  await expect(batchGoal).toHaveValue('Preserve my batch edit');
+  await simulations.getByRole('button', { name: 'Run saved test cases…', exact: true }).click();
+  await expect(header).toContainText('27 saved test cases');
+  const cases = tests.getByTestId('tests-cases-workbench');
+  await expect(cases).toHaveClass(/sf-tests-workspace/);
+  await cases.getByRole('button', { name: 'Details for Saved quote case 27', exact: true }).click();
+  await cases.locator('.sf-cases-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
+  await expect(cases.getByRole('button', { name: 'Run case', exact: true })).toBeInViewport();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`test-cases-harmonized-${theme}.png`));
+    await navigation.getByRole('button', { name: 'Scenarios', exact: true }).click();
+    await expect(tests).toHaveAttribute('data-view', 'scenarios');
+    await scenarios.getByRole('button', { name: 'Edit Journey 24', exact: true }).click();
+    await scenarios.getByRole('tab', { name: 'Setup', exact: true }).click();
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`scenarios-harmonized-${theme}.png`));
+    await navigation.getByRole('button', { name: 'Test cases', exact: true }).click();
+    await expect(tests).toHaveAttribute('data-view', 'cases');
+  }
+  await page.setViewportSize({ width: 650, height: 900 });
+  await navigation.getByRole('button', { name: 'Scenarios', exact: true }).click();
+  await scenarios.getByRole('button', { name: '← All scenarios', exact: true }).click();
+  await scenarios.getByRole('button', { name: 'Edit Journey 24', exact: true }).click();
+  await expect(scenarios.getByRole('button', { name: '← All scenarios', exact: true })).toBeVisible();
+  await expect(scenarioActions.getByRole('button', { name: 'Save changes', exact: true })).toBeInViewport();
+  expect(await tests.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('scenarios-harmonized-narrow.png'));
   expect(errors).toEqual([]);
 });
 
