@@ -543,7 +543,6 @@ it('keeps edited simulation scenarios and the selected result when returning fro
   fireEvent.click(button('Batch simulations'));
   await screen.findByText('Recorded refund');
   fireEvent.click(button(/^Batch setup/));
-  fireEvent.click(screen.getByText('Adjust for this batch'));
   fireEvent.click(button('Add scenario'));
   fireEvent.change(screen.getByLabelText('Scenario 4 name'), { target: { value: 'My unsaved scenario' } });
   fireEvent.change(screen.getByLabelText('Scenario 4 goal'), { target: { value: 'Keep this customer goal' } });
@@ -761,4 +760,22 @@ it('explains that shared scenarios require an open agent file', () => {
   setup({ path: null }); fireEvent.click(button('Scenarios'));
   expect(screen.getByText('Open an agent file to manage shared scenarios.')).toBeTruthy();
   expect(screen.queryByTestId('studio-scenarios')).toBeNull();
+});
+
+
+it('uses the current test view count and includes needs-review cases in the summary and filters', async () => {
+  const saved = suite({ lastResults: { refund: { outcome: 'pass', runId: 'r', at: 1 }, late: { outcome: 'inconclusive', runId: 'r', at: 1 } } });
+  setup({}, { 'studio.suites.list': () => ({ ok: true, suites: [saved] }) });
+  await screen.findByTestId('tests-cases-workbench');
+  const header = screen.getByTestId('tests-header');
+  expect(header.textContent).toContain('2 saved test cases');
+  expect(screen.getByTestId('tests-summary').textContent).toContain('1 need review');
+  fireEvent.click(button('Needs review 1'));
+  expect(screen.queryByTestId('tests-row-refund')).toBeNull();
+  expect(screen.getByTestId('tests-row-late')).toBeTruthy();
+  fireEvent.click(within(header).getByRole('button', { name: 'Batch simulations', exact: true }));
+  expect(header.textContent).toContain('shared scenarios · this agent');
+  expect(header.textContent).not.toContain(saved.path);
+  fireEvent.click(button('Run saved test cases…'));
+  expect(header.textContent).toContain(saved.path);
 });

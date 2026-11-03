@@ -170,7 +170,8 @@ export function runSummary(cases: readonly ScenarioCase[], results: ScenarioSuit
     const result = results?.[c.id];
     if (!result) continue;
     ran++; at = Math.max(at, result.at);
-    if (result.outcome === 'pass') pass++; else if (result.outcome === 'fail') fail++;
+    const status = caseStatus(result);
+    if (status === 'pass') pass++; else if (status === 'fail') fail++;
   }
   return { pass, fail, ran, at };
 }
@@ -451,14 +452,14 @@ export function TestsPane(props: TestsPaneProps) {
   };
   useEffect(() => { if (props.simulationsFocus && !props.casesOnly) { setView('simulations'); setSimulationsShown(true); } }, [props.simulationsFocus, props.casesOnly]);
   useEffect(() => { if (props.roleplayFocus !== undefined && !props.casesOnly) { setView('roleplay'); setRoleplayShown(true); } }, [props.roleplayFocus, props.casesOnly]);
-  const header = <TestsHeader view={view} onViewChange={showView} dirty={dirty} suite={suite} casesOnly={props.casesOnly} />;
+  const header = <TestsHeader view={view} onViewChange={showView} dirty={dirty} suite={suite} scenarioCount={library.scenarios.length} casesOnly={props.casesOnly} />;
   const controls: ScenarioLibraryControls = { ...library, onManage: () => showView('scenarios') };
   const scenariosView = scenariosShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'scenarios'}>{path ? <ScenariosView key={JSON.stringify([pluginId, projectId, path])} library={controls} pluginId={pluginId} projectId={projectId} path={path} source={source} call={call}
     onRoleplay={scenario => { setRoleplayScenario({ scenario, seq: ++scenarioSequence.current }); showView('roleplay'); }}
     onBatch={scenario => { setBatchScenario({ scenario, seq: ++scenarioSequence.current }); showView('simulations'); }} /> : <p>Open an agent file to manage shared scenarios.</p>}</div>;
   const roleplayView = roleplayShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'roleplay'}>{typeof roleplay === 'function' ? roleplay({ ...controls, selection: roleplayScenario }) : roleplay}</div>;
   const simulationsView = simulationsShown && <div className="sf-tp-subview" hidden={view !== 'simulations'}><SimulationsView pluginId={pluginId} projectId={projectId} threadId={threadId} path={path} source={source} dirty={dirty}
-    visible={visible && view === 'simulations'} onAskAgent={onAskAgent} focus={props.simulationsFocus ?? null} onFocusHandled={props.onSimulationsFocusHandled} scenarioLibrary={{ ...controls, selection: batchScenario }} call={props.call} /></div>;
+    visible={visible && view === 'simulations'} onAskAgent={onAskAgent} onShowCases={() => showView('cases')} focus={props.simulationsFocus ?? null} onFocusHandled={props.onSimulationsFocusHandled} scenarioLibrary={{ ...controls, selection: batchScenario }} call={props.call} /></div>;
   const renderLocalSuite = (suite: ScenarioSuite) => <LocalSuiteDetail key={`${projectId}:${suite.path}`} suite={suite} editor={{ ...props, visible: visible && view === 'org' }} Cases={TestsPane} />;
   const orgView = orgShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'org'}><OrgTestsView key={`${pluginId}:${projectId}:${path}`} pluginId={pluginId} projectId={projectId} threadId={threadId} path={path} visible={visible && view === 'org'} onAskAgent={onAskAgent} call={props.call} requestApproval={props.requestApproval} renderLocalSuite={renderLocalSuite} /></div>;
 
@@ -497,16 +498,18 @@ export function TestsPane(props: TestsPaneProps) {
       <style>{STYLES}</style>
       {header}
       <div className="sf-tp-cases-view" hidden={view !== 'cases'}>
+        <header className="sf-tests-view-heading"><h2>Test cases</h2><p>Replay saved customer messages and check expected outcomes.</p></header>
         {summary.ran > 0 && <div className="sf-tp-summary" data-testid="tests-summary">
           <span className="sf-tp-score" aria-label={`${summary.pass} of ${summary.ran} pass`}>{summary.pass}/{summary.ran}</span>
-          <span className="sf-tp-passbar" aria-hidden="true"><i className="is-pass" style={{ width: `${(summary.pass / summary.ran) * 100}%` }} /><i className="is-fail" style={{ width: `${(summary.fail / summary.ran) * 100}%` }} /></span>
+          <span className="sf-tp-passbar" aria-hidden="true"><i className="is-pass" style={{ width: `${(summary.pass / summary.ran) * 100}%` }} /><i className="is-fail" style={{ width: `${(summary.fail / summary.ran) * 100}%` }} /><i className="is-review" style={{ width: `${(cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'inconclusive').length / summary.ran) * 100}%` }} /></span>
           <span className="sf-tp-chip">{hasRun ? 'Previous Simulate results' : 'Simulate'}</span>
-          <span className="sf-tp-sub">{summary.pass} passed · {summary.fail} failed · {cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'stopped').length} stopped · {remaining.length} not run · {relativeTime(summary.at)}</span>
+          <span className="sf-tp-sub">{summary.pass} passed · {summary.fail} failed · {cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'inconclusive').length} need review · {cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'stopped').length} stopped · {cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'setup').length} setup required · {remaining.length} not run · {relativeTime(summary.at)}</span>
           <span className="sf-tp-spacer" />
           <div className="sf-tp-seg" role="group" aria-label="Filter cases">
             <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>All {cases.length}</button>
             <button type="button" aria-pressed={filter === 'fail'} onClick={() => setFilter('fail')}>Failing {summary.fail}</button>
             <button type="button" aria-pressed={filter === 'pass'} onClick={() => setFilter('pass')}>Passing {summary.pass}</button>
+            <button type="button" aria-pressed={filter === 'inconclusive'} onClick={() => setFilter('inconclusive')}>Needs review {cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'inconclusive').length}</button>
           </div>
         </div>}
         <div className="sf-tp-bar" role="toolbar" aria-label="Test actions">
@@ -561,7 +564,7 @@ export function TestsPane(props: TestsPaneProps) {
         </div>}
         {!loaded && !suite && <div className="sf-tp-empty">Loading cases…</div>}
         {loaded && !cases.length && <div className="sf-tp-empty">No cases yet. Add one, import a spec, or pin a conversation from Preview with Save as scenario.</div>}
-        {cases.length > 0 && <TestCasesWorkbench key={`${projectId}:${path}`} cases={cases}
+        {cases.length > 0 && <TestCasesWorkbench key={`${projectId}:${path}`} storageKey={`salesforce:studio:test-cases:${projectId}:${path}`} cases={cases}
           results={Object.fromEntries(cases.map(c => [c.id, liveResults?.[c.id] ?? evidenceOf(details[c.id], suite?.lastResults?.[c.id])]))}
           progress={progress} lastEval={suite?.lastEval}
           proposal={showProposal ? progress?.mode === 'proposal' ? Object.fromEntries(Object.entries(progress.results).map(([id, result]) => [id, result.outcome])) : proposal : undefined}

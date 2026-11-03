@@ -28,6 +28,7 @@ it('edits a revision, copies typed presets and explicitly saves before sharing a
   fireEvent.click(screen.getByRole('button', { name: 'Try in Role-play' })); expect(roleplay).toHaveBeenCalledWith(starterScenarios()[0]);
   fireEvent.change(screen.getByLabelText('Scenario 1 goal'), { target: { value: 'Create a quote' } });
   expect((screen.getByRole('button', { name: 'Add to batch' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('tab', { name: 'Variables' }));
   await screen.findByRole('option', { name: 'Customer preset · revision 2' });
   fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'p' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -68,6 +69,7 @@ it('reports catalogue and preset errors and reloads presets on request', async (
   const broken = { scenarios: starterScenarios(), loading: false, error: '', reload: vi.fn(), save: vi.fn(), remove: vi.fn(), onManage: vi.fn() };
   const failedCall = vi.fn(async () => { throw Error('Preset unavailable'); });
   render(<ScenariosView library={broken} pluginId="salesforce" projectId="q" path="Bot.agent" source="config:" call={failedCall} onRoleplay={vi.fn()} onBatch={vi.fn()} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Variables' }));
   await screen.findByText('Preset unavailable'); fireEvent.click(screen.getByRole('button', { name: 'Reload presets' })); await waitFor(() => expect(failedCall.mock.calls.length).toBe(4)); expect(call).toHaveBeenCalled();
 });
 it('saves local runner settings as a named shared copy and retains failures for correction', async () => {
@@ -114,4 +116,28 @@ it('keeps a pending copy modal open and rejects busy or blank submissions', () =
   fireEvent.submit(screen.getByLabelText('New scenario name').closest('form')!);
   expect(onCreate).not.toHaveBeenCalled();
   view.unmount(); expect(restoreFocus).toHaveBeenCalled(); trigger.remove();
+});
+
+it('keeps editing actions inside the detail pane and resets content scrolling when switching scenarios', async () => {
+  const { view } = setup();
+  Object.defineProperty(view.container.querySelector('.sf-sim-workspace'), 'clientWidth', { value: 1200 });
+  const details = screen.getByRole('region', { name: 'Scenario details' });
+  expect(details.contains(screen.getByRole('contentinfo', { name: 'Scenario editing actions' }))).toBe(true);
+  expect(details.contains(screen.getByRole('tablist', { name: 'Scenario detail' }))).toBe(true);
+  const body = view.container.querySelector('.sf-sim-editor-body')!;
+  body.scrollTop = 400;
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Missing details' }));
+  expect(body.scrollTop).toBe(0);
+  fireEvent.click(screen.getByRole('tab', { name: 'Variables' }));
+  expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toMatch(/Variables$/);
+  expect(screen.queryByRole('textbox', { name: 'Scenario 2 persona' })).toBeNull();
+  fireEvent.keyDown(screen.getByRole('tab', { name: 'Variables' }), { key: 'Home' });
+  expect(screen.getByRole('tab', { name: 'Setup' }).getAttribute('aria-selected')).toBe('true');
+  const happy = screen.getByRole('button', { name: 'Edit Happy path' }); happy.focus();
+  fireEvent.keyDown(happy, { key: 'End' });
+  expect(screen.getByRole('button', { name: 'Edit Stay in scope' })).toBe(document.activeElement);
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+  expect(screen.getByRole('button', { name: 'Edit Missing details' })).toBe(document.activeElement);
+  fireEvent.click(screen.getByText('← All scenarios', { exact: true }));
+  expect(screen.getByRole('button', { name: 'Edit Missing details' })).toBe(document.activeElement);
 });

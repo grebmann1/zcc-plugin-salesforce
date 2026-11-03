@@ -254,3 +254,24 @@ it('shows the scope of a one-exchange pass and keeps the judge evidence visible'
   expect(screen.getByText(/One exchange only/)).toBeTruthy();
   expect(screen.getByText('Which account?')).toBeTruthy();
 });
+
+it.each(['fail', 'inconclusive'] as const)('shows a %s judge explanation once and preserves its supporting evidence', outcome => {
+  const { props, rerender } = setup({ results: { quote: result({ outcome, judge: outcome, notes: ['AI: Account context is missing'] }) } });
+  select();
+  expect(screen.getAllByText(/Account context is missing/)).toHaveLength(1);
+  expect(screen.queryByRole('heading', { name: 'Assessment', exact: true })).toBeNull();
+  rerender(<TestCasesWorkbench {...props} results={{ quote: result({ outcome, judge: outcome, notes: ['AI: Account context is missing'], judgeEvidence: ['No account question appears in the reply.'] }) }} />);
+  expect(screen.getAllByText(/Account context is missing/)).toHaveLength(1);
+  expect(screen.getByLabelText('AI assessment evidence').textContent).toContain('No account question appears');
+});
+
+it('starts at the top when switching cases or detail tabs', () => {
+  const { container } = setup(); select();
+  const body = container.querySelector<HTMLElement>('.sf-cases-content')!;
+  body.scrollTop = 200;
+  tab('Expectations');
+  expect(body.scrollTop).toBe(0);
+  body.scrollTop = 100;
+  select('Billing stays in scope');
+  expect(body.scrollTop).toBe(0);
+});
