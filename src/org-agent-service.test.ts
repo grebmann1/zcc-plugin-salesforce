@@ -146,6 +146,30 @@ describe('org agent sources', () => {
       await expect(service.readVersion(org, 'Help', 1)).rejects.toThrow('None of the 10 newest Help authoring bundles on sandbox published v1.');
     });
 
+    it('reads real Name_number bundles by their metadata target, keeping numeric ordering and agent boundaries', async () => {
+      const { service, execSf, temporary } = reader({
+        Help_9: { target: 'Help.v9' },
+        Help_10: { target: 'Help.v9', content: 'latest source for version nine' },
+        Help_11: { target: 'Help.v8' },
+        Help_v12: { target: 'Help.v7' },
+        Help: { target: 'Help.v6' },
+        Help_Extra_99: { target: 'Help.v9' },
+        Other_99: { target: 'Help.v9' },
+      });
+      await expect(service.readVersion(org, 'Help', 9)).resolves.toEqual({ fullName: 'Help_10', content: 'latest source for version nine' });
+      expect(execSf.mock.calls[1]![0].filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual([
+        'AiAuthoringBundle:Help_v12', 'AiAuthoringBundle:Help_11', 'AiAuthoringBundle:Help_10', 'AiAuthoringBundle:Help_9', 'AiAuthoringBundle:Help',
+      ]);
+      expect(existsSync(temporary())).toBe(false);
+      await expect(service.readVersion(org, 'Help', 11)).rejects.toThrow('published v11');
+    });
+
+    it('preserves an agent whose own name ends in a number when finding its source candidates', async () => {
+      const { service, execSf } = reader({ Help_1: { target: 'Help_1.v3' }, Help_1_7: { target: 'Help_1.v3' }, Help_17: { target: 'Help_1.v3' } });
+      await expect(service.readVersion(org, 'Help_1', 3)).resolves.toEqual({ fullName: 'Help_1_7', content: 'Help_1_7 source' });
+      expect(execSf.mock.calls[1]![0].filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual(['AiAuthoringBundle:Help_1_7', 'AiAuthoringBundle:Help_1']);
+    });
+
     it.each([
       ['symlink', { Help_v1: { target: 'Help.v1' } }, (root: string) => symlinkSync(tmpdir(), join(root, 'escape')), 'symbolic link'],
       ['too-many', { Help_v1: { target: 'Help.v1' } }, (root: string) => { for (let index = 0; index < 1001; index++) writeFileSync(join(root, `${index}.txt`), ''); }, 'too many files'],

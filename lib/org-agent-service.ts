@@ -153,7 +153,19 @@ export class OrgAgentService {
     try {
       temporary = mkdtempSync(join(tmpdir(), 'zcc-sf-version-'));
       const listed = cliResult(await this.deps.execSf(['org', 'list', 'metadata', '--metadata-type', 'AiAuthoringBundle', '--target-org', org.alias, '--json'], { timeoutMs: 30_000, signal }));
-      const candidates = (parseAgentCatalog(listed).agents.find(agent => agent.name === apiName)?.versions ?? [])
+      // Real orgs also name authoring bundles Name_42. That suffix is ambiguous
+      // in the global catalogue (an agent may itself end in _42), but this read
+      // already knows the exact BotDefinition name. Use it only to find a
+      // bounded set of candidate bundles; <target> remains the version identity.
+      const suffix = new RegExp(`^${apiName}(?:_v|_|\\.v|#)([1-9][0-9]*)$`);
+      const candidates = parseAgentCatalog(listed).agents.flatMap(agent => agent.versions)
+        .flatMap(version => {
+          if (version.fullName === apiName) return [{ ...version, version: 0 }];
+          const match = suffix.exec(version.fullName);
+          const number = match ? Number(match[1]) : NaN;
+          return Number.isSafeInteger(number) ? [{ ...version, version: number }] : [];
+        })
+        .sort((a, b) => b.version - a.version)
         .slice(0, VERSION_CANDIDATES)
         .map(version => version.fullName);
       const older = 'Versions built before the new Agentforce Builder have no Agent Script.';
