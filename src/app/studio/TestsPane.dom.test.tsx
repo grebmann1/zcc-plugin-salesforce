@@ -1,4 +1,6 @@
 /** @vitest-environment happy-dom */
+import { findPicklistOption } from '../../test/picklist.js';
+import { choosePicklistValue } from '../../test/picklist.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { starterScenarios } from '../../../lib/scenario-library-contract.js';
@@ -66,7 +68,12 @@ function setup(overrides: Partial<TestsPaneProps> = {}, handlers: Record<string,
   const view = render(<TestsPane {...props} />);
   return { call, requestApproval, props, view, table };
 }
-const button = (name: RegExp | string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+const button = (name: RegExp | string) => {
+  const direct = screen.queryByRole('button', { name });
+  if (direct) return direct as HTMLButtonElement;
+  if (!screen.queryByRole('menu', { name: 'More test actions' })) fireEvent.click(screen.getByRole('button', { name: 'More test actions' }));
+  return screen.getByRole('menuitem', { name }) as HTMLButtonElement;
+};
 const calls = (call: ReturnType<typeof setup>['call'], method: string) => call.mock.calls.filter(([, m, args]) => method === 'studio.suites.run' ? m === 'studio.suites.start' && !(args as Record<string, unknown>).compare : method === 'studio.suites.compare' ? m === 'studio.suites.start' && (args as Record<string, unknown>).compare === true : m === method).map(([, , args]) => args as Record<string, unknown>);
 
 it('puts test guidance behind a header icon instead of using case inspector space', async () => {
@@ -86,8 +93,8 @@ it('saves a reused preset on one case with the suite revision and preserves all 
   const { call } = setup({}, { 'studio.suites.save': args => ({ ok: true, suite: suite({ cases: args.cases as ScenarioCase[], sha256: 'sha-2' } as any) }) });
   await screen.findByTestId('tests-row-refund'); fireEvent.click(button('Details for Refund'));
   fireEvent.click(screen.getByRole('tab', { name: 'Variables' }));
-  await screen.findByRole('option', { name: 'Customer · revision 1' });
-  fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'customer' } });
+  await findPicklistOption(screen.getByLabelText('Variable preset'), 'Customer · revision 1');
+  choosePicklistValue(screen.getByLabelText('Variable preset'), 'customer');
   fireEvent.click(button('Save case variables')); await screen.findByText(/Starting variables saved/);
   expect(calls(call, 'studio.suites.save')).toEqual([{ projectId: 'p1', agentPath: PATH, expectedSha256: 'sha-1', cases: [
     { ...suite().cases[0], contextVariables: [{ name: 'verified', type: 'Boolean', value: false }] }, suite().cases[1],
@@ -103,10 +110,10 @@ it.each(['conflict', 'missing-response', 'missing-revision'])('keeps case variab
     'studio.suites.save': () => failure === 'conflict' ? { ok: false, error: 'Suite changed on disk' } : { ok: true },
   });
   await screen.findByTestId('tests-row-refund'); fireEvent.click(button('Details for Refund'));
-  fireEvent.click(screen.getByRole('tab', { name: 'Variables' })); await screen.findByRole('option', { name: 'Customer · revision 1' });
-  fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'customer' } }); fireEvent.click(button('Save case variables'));
+  fireEvent.click(screen.getByRole('tab', { name: 'Variables' })); await findPicklistOption(screen.getByLabelText('Variable preset'), 'Customer · revision 1');
+  choosePicklistValue(screen.getByLabelText('Variable preset'), 'customer'); fireEvent.click(button('Save case variables'));
   await screen.findByText(failure === 'conflict' ? 'Suite changed on disk' : failure === 'missing-revision' ? 'Reload test cases before saving variable changes.' : 'The case variables could not be saved.');
-  expect((screen.getByLabelText('verified value') as HTMLSelectElement).value).toBe('false');
+  expect(screen.getByLabelText('verified value').textContent).toBe('False');
   expect(calls(call, 'studio.suites.save')).toHaveLength(failure === 'missing-revision' ? 0 : 1);
 });
 
@@ -543,7 +550,6 @@ it('keeps edited simulation scenarios and the selected result when returning fro
   fireEvent.click(button('Batch simulations'));
   await screen.findByText('Recorded refund');
   fireEvent.click(button(/^Batch setup/));
-  fireEvent.click(screen.getByText('Adjust for this batch'));
   fireEvent.click(button('Add scenario'));
   fireEvent.change(screen.getByLabelText('Scenario 4 name'), { target: { value: 'My unsaved scenario' } });
   fireEvent.change(screen.getByLabelText('Scenario 4 goal'), { target: { value: 'Keep this customer goal' } });
@@ -653,9 +659,9 @@ it('compares immutable source snapshots and marks the result stale after editing
   const { call, props, view } = setup({}, { 'studio.suites.compare': () => ({ ok: true, comparison: { referenceHash: 'aaa', candidateHash: 'bbb', suiteHash: 'ccc', at: 1, reference: { refund: ref }, candidate: { refund: candidate } } }) });
   await screen.findByTestId('tests-cases-workbench');
   fireEvent.click(button('Compare saved vs draft'));
-  expect(await screen.findByText('Saved source → Editor draft: 0/1 → 1/1 pass')).toBeTruthy();
-  expect(screen.getByText('1 improved · 0 regressed · 0 unclear')).toBeTruthy();
-  fireEvent.click(screen.getByText('Refund: fail → pass'));
+  expect(await screen.findByLabelText('Saved source → Editor draft: 0/1 → 1/1 pass')).toBeTruthy();
+  expect(screen.getByLabelText('1 improved · 0 regressed · 0 unclear')).toBeTruthy();
+  fireEvent.click(screen.getByLabelText('Refund: fail → pass'));
   expect(screen.getByText('No refund')).toBeTruthy(); expect(screen.getByText('Refund offered')).toBeTruthy();
   expect(calls(call, 'studio.suites.compare')[0]).toMatchObject({ agentPath: PATH, source: props.source, startedByUser: true });
   expect(calls(call, 'studio.suites.run')).toHaveLength(0);
@@ -761,4 +767,94 @@ it('explains that shared scenarios require an open agent file', () => {
   setup({ path: null }); fireEvent.click(button('Scenarios'));
   expect(screen.getByText('Open an agent file to manage shared scenarios.')).toBeTruthy();
   expect(screen.queryByTestId('studio-scenarios')).toBeNull();
+});
+
+
+it('keeps the catalogue search and selection when returning from a dedicated comparison workspace', async () => {
+  const comparison = { referenceHash: 'a', candidateHash: 'b', suiteHash: 's', at: 1, reference: { late: { outcome: 'fail', runId: 'r', at: 1 } }, candidate: { late: { outcome: 'pass', runId: 'r2', at: 1 } } };
+  const { call, props, view } = setup({}, { 'studio.suites.compare': () => ({ ok: true, comparison }) });
+  await screen.findByTestId('tests-cases-workbench');
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search cases' }), { target: { value: 'Late' } });
+  fireEvent.click(button('Details for Late order'));
+  const catalogue = screen.getByTestId('tests-cases-workbench');
+  expect(screen.queryByRole('button', { name: 'Compare saved vs draft' })).toBeNull();
+  fireEvent.click(button('Compare saved vs draft'));
+  await screen.findByTestId('tests-comparison-workspace');
+  expect(screen.queryByRole('searchbox', { name: 'Search cases' })).toBeNull();
+  await waitFor(() => expect(document.activeElement?.textContent).toBe('Source comparison results'));
+  fireEvent.click(button('← Test cases'));
+  expect(screen.getByTestId('tests-cases-workbench')).toBe(catalogue);
+  expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Late');
+  expect(button('Details for Late order').getAttribute('aria-pressed')).toBe('true');
+  await waitFor(() => expect(document.activeElement).toBe(button('Run all in Simulate')));
+  fireEvent.click(button('View last comparison'));
+  await screen.findByTestId('tests-comparison-workspace');
+  expect(calls(call, 'studio.suites.compare')).toHaveLength(1);
+  fireEvent.click(button('Run comparison again'));
+  await waitFor(() => expect(calls(call, 'studio.suites.compare')).toHaveLength(2));
+  view.rerender(<TestsPane {...props} path="force-app/Other.agent" />);
+  await screen.findByTestId('tests-cases-workbench');
+  expect(screen.queryByTestId('tests-comparison-workspace')).toBeNull();
+});
+
+it('gives case creation the workspace and restores the existing case catalogue on cancel', async () => {
+  setup();
+  await screen.findByTestId('tests-cases-workbench');
+  const catalogue = screen.getByTestId('tests-cases-workbench');
+  fireEvent.click(button('+ Case'));
+  expect(screen.getByRole('form', { name: 'New test case' }).closest('.sf-tp-case-editor')).toBeTruthy();
+  expect(screen.queryByRole('searchbox', { name: 'Search cases' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Name', exact: true }));
+  fireEvent.click(button('← Test cases'));
+  expect(screen.getByTestId('tests-cases-workbench')).toBe(catalogue);
+  expect(document.activeElement).toBe(button('Run all in Simulate'));
+  fireEvent.click(button('+ Case'));
+  const cancel = button('Cancel'); cancel.focus(); fireEvent.click(cancel);
+  expect(document.activeElement).toBe(button('Run all in Simulate'));
+});
+
+it('returns keyboard focus to the catalogue after creating a case', async () => {
+  setup({}, { 'studio.suites.save': args => ({ ok: true, suite: suite({ cases: args.cases as ScenarioCase[] }) }) });
+  await screen.findByTestId('tests-cases-workbench');
+  fireEvent.click(button('+ Case'));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name', exact: true }), { target: { value: 'Keyboard case' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Utterances, one per line' }), { target: { value: 'Hello' } });
+  button('Add case').focus(); fireEvent.submit(screen.getByRole('form', { name: 'New test case' }));
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'New test case' })).toBeNull());
+  expect([button('Run all in Simulate'), screen.getByRole('searchbox', { name: 'Search cases' })]).toContain(document.activeElement);
+});
+
+it('restores focus to case search when the run action is unavailable', async () => {
+  setup({ source: '' });
+  await screen.findByTestId('tests-cases-workbench');
+  fireEvent.click(button('+ Case'));
+  const cancel = button('Cancel'); cancel.focus(); fireEvent.click(cancel);
+  expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search cases' }));
+});
+
+
+it('labels comparison evidence with the server-executed case definitions after an external edit', async () => {
+  const executed = suite(); executed.cases[0].name = 'Updated refund policy';
+  const result = { outcome: 'pass', runId: 'r', at: 1 };
+  setup({}, { 'studio.suites.compare': () => ({ ok: true, suite: executed, comparison: { referenceHash: 'a', candidateHash: 'b', suiteHash: 's', at: 1, reference: { refund: result }, candidate: { refund: result } } }) });
+  await screen.findByTestId('tests-cases-workbench');
+  fireEvent.click(button('Compare saved vs draft'));
+  await screen.findByLabelText('Updated refund policy: pass → pass');
+});
+
+it('uses the current test view count and includes needs-review cases in the summary and filters', async () => {
+  const saved = suite({ lastResults: { refund: { outcome: 'pass', runId: 'r', at: 1 }, late: { outcome: 'inconclusive', runId: 'r', at: 1 } } });
+  setup({}, { 'studio.suites.list': () => ({ ok: true, suites: [saved] }) });
+  await screen.findByTestId('tests-cases-workbench');
+  const header = screen.getByTestId('tests-header');
+  expect(header.textContent).toContain('2 saved test cases');
+  expect(screen.getByTestId('tests-summary').textContent).toContain('1 need review');
+  fireEvent.click(button('Needs review 1'));
+  expect(screen.queryByTestId('tests-row-refund')).toBeNull();
+  expect(screen.getByTestId('tests-row-late')).toBeTruthy();
+  fireEvent.click(within(header).getByRole('button', { name: 'Batch simulations', exact: true }));
+  expect(header.textContent).toContain('shared scenarios · this agent');
+  expect(header.textContent).not.toContain(saved.path);
+  fireEvent.click(button('Run saved test cases…'));
+  expect(header.textContent).toContain(saved.path);
 });

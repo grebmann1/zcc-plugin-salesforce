@@ -1,7 +1,8 @@
-import { clearStudioRunWorkspaces, getStudioRun, studioRunKey, writeWorkspaceValue } from './studio/run-workspaces.js';
 /**
  * @vitest-environment happy-dom
  */
+import { choosePicklistValue } from '../test/picklist.js';
+import { clearStudioRunWorkspaces, getStudioRun, studioRunKey, writeWorkspaceValue } from './studio/run-workspaces.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createElement } from 'react';
@@ -131,7 +132,7 @@ describe('AgentforcePreviewPanel', () => {
     expect(rpc).toHaveBeenCalledWith('salesforce', 'agentFiles.list', { projectId: 'proj-1', purpose: 'preview' });
     expect(el.querySelector('[data-testid="salesforce-agentforce-preview"]')).toBeTruthy();
     expect(el.querySelector('[data-testid="salesforce-preview-org"]')?.textContent).toContain('dev');
-    expect((el.querySelector('[aria-label="Agentforce preview mode"]') as HTMLSelectElement).value).toBe('simulate');
+    expect(el.querySelector('[aria-label="Agentforce preview mode"]')?.textContent).toBe('Simulate');
     await act(async () => {
       (el.querySelector('[data-testid="salesforce-agentforce-preview-start"]') as HTMLButtonElement).click();
     });
@@ -211,8 +212,7 @@ describe('AgentforcePreviewPanel', () => {
       const input = published.querySelector('[aria-label="Variable name"]') as HTMLInputElement;
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'verified');
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      const select = published.querySelector('[aria-label="Variable type"]') as HTMLSelectElement;
-      select.value = 'Boolean'; select.dispatchEvent(new Event('change', { bubbles: true }));
+      choosePicklistValue(published.querySelector<HTMLElement>('[aria-label="Variable type"]')!, 'Boolean');
     });
     await click(publishedButton('Add'));
     await click(published.querySelector('[aria-label="Set verified"]'));
@@ -227,9 +227,7 @@ describe('AgentforcePreviewPanel', () => {
     const el = await mount();
     const mode = el.querySelector('[aria-label="Agentforce preview mode"]') as HTMLSelectElement;
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-      setter?.call(mode, 'live');
-      mode.dispatchEvent(new Event('change', { bubbles: true }));
+      choosePicklistValue(mode, 'live');
     });
     expect(el.textContent).toContain('Live Test runs real actions on dev (sandbox)');
     await act(async () => {

@@ -165,6 +165,10 @@ export default function App() {
         setTheme(message.theme);
         return;
       }
+      if (message.type === 'setEditorOptions') {
+        editorRef.current?.updateOptions({ lineNumbers: message.lines ? 'on' : 'off', wordWrap: message.wrap ? 'on' : 'off' });
+        return;
+      }
       if (message.type === 'proposeEdit') {
         layerRef.current?.setProposal(message);
         return;

@@ -5,6 +5,8 @@ import { GENERATED_SPEC_MARKER } from '../lib/eval-spec.js';
 import type { FixLoop } from '../lib/fix-loop.js';
 import { STUDIO_RPC } from '../lib/studio-contract.js';
 import type { TurnTrace } from '../lib/studio-contract.js';
+import { emptyBuilderResources, type BuilderScorer } from '../lib/studio-builder-contract.js';
+import { builderResourcesKey } from '../lib/studio-builder.js';
 
 const ROOT = '/proj';
 function fsFake(initial: Record<string, string> = {}, links: Record<string, string> = {}) {
@@ -39,6 +41,221 @@ function store(opts: { files?: Record<string, string>; links?: Record<string, st
   });
   return { ...fake, kv, changed, lab, suites };
 }
+
+describe('scenario scorer snapshots', () => {
+  const path = 'tests/Scored.scenario.json';
+  const input = { path, source: 'config: x', engine: 'preview' as const };
+  const policy: BuilderScorer = { id: 'policy', name: 'Refund policy', kind: 'contains', value: 'refund' };
+  const resources = (scorers: BuilderScorer[] = [policy], revision = 4) => ({ ...emptyBuilderResources(), revision, scorers: scorers.map(rule => ({ ...rule })) });
+  const fixture = (cases = [caseA]) => store({ files: { [`${ROOT}/${path}`]: JSON.stringify({ cases }) } });
+
+  it('applies passing pinned rules to saved outcomes and preserves the original built-in verdict', async () => {
+    const s = fixture(); s.kv.set(builderResourcesKey('p1'), resources());
+    const run = await s.suites.run(input);
+    const evaluation = { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass' }] };
+    expect(run.results.refund).toMatchObject({ outcome: 'pass', deterministic: 'pass', scorerEvaluation: evaluation });
+    expect(run.details[0]).toMatchObject({ scorerEvaluation: evaluation });
+    expect((await s.suites.list())[0].lastResults?.refund.scorerEvaluation).toEqual(evaluation);
+  });
+  it('fails a built-in pass on a custom failure and includes a readable note', async () => {
+    const s = fixture();
+    s.kv.set(builderResourcesKey('p1'), resources([{ ...policy, kind: 'excludes' }]));
+    const result = (await s.suites.run(input)).results.refund;
+    expect(result).toMatchObject({ outcome: 'fail', deterministic: 'pass', scorerEvaluation: { baseOutcome: 'pass', checks: [{ outcome: 'fail' }] } });
+    expect(result.notes?.[0]).toContain('1 failed (Refund policy)');
+  });
+  it('never upgrades failed or inconclusive built-in outcomes and missing evidence downgrades a pass', async () => {
+    const s = fixture([{ ...caseA, id: 'failed', expect: { contains: ['missing text'] } }, { ...caseA, id: 'unknown', expect: {} }, { ...caseA, id: 'passed' }]);
+    s.kv.set(builderResourcesKey('p1'), resources([policy, { id: 'speed', name: 'Response time', kind: 'latency', value: '2000' }]));
+    const results = (await s.suites.run(input)).results;
+    expect(results.failed).toMatchObject({ outcome: 'fail', scorerEvaluation: { baseOutcome: 'fail' } });
+    expect(results.unknown).toMatchObject({ outcome: 'inconclusive', scorerEvaluation: { baseOutcome: 'inconclusive' } });
+    expect(results.passed).toMatchObject({ outcome: 'inconclusive', scorerEvaluation: { baseOutcome: 'pass', checks: [{ outcome: 'pass' }, { outcome: 'inconclusive' }] } });
+    expect(results.passed.notes?.[0]).toContain('1 inconclusive (Response time)');
+    s.kv.set(builderResourcesKey('p1'), resources([policy], 5));
+    expect((await s.suites.run({ ...input, caseIds: ['unknown'] })).results.unknown.outcome).toBe('inconclusive');
+  });
+  it('preserves failed assertion evidence when custom checks pass, including unsaved proposal runs', async () => {
+    const s = fixture([{ ...caseA, expect: { ...caseA.expect, maxLatencyMs: 100 } }]);
+    s.kv.set(builderResourcesKey('p1'), resources([policy, { id: 'speed', name: 'Response time', kind: 'latency', value: '2000' }]));
+    s.lab.send.mockResolvedValue({ turns: [{ role: 'user', text: 'q' }, { role: 'agent', text: 'refund', latencyMs: 1000, planId: 'p' }] } as never);
+    const run = await s.suites.run({ ...input, store: false });
+    expect(run.results.refund).toMatchObject({ outcome: 'fail', deterministic: 'fail', latencyMs: 1000, assertions: [{ outcome: 'fail' }], scorerEvaluation: { baseOutcome: 'fail', checks: [{ outcome: 'pass' }, { outcome: 'pass' }] } });
+    expect((await s.suites.list())[0]).not.toHaveProperty('lastResults');
+  });
+  it('pins independent rule values once for all cases and leaves saved history unchanged after edits or deletion', async () => {
+    const s = fixture([caseA, { ...caseA, id: 'second' }]);
+    const initial = resources(); s.kv.set(builderResourcesKey('p1'), initial);
+    const originalSend = s.lab.send.getMockImplementation()!;
+    s.lab.send.mockImplementation((async (...args: []) => {
+      initial.scorers[0].value = 'changed in memory'; initial.scorers[0].name = 'Renamed';
+      s.kv.set(builderResourcesKey('p1'), resources([{ ...policy, value: 'missing' }], 5));
+      return originalSend(...args);
+    }) as never);
+    const run = await s.suites.run(input);
+    for (const result of Object.values(run.results)) expect(result).toMatchObject({ outcome: 'pass', scorerEvaluation: { revision: 4, checks: [{ ...policy, outcome: 'pass' }] } });
+    s.kv.set(builderResourcesKey('p1'), resources([], 6));
+    expect((await s.suites.list())[0].lastResults).toEqual(run.results);
+    expect((await s.suites.run(input)).results.refund).not.toHaveProperty('scorerEvaluation');
+  });
+  it('uses the same snapshot for both comparison sources without overwriting the saved suite result', async () => {
+    const s = fixture(); s.kv.set(builderResourcesKey('p1'), resources());
+    const saved = (await s.suites.run(input)).results;
+    const originalSend = s.lab.send.getMockImplementation()!;
+    s.lab.send.mockImplementation((async (...args: []) => {
+      s.kv.set(builderResourcesKey('p1'), resources([{ ...policy, value: 'different' }], 9));
+      return originalSend(...args);
+    }) as never);
+    const run = await s.suites.run({ ...input, referenceSource: 'saved source' });
+    expect(run.comparison?.reference.refund.scorerEvaluation).toEqual(saved.refund.scorerEvaluation);
+    expect(run.comparison?.candidate.refund.scorerEvaluation).toEqual(saved.refund.scorerEvaluation);
+    expect((await s.suites.list())[0].lastResults).toEqual(saved);
+  });
+  it('scores the full final response before evidence is clipped for storage', async () => {
+    const s = fixture(); s.kv.set(builderResourcesKey('p1'), resources());
+    s.lab.send.mockResolvedValue({ turns: [{ role: 'user', text: 'q' }, { role: 'agent', text: `${'x'.repeat(5000)} refund`, planId: 'p' }] });
+    const result = (await s.suites.run(input)).results.refund;
+    expect(result).toMatchObject({ outcome: 'pass', replyTruncated: true, conversationTruncated: true, scorerEvaluation: { checks: [{ outcome: 'pass' }] } });
+    expect(result.reply).not.toContain('refund');
+    expect(result.conversation?.at(-1)?.message).not.toContain('refund');
+  });
+  it('records setup and incomplete runtime attempts as inconclusive checks', async () => {
+    const s = fixture([{ ...caseA, id: 'blocked', prerequisites: ['Prepare account'] }, { ...caseA, id: 'error' }]);
+    s.kv.set(builderResourcesKey('p1'), resources());
+    s.lab.send.mockRejectedValue(Error('Connection lost'));
+    const results = (await s.suites.run(input)).results;
+    expect(results.blocked).toMatchObject({ setupBlocked: true, outcome: 'inconclusive', scorerEvaluation: { checks: [{ outcome: 'inconclusive' }] } });
+    expect(results.error).toMatchObject({ outcome: 'inconclusive', scorerEvaluation: { checks: [{ outcome: 'inconclusive' }] } });
+    expect(results.error.notes).toContain('Connection lost');
+  });
+  it('does not record a cancelled response as a passing custom check', async () => {
+    const s = fixture(); s.kv.set(builderResourcesKey('p1'), resources());
+    const controller = new AbortController();
+    s.lab.send.mockImplementation((async () => {
+      controller.abort();
+      return { turns: [{ role: 'user', text: 'q' }, { role: 'agent', text: 'refund', planId: 'p' }] };
+    }) as never);
+    await expect(s.suites.run({ ...input, signal: controller.signal })).rejects.toThrow();
+    expect((await s.suites.list())[0].lastResults?.refund).toMatchObject({ stopped: true, scorerEvaluation: { checks: [{ outcome: 'inconclusive' }] } });
+  });
+  it('normalizes a passing verdict to inconclusive when Stop arrives during trace collection', async () => {
+    const s = fixture(); s.kv.set(builderResourcesKey('p1'), resources());
+    const controller = new AbortController();
+    s.lab.trace.mockImplementation(async () => {
+      controller.abort();
+      return { runId: 'r', turn: 1, available: true, steps: [] };
+    });
+    await expect(s.suites.run({ ...input, signal: controller.signal })).rejects.toThrow();
+    expect((await s.suites.list())[0].lastResults?.refund).toMatchObject({ outcome: 'inconclusive', stopped: true, deterministic: 'pass', scorerEvaluation: { baseOutcome: 'inconclusive', checks: [{ outcome: 'inconclusive' }] } });
+  });
+  it('refuses malformed rule storage before opening any sessions and releases the run lock', async () => {
+    const s = fixture(); s.kv.set(builderResourcesKey('p1'), resources([{ ...policy, kind: 'javascript' as never }]));
+    await expect(s.suites.run(input)).rejects.toThrow('Invalid scorer rule');
+    expect(s.lab.start).not.toHaveBeenCalled();
+    s.kv.delete(builderResourcesKey('p1'));
+    expect((await s.suites.run(input)).results.refund).not.toHaveProperty('scorerEvaluation');
+  });
+  it('bounds repeated scorer provenance before model calls and permits a smaller selected case set', async () => {
+    const cases = Array.from({ length: 50 }, (_, index) => ({ ...caseA, id: `c${index}` }));
+    const s = fixture(cases);
+    s.kv.set(builderResourcesKey('p1'), resources(Array.from({ length: 20 }, (_, index) => ({ ...policy, id: `r${index}`, value: 'x'.repeat(2000) }))));
+    await expect(s.suites.run(input)).rejects.toThrow('Run fewer cases');
+    await expect(s.suites.run({ ...input, referenceSource: 'saved' })).rejects.toThrow('Run fewer cases');
+    expect(s.lab.start).not.toHaveBeenCalled();
+    expect((await s.suites.run({ ...input, caseIds: ['c0'] })).results.c0.scorerEvaluation?.checks).toHaveLength(20);
+  });
+  it('allows all fifty cases with ordinary short project rules for both comparison sources', async () => {
+    const s = fixture(Array.from({ length: 50 }, (_, index) => ({ ...caseA, id: `c${index}` })));
+    s.kv.set(builderResourcesKey('p1'), resources([policy, { id: 'safe', name: 'Safety', kind: 'excludes', value: 'secret' }]));
+    const run = await s.suites.run({ ...input, referenceSource: 'saved' });
+    expect(Object.keys(run.comparison!.reference)).toHaveLength(50);
+    expect(Object.keys(run.comparison!.candidate)).toHaveLength(50);
+    expect(JSON.stringify(run.comparison).length).toBeLessThan(750_000);
+    expect(s.lab.start).toHaveBeenCalledTimes(100);
+  });
+  it.each([{ current: [] }, { current: [policy] }])('budgets retained historical snapshots on partial runs even with current rules $current', async ({ current }) => {
+    const cases = Array.from({ length: 4 }, (_, index) => ({ ...caseA, id: `c${index}` }));
+    const s = fixture(cases);
+    const scorerEvaluation = { revision: 3, baseOutcome: 'pass', checks: Array.from({ length: 20 }, (_, index) => ({ ...policy, id: `r${index}`, value: 'x'.repeat(2000), outcome: 'fail' })) };
+    const historical = Object.fromEntries(cases.map(c => [c.id, { outcome: 'fail', runId: 'past', at: 1, scorerEvaluation }]));
+    s.kv.set('studio:suites:p1', { Scored: historical });
+    s.kv.set(builderResourcesKey('p1'), resources(current, 4));
+    await expect(s.suites.run({ ...input, caseIds: ['c0'] })).rejects.toThrow('rerun the complete suite with shorter rules');
+    expect(s.lab.start).not.toHaveBeenCalled();
+    expect((await s.suites.list())[0].lastResults).toEqual(historical);
+    const refreshed = (await s.suites.run(input)).results;
+    expect(Object.keys(refreshed)).toHaveLength(4);
+    if (current.length) expect(refreshed.c0.scorerEvaluation?.checks).toHaveLength(current.length);
+    else expect(refreshed.c0).not.toHaveProperty('scorerEvaluation');
+  });
+  it('counts the complete saved-suite scorer history once for proposals and excludes it from comparisons', async () => {
+    const cases = Array.from({ length: 6 }, (_, index) => ({ ...caseA, id: `c${index}` }));
+    const s = fixture(cases);
+    const scorerEvaluation = { revision: 3, baseOutcome: 'pass', checks: Array.from({ length: 20 }, (_, index) => ({ ...policy, id: `r${index}`, value: 'x'.repeat(2000), outcome: 'fail' })) };
+    const historical = Object.fromEntries(cases.map(c => [c.id, { outcome: 'fail', runId: 'past', at: 1, scorerEvaluation }]));
+    s.kv.set('studio:suites:p1', { Scored: historical });
+    s.kv.set(builderResourcesKey('p1'), resources([], 4));
+    await expect(s.suites.run({ ...input, store: false, caseIds: ['c0'] })).rejects.toThrow('Scorer evidence exceeds');
+    expect(s.lab.start).not.toHaveBeenCalled();
+    const compared = await s.suites.run({ ...input, referenceSource: 'saved' });
+    expect(Object.keys(compared.comparison!.reference)).toHaveLength(6);
+    expect(Object.keys(compared.comparison!.candidate)).toHaveLength(6);
+    expect((await s.suites.list())[0].lastResults).toEqual(historical);
+  });
+  it('does not double-count the saved-suite history in proposal replies', async () => {
+    const s = fixture();
+    const scorerEvaluation = { revision: 3, baseOutcome: 'pass', checks: Array.from({ length: 50 }, (_, index) => ({ ...policy, id: `r${index}`, value: 'x'.repeat(2000), outcome: 'fail' })) };
+    s.kv.set('studio:suites:p1', { Scored: { refund: { outcome: 'fail', runId: 'past', at: 1, scorerEvaluation } } });
+    s.kv.set(builderResourcesKey('p1'), resources([], 4));
+    const proposal = await s.suites.run({ ...input, store: false });
+    expect(proposal.suite.lastResults!.refund.scorerEvaluation?.checks).toHaveLength(50);
+    expect(proposal.results.refund).not.toHaveProperty('scorerEvaluation');
+    expect(s.lab.start).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    null, [], 'invalid', {},
+    { revision: 4, baseOutcome: 'pass', checks: null },
+    { revision: 4, baseOutcome: 'pass', checks: {} },
+    { revision: 4, baseOutcome: 'pass', checks: [] },
+    { revision: 4, baseOutcome: 'fake', checks: [{ ...policy, outcome: 'pass' }] },
+    { revision: 4, baseOutcome: { toString: 'pass' }, checks: [{ ...policy, outcome: 'pass' }] },
+    { revision: -1, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass' }] },
+    { revision: 1.5, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass' }] },
+    { revision: 4, baseOutcome: 'pass', checks: [null] },
+    { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'fake' }] },
+    { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: { toString: 'pass' } }] },
+    { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass', value: '' }] },
+    { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass', value: 'x'.repeat(2001) }] },
+    { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass', kind: 'javascript' }] },
+    { revision: 4, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'pass', kind: 'latency', value: 'NaN' }] },
+    { revision: 4, baseOutcome: 'pass', checks: Array(51).fill({ ...policy, outcome: 'pass' }) },
+    { revision: 4, baseOutcome: 'pass', checks: Array(2).fill({ ...policy, outcome: 'pass' }) },
+  ])('omits only corrupt scorer provenance without rewriting historical outcome %#', async scorerEvaluation => {
+    const s = fixture();
+    const stored = { outcome: 'fail', runId: 'past', at: 1, notes: ['Historical reason'], reply: 'refund', scorerEvaluation };
+    s.kv.set('studio:suites:p1', { Scored: { refund: stored } });
+    const restored = (await s.suites.list())[0].lastResults!.refund;
+    expect(restored).toEqual({ outcome: 'fail', runId: 'past', at: 1, notes: ['Historical reason'], reply: 'refund' });
+    expect(stored.scorerEvaluation).toBe(scorerEvaluation);
+    expect(s.lab.start).not.toHaveBeenCalled();
+  });
+  it('restores valid bounded snapshots independently without mutating storage or recomputing scores', async () => {
+    const s = fixture();
+    const scorerEvaluation = { revision: 27, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'fail' }, { id: 'speed', name: 'Maximum response time', kind: 'latency', value: '2500', outcome: 'inconclusive' }] };
+    const stored = { outcome: 'fail', runId: 'past', at: 1, notes: ['Original reason'], reply: 'refund', scorerEvaluation };
+    s.kv.set('studio:suites:p1', { Scored: { refund: stored } });
+    const restored = (await s.suites.list())[0].lastResults!.refund;
+    expect(restored).toEqual(stored);
+    restored.scorerEvaluation!.checks[0].name = 'Caller changed name';
+    restored.scorerEvaluation!.checks[0].value = 'Caller changed rule';
+    restored.scorerEvaluation!.checks[0].outcome = 'pass';
+    restored.scorerEvaluation!.revision = 99;
+    restored.notes!.push('Caller changed notes');
+    expect((await s.suites.list())[0].lastResults!.refund).toEqual(stored);
+    expect(scorerEvaluation).toEqual({ revision: 27, baseOutcome: 'pass', checks: [{ ...policy, outcome: 'fail' }, { id: 'speed', name: 'Maximum response time', kind: 'latency', value: '2500', outcome: 'inconclusive' }] });
+    expect(stored.notes).toEqual(['Original reason']);
+  });
+});
 
 describe('suite paths', () => {
   it('derives tests/<Agent>.scenario.json', () => {

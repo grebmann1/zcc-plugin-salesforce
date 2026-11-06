@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useSalesforceControl, controlText } from '../useSalesforceControl.js';
 import { useId, useState } from 'react';
 import type { OperationKind } from '../../../lib/workbench-contract.js';
@@ -57,9 +58,7 @@ export function DeploymentsPanel(props: SalesforcePanelProps) {
         <section className="sf-workspace-section" aria-labelledby={`${id}-components`}>
           <h3 id={`${id}-components`}><span className="sf-step">1</span> Choose components</h3>
           <div className="sf-control-row">
-            <select className="sf-select" aria-label="Metadata type" value={type} onChange={event => { setType(event.target.value); setBrowseType(null); setSearch(''); }}>
-              {Object.entries(METADATA_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+            <SalesforcePicklist triggerClassName="sf-select" ariaLabel="Metadata type" value={type} onChange={type => { setType(type); setBrowseType(null); setSearch(''); }} searchable={false} options={Object.entries(METADATA_TYPES).map(([value, label]) => ({ value, label }))} />
             <button className="sf-btn" type="button" disabled={metadata.busy} onClick={() => { if (browseType === type) void metadata.refresh(); else setBrowseType(type); }}>Browse org metadata</button>
           </div>
           {metadata.error && <ErrorState message={metadata.error} />}

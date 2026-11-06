@@ -80,6 +80,21 @@ afterEach(() => { nodes.splice(0).forEach(fn => fn()); vi.restoreAllMocks(); del
 
 const openReferences = async (root: ParentNode) => { const btn = [...root.querySelectorAll('.sf-as-explorer-foot button')][0]; expect(btn).toBeTruthy(); await act(async () => { fireEvent.click(btn!); }); };
 describe('AgentScriptPanel studio layout', () => {
+  it('routes both tool catalogs to one Preview and sanitizes persisted workspace views', async () => {
+    localStorage.setItem('salesforce:agent-tools:proj-1', JSON.stringify({ tabs: ['files', 'preview', 'test', 'graph', 'assistant'], active: 'preview', open: true }));
+    const el = await mount('force-app/bots/QC.agent');
+    await ready(el);
+    const iframe = el.querySelector('iframe');
+    await act(async () => { fireEvent.click(within(el.querySelector<HTMLElement>('.af-document-bar')!).getByRole('button', { name: 'Preview', exact: true })); });
+    expect(el.querySelectorAll('[data-testid="stub-preview"]')).toHaveLength(1);
+    await act(async () => { fireEvent.click(within(el).getByRole('button', { name: 'Add side panel tab', exact: true })); });
+    await act(async () => { fireEvent.click(within(el.querySelector<HTMLElement>('.af-tool-picker')!).getByRole('button', { name: /^Preview / })); });
+    expect(el.querySelectorAll('[data-testid="stub-preview"]')).toHaveLength(1);
+    expect(el.querySelector('iframe')).toBe(iframe);
+    await act(async () => { await exec('preview.send', { text: 'Hello', engine: 'simulate' }); });
+    expect(el.querySelectorAll('[data-testid="stub-preview"][data-command*="Hello"]')).toHaveLength(1);
+  });
+
   it('wires current-case failure counts, saved evidence and Open Tests into the footer', async () => {
     rpc.mockImplementation(async (plugin, method, args) => method === 'studio.suites.list' ? {
       ok: true, suites: [{ id: 'QC', path: 'tests/QC.scenario.json',

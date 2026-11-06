@@ -1,3 +1,4 @@
+import { selectPicklistValue, expectPicklistValue } from './fixtures/picklist.js';
 import { selectSalesforceSection } from './fixtures/salesforce-navigation.js';
 import { openThreadToolLauncher } from './fixtures/thread-tool-panel.js';
 import { createServer } from 'node:http';
@@ -224,9 +225,9 @@ test('AgentScript windows: independent panels and assistants, main tabs, resourc
       await captureElectronScreenshot(app.electron, help, testInfo.outputPath(`salesforce-launcher-${theme}-${width}.png`));
       await help.keyboard.press('Escape');
       if (width === 480 && theme === 'dark') {
-        // Connection entries live at the end of the org menu.
-        const orgMenu = tools.getByTestId('salesforce-org-picker');
-        await orgMenu.selectOption({ label: 'Connect org…' });
+        // At this width the org picker moves into the compact launcher.
+        await tools.getByRole('button', { name: 'Open Salesforce tools' }).click();
+        await tools.getByRole('dialog', { name: 'Salesforce tools' }).getByRole('button', { name: 'Connect org', exact: true }).click();
         await expect(help.getByRole('dialog', { name: 'Connect an org' })).toBeVisible();
         await help.getByRole('button', { name: 'Close connection dialog' }).click();
       }
@@ -344,7 +345,7 @@ test('Salesforce hub: project tools, recent agents, themes, narrow layout and St
   const hub = main.getByTestId('salesforce-orgs-panel');
   const openHub = async () => {
     await route(main, '/plugins/salesforce/orgs');
-    await expect(hub.getByRole('combobox', { name: 'Project', exact: true })).toHaveValue(projectId);
+    await expectPicklistValue(hub.getByRole('button', { name: 'Project', exact: true }), projectId);
   };
   // The plugin runtime can be running before its navigation contribution reaches the renderer.
   await main.getByTestId('nav-salesforce/orgs').click();
@@ -451,7 +452,7 @@ test('Salesforce Studio window: one owner, status card, cross-window org sync an
   await expect(mainTools.getByRole('tab', { name: 'Agentforce', exact: true })).toHaveCount(0);
   await expect(mainTools.getByRole('button', { name: 'Open Salesforce tools' })).toContainText('Overview');
   const mainOrg = mainTools.getByTestId('salesforce-org-picker');
-  await expect(mainOrg).toHaveValue('studio');
+  await expectPicklistValue(mainOrg, 'studio');
 
   // Focus and a second open reuse the same window.
   await card.getByRole('button', { name: 'Show window' }).click();
@@ -534,8 +535,8 @@ test('Salesforce Studio window: one owner, status card, cross-window org sync an
   // An org chosen in the Studio window reaches the main card without a reload.
   const picker = workbench.getByTestId('salesforce-org-picker');
   await expect(picker).toBeEnabled();
-  await picker.selectOption('second');
-  await expect(mainOrg).toHaveValue('second');
+  await selectPicklistValue(picker, 'second');
+  await expectPicklistValue(mainOrg, 'second');
   await expect(title).toHaveText('Agentforce · Help — dx · second');
 
   // Bring back from the card: the window closes and the tab mounts here again.

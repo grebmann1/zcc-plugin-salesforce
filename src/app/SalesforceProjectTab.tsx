@@ -259,6 +259,9 @@ export function SalesforceProjectTab(props: {
       <span>{alias || 'Choose an org'}</span><ChevronDown size={13} aria-hidden="true" />
     </button>
     {fetchButton}
+    <button type="button" className="icon-btn" aria-label="Connect org" onClick={connectOrg}>
+      <Plus size={15} aria-hidden="true" /><span className="sf-org-action-label">Connect org</span>
+    </button>
   </>;
   const workbench = (
     <>

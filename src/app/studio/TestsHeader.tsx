@@ -9,11 +9,13 @@ const VIEWS = [
 ] as const;
 
 /** The same two rows stay mounted while the test workspace changes underneath. */
-export function TestsHeader({ view, onViewChange, dirty, suite, casesOnly = false }: {
-  view: TestsView; onViewChange(view: TestsView): void; dirty: boolean;
-  suite?: { path: string; cases: readonly unknown[] } | null; casesOnly?: boolean;
+export function TestsHeader({ view, onViewChange, dirty, suite, scenarioCount = 0, casesOnly = false, title = 'Tests' }: {
+  title?: 'Tests' | 'Evals'; view: TestsView; onViewChange(view: TestsView): void; dirty: boolean;
+  suite?: { path: string; cases: readonly unknown[] } | null; scenarioCount?: number; casesOnly?: boolean;
 }) {
-  const label = suite ? `${suite.path} · ${suite.cases.length} case${suite.cases.length === 1 ? '' : 's'}` : '';
+  const label = view === 'cases' || casesOnly
+    ? suite ? `${suite.path} · ${suite.cases.length} saved test case${suite.cases.length === 1 ? '' : 's'}` : 'Saved test cases'
+    : view === 'org' ? 'Local suites and org tests' : `${scenarioCount} shared scenario${scenarioCount === 1 ? '' : 's'} · this agent`;
   return <header className="sf-tests-header" data-testid="tests-header">
     <style>{`
 .sf-tests-header { display:flex; flex-direction:column; gap:8px; flex:none; min-width:0; }
@@ -30,7 +32,7 @@ export function TestsHeader({ view, onViewChange, dirty, suite, casesOnly = fals
 .sf-tests-nav > .sf-tp-btn[aria-pressed="true"] { background:var(--sf-soft); color:var(--sf-text); }
 @media (prefers-reduced-motion:reduce) { .sf-tp .sf-tp-seg button { transition:none; } }
     `}</style>
-    <div className="sf-tp-head"><h2>Tests</h2><TestsHelp dirty={dirty} />{suite && <span className="sf-tp-sub" title={label}>{label}</span>}</div>
+    <div className="sf-tp-head"><h2>{title}</h2><TestsHelp dirty={dirty} /><span className="sf-tp-sub" title={label}>{label}</span></div>
     {!casesOnly && <div className="sf-tests-nav">
       <div className="sf-tp-seg" role="group" aria-label="Tests view">
         {VIEWS.map(([key, name, title]) => <button key={key} type="button" title={title} aria-pressed={view === key} onClick={() => onViewChange(key)}>{name}</button>)}

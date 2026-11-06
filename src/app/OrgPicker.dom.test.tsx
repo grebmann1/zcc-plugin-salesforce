@@ -1,6 +1,7 @@
 /**
  * @vitest-environment happy-dom
  */
+import { choosePicklistValue, choosePicklistLabel } from '../test/picklist.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createElement } from 'react';
@@ -125,12 +126,10 @@ describe('OrgPicker and Salesforce project tab', () => {
   it('shows a compact shared picker', async () => {
     const onSelect = vi.fn();
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', compact: true, onSelect }));
-    const select = el.querySelector('[data-testid="salesforce-org-picker"]') as HTMLSelectElement;
-    expect(select.value).toBe('dev');
-    expect(select.options).toHaveLength(2);
+    const select = el.querySelector('[data-testid="salesforce-org-picker"]') as HTMLButtonElement;
+    expect(select.textContent).toBe('dev (sandbox) · dev@example.com · CLI default');
     await act(async () => {
-      select.value = 'prod';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
+      choosePicklistValue(select, 'prod');
     });
     await act(async () => {
       await Promise.resolve();
@@ -139,16 +138,16 @@ describe('OrgPicker and Salesforce project tab', () => {
     expect(onSelect).toHaveBeenCalledWith('prod');
   });
 
-  it('keeps full org identities in the native toolbar picker while showing a concise label', async () => {
+  it('keeps full org identities in the themed toolbar picker while showing a concise label', async () => {
     const onSelect = vi.fn();
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', projectId: 'proj-1', compact: true, appearance: 'toolbar', onSelect }));
-    const picker = el.querySelector('select')!;
+    const picker = el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')!;
     const label = el.querySelector('.sf-org-switcher-label')!;
     expect(label.textContent).toBe('devsandbox');
     expect(label.getAttribute('aria-hidden')).toBe('true');
     expect(picker.title).toBe('dev (sandbox) · dev@example.com · CLI default');
-    expect(picker.options[1].textContent).toContain('prod@example.com');
-    await act(async () => { fireEvent.change(picker, { target: { value: 'prod' } }); });
+    await act(async () => { fireEvent.click(picker); }); expect(document.querySelector('[role=listbox]')?.textContent).toContain('prod@example.com'); await act(async () => { fireEvent.click(picker); });
+    await act(async () => { choosePicklistValue(picker, 'prod'); });
     expect(rpc).toHaveBeenCalledWith('salesforce', 'context.select', { projectId: 'proj-1', selectedAlias: 'prod', origin: CONTEXT_ORIGIN });
     expect(onSelect).toHaveBeenCalledWith('prod');
   });
@@ -157,27 +156,26 @@ describe('OrgPicker and Salesforce project tab', () => {
     rpc.mockResolvedValue({ ok: true, orgs: [{ ...orgs[0], alias: '' }], selectedAlias: 'dev@example.com' });
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', compact: true, appearance: 'toolbar', disabled: true }));
     expect(el.querySelector('.sf-org-switcher-name')?.textContent).toBe('dev@example.com');
-    expect(el.querySelector('select')?.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')?.disabled).toBe(true);
     expect(el.querySelector('.sf-org-switcher')?.getAttribute('data-disabled')).toBe('true');
   });
 
   it.each([null, 'missing'])('does not imply an org selection when the target is %s', async selectedAlias => {
     rpc.mockResolvedValue({ ok: true, orgs, selectedAlias });
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', projectId: 'proj-1', compact: true, appearance: 'toolbar' }));
-    const picker = el.querySelector('select')!;
-    expect(picker.value).toBe(selectedAlias ?? '');
-    expect(picker.selectedOptions[0].textContent).toBe(selectedAlias ? 'missing (unavailable)' : 'Choose an org');
+    const picker = el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')!;
+    expect(picker.textContent).toBe(selectedAlias ? 'missing (unavailable)' : 'Choose an org');
     expect(picker.title).toBe(selectedAlias ? 'missing (unavailable)' : 'Choose an org');
     expect(el.querySelector('.sf-org-switcher-name')?.textContent).toBe('Select org');
     expect(setSettings).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.change(picker, { target: { value: 'dev' } }); });
+    await act(async () => { choosePicklistValue(picker, 'dev'); });
     expect(rpc).toHaveBeenCalledWith('salesforce', 'context.select', { projectId: 'proj-1', selectedAlias: 'dev', origin: CONTEXT_ORIGIN });
   });
 
   it('matches a selected username to its aliased option', async () => {
     rpc.mockResolvedValue({ ok: true, orgs, selectedAlias: 'DEV@EXAMPLE.COM' });
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', compact: true, appearance: 'toolbar' }));
-    expect(el.querySelector('select')?.value).toBe('dev');
+    expect(el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')?.textContent).toContain('dev (sandbox)');
     expect(el.querySelector('.sf-org-switcher-name')?.textContent).toBe('dev');
   });
 
@@ -186,15 +184,15 @@ describe('OrgPicker and Salesforce project tab', () => {
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', compact: true, appearance: 'toolbar' }));
     expect(el.querySelector('.sf-org-switcher-name')?.textContent).toBe('Select org');
     expect(el.querySelector('.sf-org-switcher-kind')).toBeNull();
-    expect(el.querySelector('select')?.disabled).toBe(true);
-    expect(el.querySelector('select')?.title).toBe('No connected orgs');
+    expect(el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')?.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')?.title).toBe('No connected orgs');
   });
 
   it('keeps toolbar connection failures concise and exposes the explanation as its title', async () => {
     rpc.mockResolvedValue({ ok: false, error: 'Salesforce CLI was not found', orgs: [], selectedAlias: null });
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', compact: true, appearance: 'toolbar' }));
     expect(el.querySelector('.sf-org-switcher-name')?.textContent).toBe('Connection unavailable');
-    expect(el.querySelector('select')?.title).toBe('Salesforce CLI was not found');
+    expect(el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')?.title).toBe('Salesforce CLI was not found');
     expect(el.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -260,26 +258,25 @@ describe('OrgPicker and Salesforce project tab', () => {
   it('ends the toolbar org menu with connection entries', async () => {
     const onConnect = vi.fn(); const onManage = vi.fn(); const onSelect = vi.fn();
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', projectId: 'proj-1', compact: true, appearance: 'toolbar', onConnect, onManage, onSelect }));
-    const picker = el.querySelector<HTMLSelectElement>('[data-testid="salesforce-org-picker"]')!;
-    const group = picker.querySelector('optgroup[label="Connections"]')!;
-    expect([...group.querySelectorAll('option')].map(option => option.textContent)).toEqual(['Connect org…', 'Manage orgs…']);
-    await act(async () => { fireEvent.change(picker, { target: { value: group.querySelectorAll('option')[0].value } }); });
-    await act(async () => { fireEvent.change(picker, { target: { value: group.querySelectorAll('option')[1].value } }); });
+    const picker = el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')!;
+    await act(async () => { fireEvent.click(picker); });
+    expect([...document.querySelectorAll('.launch-model-picker-footer [role=option]')].map(option => option.textContent)).toEqual(['Connect org…', 'Manage orgs…']);
+    await act(async () => { fireEvent.click(picker); choosePicklistLabel(picker, 'Connect org…'); });
+    await act(async () => { choosePicklistLabel(picker, 'Manage orgs…'); });
     expect(onConnect).toHaveBeenCalledOnce();
     expect(onManage).toHaveBeenCalledOnce();
     expect(onSelect).not.toHaveBeenCalled();
     expect(rpc).not.toHaveBeenCalledWith('salesforce', 'context.select', expect.anything());
-    expect(picker.value).toBe('dev');
+    expect(picker.textContent).toContain('dev (sandbox)');
   });
 
   it('keeps connection entries reachable when no org is connected yet', async () => {
     rpc.mockImplementation(async (_pluginId, method) => method === 'orgs' ? { ok: true, orgs: [], selectedAlias: null } : { ok: true });
     const onConnect = vi.fn();
     const el = await mount(createElement(OrgPicker, { pluginId: 'salesforce', projectId: 'proj-1', compact: true, appearance: 'toolbar', onConnect }));
-    const picker = el.querySelector<HTMLSelectElement>('[data-testid="salesforce-org-picker"]')!;
+    const picker = el.querySelector<HTMLButtonElement>('[data-testid="salesforce-org-picker"]')!;
     expect(picker.disabled).toBe(false);
-    expect(picker.querySelectorAll('optgroup option')).toHaveLength(1);
-    await act(async () => { fireEvent.change(picker, { target: { value: picker.querySelector('optgroup option')!.getAttribute('value') } }); });
+    await act(async () => { choosePicklistLabel(picker, 'Connect org…'); });
     expect(onConnect).toHaveBeenCalledOnce();
   });
 

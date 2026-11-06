@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue, choosePicklistLabel } from '../test/picklist.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import {
@@ -217,7 +218,7 @@ describe("public Salesforce panels", () => {
     expect(screen.queryByLabelText('Select Ten')).toBeNull();
     fireEvent.click(screen.getByLabelText('Select One'));
     expect(screen.getByText('1 selected')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Metadata type'), { target: { value: 'Flow' } });
+    choosePicklistValue(screen.getByLabelText('Metadata type'), 'Flow');
     expect(screen.getByRole('button', { name: 'Remove ApexClass:One' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Browse org metadata' }));
     fireEvent.click(await screen.findByLabelText('Select Ten'));
@@ -381,7 +382,7 @@ describe("public Salesforce panels", () => {
     selectSection("Agentforce");
     expect(screen.getByText("Agentforce script")).toBeTruthy();
     expect(screen.getByTestId('script').getAttribute('data-org-picker')).toBe('false');
-    expect(screen.getAllByRole('combobox', { name: 'Salesforce org' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Salesforce org' })).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Close pane' }).closest('.sf-workbench-toolbar')).toBeTruthy();
     expect(document.querySelector('.sf-workbench>.sf-footer')).toBeNull();
     expect(screen.queryByRole("button", { name: "Open beside agent" })).toBeNull();
@@ -484,7 +485,7 @@ describe("public Salesforce panels", () => {
     });
     mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" />);
     await screen.findByText('Ready for your next change.');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Salesforce org' }), { target: { value: 'other' } });
+    choosePicklistValue(screen.getByRole('button', { name: 'Salesforce org' }), 'other');
     await waitFor(() => expect(finish).toBeTypeOf('function'));
     selectSection("Data");
     fireEvent.change(await screen.findByTestId('soql-editor'), { target: { value: 'SELECT Id, Name FROM Account LIMIT 1' } });
@@ -542,11 +543,23 @@ describe("public Salesforce panels", () => {
     // Manage orgs… in another section's org menu returns to Overview with the list open.
     selectSection("Apex & logs");
     const picker = screen.getByTestId("salesforce-org-picker") as HTMLSelectElement;
-    const manage = [...picker.querySelectorAll("option")].find(option => option.textContent === "Manage orgs…")!;
-    fireEvent.change(picker, { target: { value: manage.value } });
+    choosePicklistLabel(picker, "Manage orgs…");
     expect(await screen.findByText("Ready for your next change.")).toBeTruthy();
     expect(await screen.findByLabelText("Search connected orgs")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Hide orgs" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps Connect org available in the compact Studio launcher", async () => {
+    (globalThis as any).__ZCC_PLUGIN_RUNTIME__.useZccContext = () => ({ projectId: "p", threadId: "t", surface: "plugin-view" });
+    mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" />);
+    await screen.findByText("Agentforce script");
+    fireEvent.click(screen.getByRole("button", { name: "Open Salesforce tools" }));
+    const popup = screen.getByRole("dialog", { name: "Salesforce tools" });
+    fireEvent.click(within(popup).getByRole("button", { name: "Connect org", exact: true, hidden: true }));
+    expect(await screen.findByRole("dialog", { name: "Connect an org" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Salesforce tools" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close connection dialog" }));
+    expect(screen.queryByRole("dialog", { name: "Connect an org" })).toBeNull();
   });
 
   it("opens the org list under the toolbar in the Studio window, which has no Overview", async () => {
@@ -558,8 +571,7 @@ describe("public Salesforce panels", () => {
       expect(element.disabled).toBe(false);
       return element;
     });
-    const manage = [...picker.querySelectorAll("option")].find(option => option.textContent === "Manage orgs…")!;
-    fireEvent.change(picker, { target: { value: manage.value } });
+    choosePicklistLabel(picker, "Manage orgs…");
     expect(await screen.findByLabelText("Search connected orgs")).toBeTruthy();
     expect(screen.getByText("Agentforce script")).toBeTruthy();
   });
@@ -585,17 +597,9 @@ describe("public Salesforce panels", () => {
     const { rerender } = render(
       <OrgSwitcher orgs={orgs} value="removed-org" onChange={vi.fn()} />,
     );
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(
-      "removed-org",
-    );
-    expect(
-      screen.getByRole("option", {
-        name: "removed-org (not in connected list)",
-      }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Salesforce org" }).textContent).toBe("removed-org (not in connected list)");
     rerender(<OrgSwitcher orgs={orgs} value="" onChange={vi.fn()} />);
-    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("");
-    expect(screen.getByRole("option", { name: "Choose an org" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Salesforce org" }).textContent).toBe("Choose an org");
   });
 
   it("registers consumer-owned native slots and seeds a record using the explicit Salesforce client", async () => {

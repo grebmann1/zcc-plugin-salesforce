@@ -80,6 +80,7 @@ export type HostToPlayground =
   | { source: typeof PLAYGROUND_BRIDGE_SOURCE; type: 'setComments'; comments: StudioComment[] }
   | { source: typeof PLAYGROUND_BRIDGE_SOURCE; type: 'setHits'; lines: number[] }
   | { source: typeof PLAYGROUND_BRIDGE_SOURCE; type: 'setLayout'; compact: boolean }
+  | { source: typeof PLAYGROUND_BRIDGE_SOURCE; type: 'setEditorOptions'; lines: boolean; wrap: boolean }
   /**
    * Read-only follower mode (another Studio holds the edit lease). `content` is the holder's live text: shown without
    * touching this window's draft. Leaving read-only with `content` replaces the buffer as one undoable edit.
@@ -160,6 +161,7 @@ export function isHostToPlayground(value: unknown): value is HostToPlayground {
     (value.type === 'setComments' && Array.isArray(value.comments) && value.comments.length <= 500 && value.comments.every(isStudioComment)) ||
     (value.type === 'setHits' && Array.isArray(value.lines) && value.lines.length <= 1000 && value.lines.every(isPositive)) ||
     (value.type === 'setLayout' && typeof value.compact === 'boolean') ||
+    (value.type === 'setEditorOptions' && typeof value.lines === 'boolean' && typeof value.wrap === 'boolean') ||
     (value.type === 'setReadOnly' && typeof value.readOnly === 'boolean' && (value.content === undefined || (typeof value.content === 'string' && value.content.length <= AGENT_SOURCE_MAX)) &&
       (value.baseline === undefined ? value.baseSha === undefined : typeof value.baseline === 'string' && value.baseline.length <= AGENT_SOURCE_MAX && typeof value.baseSha === 'string' && /^[0-9a-f]{64}$/.test(value.baseSha)))
   );

@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue, findPicklistOption, picklistOption } from '../../test/picklist.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { SimulationsView, improvePrompt, type SimulationsViewProps } from './SimulationsView.js';
@@ -51,25 +52,25 @@ it('copies shared presets into individual scenarios and pins both scenario and b
     'agentPreview.presets.list': () => ({ ok: true, presets: [preset] }),
     'studio.simulations.start': () => ({ ok: false, error: 'Test stop' }),
   });
-  await within(screen.getByLabelText('Simulation context preset')).findByRole('option', { name: 'Customer · revision 1' });
+  await findPicklistOption(screen.getByLabelText('Simulation context preset'), 'Customer · revision 1');
   await waitFor(() => expect((screen.getByLabelText('Variable preset') as HTMLSelectElement).disabled).toBe(false));
-  fireEvent.change(screen.getByLabelText('Simulation context preset'), { target: { value: 'customer' } });
-  fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'customer' } });
+  choosePicklistValue(screen.getByLabelText('Simulation context preset'), 'customer');
+  choosePicklistValue(screen.getByLabelText('Variable preset'), 'customer');
   fireEvent.change(screen.getByLabelText('count value'), { target: { value: '2' } });
   fireEvent.click(button('Edit Missing details'));
   expect(screen.queryByLabelText('count value')).toBeNull();
   fireEvent.click(button('Edit Happy path'));
   preset = { ...preset, revision: 2, values: [{ name: 'count', type: 'Number', value: 9 }] };
   await act(async () => channels['salesforce.context-presets.changed']({ projectId: 'p1' }));
-  await within(screen.getByLabelText('Variable preset')).findByRole('option', { name: 'Customer · revision 2' });
+  await findPicklistOption(screen.getByLabelText('Variable preset'), 'Customer · revision 2');
   expect((screen.getByLabelText('count value') as HTMLInputElement).value).toBe('2');
-  expect(within(screen.getByLabelText('Simulation context preset')).getByRole('option', { name: 'Customer · copied values' })).toBeTruthy();
+  expect(picklistOption(screen.getByLabelText('Simulation context preset'), 'Customer · copied values')).toBeTruthy();
   fireEvent.click(button('Run 3 conversations')); await screen.findByText('Test stop');
   const sent = calls(call, 'studio.simulations.start')[0] as any;
   expect(sent.contextVariables).toEqual(original);
   expect(sent.scenarios[0].contextVariables).toEqual([original[0], { name: 'count', type: 'Number', value: 2 }]);
   expect(sent.scenarios[1].contextVariables).toBeUndefined();
-  fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'customer' } });
+  choosePicklistValue(screen.getByLabelText('Variable preset'), 'customer');
   expect((screen.getByLabelText('count value') as HTMLInputElement).value).toBe('9');
 });
 
@@ -100,7 +101,7 @@ it('shows applied lane variables and restores batch defaults plus scenario overr
   expect(screen.getByText('Starting variables · 2')).toBeTruthy();
   expect(screen.getByText('false')).toBeTruthy();
   fireEvent.click(button('Use scenarios from this batch'));
-  expect((screen.getByLabelText('verified value') as HTMLSelectElement).value).toBe('false');
+  expect(screen.getByLabelText('verified value').textContent).toBe('False');
   expect(screen.getByText(/1 variable inherited/)).toBeTruthy();
   fireEvent.click(button('Run 1 conversation')); await screen.findByText('Test stop');
   expect(calls(call, 'studio.simulations.start')[0]).toMatchObject({ contextVariables: done.contextVariables, scenarios: [{ name: 'Lane 1', ...done.lanes[0].scenario }] });
@@ -121,8 +122,8 @@ it('starts a batch of the selected presets on the editor source', async () => {
   await screen.findByText(/No simulations yet/);
   expect(screen.getByText(/including unsaved changes/)).toBeTruthy();
   fireEvent.click(screen.getByLabelText(LAB_SCENARIOS[0]!.name));
-  fireEvent.change(screen.getByLabelText('Repeats'), { target: { value: '2' } });
-  fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'rehearsal' } });
+  choosePicklistValue(screen.getByLabelText('Repeats'), '2');
+  choosePicklistValue(screen.getByLabelText('Engine'), 'rehearsal');
   expect(screen.getByText(/AI approximation/)).toBeTruthy();
   const lanes = (LAB_SCENARIOS.length - 1) * 2;
   fireEvent.click(button(`Run ${lanes} conversations`));
@@ -179,7 +180,7 @@ it('shows a finished batch, its lane detail and hands failures to the agent', as
   expect(prompt).toMatch(/Failing: Lane 2 #2, Lane 3\./);
   expect(prompt).toMatch(/Do not save, deploy, publish/);
 
-  fireEvent.change(screen.getByLabelText('Simulation batch'), { target: { value: 'b1' } });
+  choosePicklistValue(screen.getByLabelText('Simulation batch'), 'b1');
   await waitFor(() => expect(screen.getByLabelText('1 of 1 pass')).toBeTruthy());
   expect(calls(call, 'studio.simulations.get').at(-1)).toMatchObject({ batchId: 'b1' });
   expect(screen.queryByRole('button', { name: 'Ask assistant to investigate' })).toBeNull();
@@ -300,10 +301,10 @@ it('edits scenarios, adds/removes custom cases, validates and applies a typed co
     'studio.simulations.list': () => ({ ok: true, batches: [] }),
   });
   await screen.findByText(/No simulations yet/);
-  await within(screen.getByLabelText('Simulation context preset')).findByRole('option', { name: 'French customer · revision 2' });
+  await findPicklistOption(screen.getByLabelText('Simulation context preset'), 'French customer · revision 2');
   fireEvent.change(screen.getByLabelText('Scenario 1 name'), { target: { value: 'Return policy' } });
   fireEvent.change(screen.getByLabelText('Scenario 1 opening'), { target: { value: 'Can I return this?' } });
-  fireEvent.change(screen.getByLabelText('Simulation context preset'), { target: { value: 'fr' } });
+  choosePicklistValue(screen.getByLabelText('Simulation context preset'), 'fr');
   fireEvent.click(button('Add scenario'));
   fireEvent.click(button('Run 4 conversations'));
   expect((await screen.findByRole('alert')).textContent).toContain('Persona');
@@ -324,8 +325,8 @@ it('explains conversation limits before starting any work', async () => {
   await screen.findByText(/No simulations yet/);
   fireEvent.click(button('Add scenario'));
   fireEvent.click(button('Add scenario'));
-  fireEvent.change(screen.getByLabelText('Repeats'), { target: { value: '3' } });
-  expect(screen.getByRole('alert').textContent).toContain('at most 12');
+  choosePicklistValue(screen.getByLabelText('Repeats'), '3');
+  expect(screen.getByRole('alert').textContent).toContain('Maximum 12 per batch');
   expect(button('Run 15 conversations').disabled).toBe(true);
 });
 
@@ -373,13 +374,13 @@ it('keeps custom scenario identities distinct after deleting a middle scenario',
 
 it('refreshes presets and clears selected context when this project changes org', async () => {
   const { call } = setup({}, { 'agentPreview.presets.list': () => ({ ok: true, presets: [{ id: 'fr', name: 'French', revision: 1, values: [] }] }) });
-  await within(screen.getByLabelText('Simulation context preset')).findByRole('option', { name: 'French · revision 1' });
-  fireEvent.change(screen.getByLabelText('Simulation context preset'), { target: { value: 'fr' } });
+  await findPicklistOption(screen.getByLabelText('Simulation context preset'), 'French · revision 1');
+  choosePicklistValue(screen.getByLabelText('Simulation context preset'), 'fr');
   const before = calls(call, 'agentPreview.presets.list').length;
   await act(async () => { channels['context.changed']!({ projectId: 'other' }); });
   expect(calls(call, 'agentPreview.presets.list')).toHaveLength(before);
   await act(async () => { channels['context.changed']!({ projectId: 'p1' }); });
-  expect((screen.getByLabelText('Simulation context preset') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByLabelText('Simulation context preset').textContent).toBe('Agent defaults');
   expect(calls(call, 'agentPreview.presets.list')).toHaveLength(before + 1);
   await act(async () => { channels['salesforce.context-presets.changed']!({ projectId: 'p1' }); });
   expect(calls(call, 'agentPreview.presets.list')).toHaveLength(before + 2);
@@ -422,7 +423,7 @@ it('selects shared copies, preserves batch edits and pins their source revisions
   const { call, view, props: current } = setup({ scenarioLibrary: shared }, { 'studio.simulations.start': () => ({ ok: true, batch: batch('new', 'done', []) }) });
   await screen.findByRole('checkbox', { name: 'Happy path', exact: true });
   fireEvent.click(screen.getByRole('checkbox', { name: 'Missing details', exact: true })); fireEvent.click(screen.getByRole('checkbox', { name: 'Stay in scope', exact: true }));
-  fireEvent.click(screen.getByText('Adjust for this batch')); fireEvent.change(screen.getByLabelText('Scenario 1 goal'), { target: { value: 'Local batch goal' } });
+  fireEvent.change(screen.getByLabelText('Scenario 1 goal'), { target: { value: 'Local batch goal' } });
   view.rerender(<SimulationsView {...current} scenarioLibrary={{ ...shared, scenarios: rows.map(row => ({ ...row, revision: 2, goal: 'Shared update' })) }} />);
   expect((screen.getByLabelText('Scenario 1 goal') as HTMLInputElement).value).toBe('Local batch goal');
   fireEvent.click(screen.getByRole('button', { name: 'Run 1 conversation' }));
@@ -439,8 +440,8 @@ it('adds an explicitly selected library scenario and sends management back to th
   view.rerender(<SimulationsView {...current} scenarioLibrary={{ ...shared, selection: { scenario: extra, seq: 1 } }} />);
   await screen.findByRole('checkbox', { name: 'Custom shared', exact: true });
   fireEvent.click(screen.getByRole('button', { name: 'Manage scenarios' })); expect(shared.onManage).toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('Add shared scenario to batch'), { target: { value: rows[1].id } }); fireEvent.click(screen.getByRole('button', { name: 'Copy into batch' }));
-  fireEvent.click(screen.getByText('Adjust for this batch')); expect((screen.getByLabelText('Scenario 4 goal') as HTMLInputElement).value).toBe(rows[1].goal);
+  fireEvent.click(screen.getByRole('checkbox', { name: rows[1].name, exact: true })); fireEvent.click(screen.getByRole('checkbox', { name: rows[1].name, exact: true })); fireEvent.click(screen.getByRole('button', { name: 'Edit Missing details' }));
+  expect((screen.getByLabelText('Scenario 2 goal') as HTMLInputElement).value).toBe(rows[1].goal);
 });
 
 it('keeps an explicitly copied scenario visible when previous batch history arrives later', async () => {
@@ -454,8 +455,79 @@ it('keeps an explicitly copied scenario visible when previous batch history arri
   });
   await screen.findByRole('checkbox', { name: 'Happy path', exact: true });
   await act(async () => resolveHistory({ ok: true, batches: [batch('previous', 'done', [])] }));
-  expect(screen.getByRole('button', { name: 'Batch setup 3' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Batch setup 3 selected' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('checkbox', { name: 'Happy path', exact: true })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /Results/ }));
   expect(screen.getByRole('button', { name: /Results/ }).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('shows all 27 library scenarios, supports bulk selection and blocks oversized runs without truncating', async () => {
+  const { starterScenarios } = await import('../../../lib/scenario-library-contract.js');
+  const rows = Array.from({ length: 27 }, (_, index) => ({ ...starterScenarios()[0], id: `saved-${index}`, name: `Customer ${index + 1}` }));
+  const shared = { scenarios: rows, loading: false, error: '', reload: vi.fn(), save: vi.fn(), remove: vi.fn(), onManage: vi.fn() };
+  const { call } = setup({ scenarioLibrary: shared });
+  await screen.findByText('27 of 27 scenarios · 0 selected');
+  expect(screen.getAllByRole('checkbox')).toHaveLength(27);
+  expect(button('Run 0 conversations').disabled).toBe(true);
+  fireEvent.click(button('Select all'));
+  expect(screen.getAllByRole('checkbox').every(row => (row as HTMLInputElement).checked)).toBe(true);
+  expect(screen.getByRole('alert').textContent).toContain('27 selected × 1 repeat = 27 conversations. Maximum 12 per batch');
+  expect(button('Run 27 conversations').disabled).toBe(true);
+  expect(calls(call, 'studio.simulations.start')).toHaveLength(0);
+  fireEvent.click(button('Clear selection'));
+  expect(screen.queryByRole('alert')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Search scenarios'), { target: { value: 'Customer 27' } });
+  fireEvent.click(button('Select matching'));
+  expect(screen.getByText('1 of 27 scenarios · 1 selected')).toBeTruthy();
+  expect(button('Run 1 conversation').disabled).toBe(false);
+  fireEvent.change(screen.getByLabelText('Search scenarios'), { target: { value: 'Customer 2' } });
+  fireEvent.click(button('Select matching'));
+  expect(screen.getByText('9 of 27 scenarios · 9 selected')).toBeTruthy();
+  choosePicklistValue(screen.getByLabelText('Repeats'), '2');
+  expect(button('Run 18 conversations').disabled).toBe(true);
+  // Clearing works across the search filter, including hidden selections.
+  fireEvent.click(button('Clear selection'));
+  expect(screen.getByText('9 of 27 scenarios · 0 selected')).toBeTruthy();
+});
+
+it('discovers new shared scenarios while preserving selected snapshots and local edits', async () => {
+  const { starterScenarios } = await import('../../../lib/scenario-library-contract.js');
+  const rows = starterScenarios();
+  const shared = { scenarios: rows, loading: false, error: '', reload: vi.fn(), save: vi.fn(), remove: vi.fn(), onManage: vi.fn() };
+  const { call, props, view } = setup({ scenarioLibrary: shared }, { 'studio.simulations.start': () => ({ ok: false, error: 'Test stop' }) });
+  await screen.findByText('3 of 3 scenarios · 3 selected');
+  fireEvent.change(screen.getByLabelText('Scenario 1 goal'), { target: { value: 'Keep this batch goal' } });
+  const extra = { ...rows[0], id: 'new', name: 'New library scenario', contextVariables: [{ name: 'count', type: 'Number' as const, value: 0 }] };
+  view.rerender(<SimulationsView {...props} scenarioLibrary={{ ...shared, scenarios: [...rows.map(row => ({ ...row, revision: 2, goal: 'Updated library goal' })), extra] }} />);
+  expect(screen.getByText('4 of 4 scenarios · 3 selected')).toBeTruthy();
+  expect((screen.getByRole('checkbox', { name: extra.name }) as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(button('Select all'));
+  fireEvent.click(button('Run 4 conversations'));
+  await screen.findByText('Test stop');
+  expect(calls(call, 'studio.simulations.start')[0].scenarios).toEqual([
+    expect.objectContaining({ name: rows[0].name, goal: 'Keep this batch goal', origin: expect.objectContaining({ revision: 1 }) }),
+    expect.objectContaining({ name: rows[1].name, goal: rows[1].goal, origin: expect.objectContaining({ revision: 1 }) }),
+    expect.objectContaining({ name: rows[2].name, goal: rows[2].goal }),
+    expect.objectContaining({ name: extra.name, contextVariables: extra.contextVariables })
+  ]);
+});
+
+it('retains local copies on explicit reselection and disables bulk controls while running', async () => {
+  const { starterScenarios } = await import('../../../lib/scenario-library-contract.js');
+  const rows = starterScenarios(); const onShowCases = vi.fn();
+  const shared = { scenarios: rows, loading: false, error: '', reload: vi.fn(), save: vi.fn(), remove: vi.fn(), onManage: vi.fn() };
+  const { props, view, table } = setup({ scenarioLibrary: shared, onShowCases });
+  await screen.findByText('3 of 3 scenarios · 3 selected');
+  fireEvent.change(screen.getByLabelText('Scenario 1 goal'), { target: { value: 'Local goal' } });
+  view.rerender(<SimulationsView {...props} scenarioLibrary={{ ...shared, selection: { scenario: { ...rows[0], revision: 2, goal: 'New library goal' }, seq: 1 } }} />);
+  expect((screen.getByLabelText('Scenario 1 goal') as HTMLInputElement).value).toBe('Local goal');
+  fireEvent.click(button('Run saved test cases…')); expect(onShowCases).toHaveBeenCalledOnce();
+  const running = batch('running', 'running', [lane('1', 'running')]);
+  table['studio.simulations.start'] = () => ({ ok: true, batch: running });
+  table['studio.simulations.list'] = () => ({ ok: true, batches: [running] });
+  table['studio.simulations.get'] = () => ({ ok: true, batch: running });
+  fireEvent.click(button('Run 3 conversations'));
+  await screen.findByText('Lane 1'); fireEvent.click(button(/^Batch setup/));
+  expect(button('Clear selection').disabled).toBe(true);
+  expect((screen.getByRole('checkbox', { name: rows[0].name }) as HTMLInputElement).disabled).toBe(true);
 });

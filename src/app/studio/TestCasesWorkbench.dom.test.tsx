@@ -65,6 +65,19 @@ it('shows a concise list, opens a case, and keeps technical checks in Expectatio
   expect(screen.getByText('No expectations have been configured for this case.')).toBeTruthy();
 });
 
+it('describes each case button with its current visible result without changing its action name', () => {
+  const { props, rerender } = setup({ cases: [{ ...cases[0]!, id: 'case with spaces' }], results: { 'case with spaces': result({ outcome: 'fail' }) } });
+  const row = screen.getByRole('button', { name: 'Details for Quote journey' });
+  const description = () => document.getElementById(row.getAttribute('aria-describedby')!)!;
+  expect(description().textContent?.trim()).toBe('✕ Failed');
+  expect(screen.getByRole('button', { name: 'Details for Quote journey', description: 'Failed' })).toBe(row);
+  expect(description().querySelector('[aria-hidden="true"]')).toBeTruthy();
+  expect(row.getAttribute('aria-describedby')).not.toMatch(/\s/);
+  rerender(<TestCasesWorkbench {...props} results={{ 'case with spaces': result() }} />);
+  expect(description().textContent?.trim()).toBe('✓ Passed');
+  expect(screen.getByRole('button', { name: 'Details for Quote journey', description: 'Passed' })).toBe(row);
+});
+
 it('searches titles and messages, reports no matches, and clears filters', () => {
   const { props } = setup();
   const search = screen.getByRole('searchbox');
@@ -76,7 +89,8 @@ it('searches titles and messages, reports no matches, and clears filters', () =>
   fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
   expect(props.onFilterChange).toHaveBeenCalledWith('all');
   expect((search as HTMLInputElement).value).toBe('');
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'stopped' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Filter case results' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Stopped' }));
   expect(props.onFilterChange).toHaveBeenCalledWith('stopped');
 });
 
@@ -253,4 +267,25 @@ it('shows the scope of a one-exchange pass and keeps the judge evidence visible'
   tab('Conversation');
   expect(screen.getByText(/One exchange only/)).toBeTruthy();
   expect(screen.getByText('Which account?')).toBeTruthy();
+});
+
+it.each(['fail', 'inconclusive'] as const)('shows a %s judge explanation once and preserves its supporting evidence', outcome => {
+  const { props, rerender } = setup({ results: { quote: result({ outcome, judge: outcome, notes: ['AI: Account context is missing'] }) } });
+  select();
+  expect(screen.getAllByText(/Account context is missing/)).toHaveLength(1);
+  expect(screen.queryByRole('heading', { name: 'Assessment', exact: true })).toBeNull();
+  rerender(<TestCasesWorkbench {...props} results={{ quote: result({ outcome, judge: outcome, notes: ['AI: Account context is missing'], judgeEvidence: ['No account question appears in the reply.'] }) }} />);
+  expect(screen.getAllByText(/Account context is missing/)).toHaveLength(1);
+  expect(screen.getByLabelText('AI assessment evidence').textContent).toContain('No account question appears');
+});
+
+it('starts at the top when switching cases or detail tabs', () => {
+  const { container } = setup(); select();
+  const body = container.querySelector<HTMLElement>('.sf-cases-content')!;
+  body.scrollTop = 200;
+  tab('Expectations');
+  expect(body.scrollTop).toBe(0);
+  body.scrollTop = 100;
+  select('Billing stays in scope');
+  expect(body.scrollTop).toBe(0);
 });

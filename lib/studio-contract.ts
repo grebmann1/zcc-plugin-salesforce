@@ -2,7 +2,8 @@
  * Salesforce Studio shared contract (WS-0). Isomorphic: imported by the server
  * (lib/*), the renderer (src/app/*) and the playground iframe. No node imports.
  */
-export type StudioTool = 'code' | 'preview' | 'tests' | 'graph' | 'actions' | 'data' | 'deploy' | 'assistant' | 'comments' | 'agents';
+import { BUILDER_TOOLS, type BuilderScorer, type BuilderTool } from './studio-builder-contract.js';
+export type StudioTool = BuilderTool | 'code' | 'preview' | 'tests' | 'graph' | 'actions' | 'data' | 'deploy' | 'assistant' | 'comments' | 'agents';
 export type StudioEngine = 'rehearse' | 'simulate' | 'live';
 export interface StudioDiagnostic { line: number; column: number; endLine: number; endColumn: number; severity: 'error' | 'warning' | 'info' | 'hint'; message: string; code?: string }
 /** Problem counters count errors and warnings; info and hint entries are listed but not counted. */
@@ -44,6 +45,12 @@ export interface ScenarioCase {
   pinned?: { runId: string; at: number };
 }
 export type CaseOutcome = 'pass' | 'fail' | 'inconclusive';
+/** Immutable rules and verdicts captured for a scenario run, never recomputed on resource edits. */
+export interface ScorerEvaluation {
+  revision: number;
+  baseOutcome: CaseOutcome;
+  checks: Array<BuilderScorer & { outcome: CaseOutcome }>;
+}
 /** The last `sf agent test run-eval` of a suite against the org's published agent. */
 export interface SuiteEval {
   at: number; org: string; orgId: string; passed: boolean; specPath: string; botVersionId?: string;
@@ -58,6 +65,8 @@ export interface SuiteEval {
 export interface CaseObserved { topics: string[]; actions: string[]; traced: boolean; traceComplete?: boolean }
 /** A saved Simulate result. `notes`, `observed` and `reply` are the run's evidence, kept small so a Fail always says why. */
 export interface CaseResult { outcome: CaseOutcome; runId: string; at: number; notes?: string[]; observed?: CaseObserved; reply?: string; /** The AI judge's verdict on `criteria`, when it ran. */ judge?: CaseOutcome;
+  /** The response preview omits text; absence checks need complete transcript evidence. */
+  replyTruncated?: boolean;
   /** Bounded recorded messages, independent of the expiring live preview session. */
   conversation?: ConversationMessage[];
   conversationTruncated?: boolean;
@@ -65,6 +74,8 @@ export interface CaseResult { outcome: CaseOutcome; runId: string; at: number; n
   /** This attempt was explicitly cancelled, so it has no evaluation verdict. */
   stopped?: boolean;
   deterministic?: CaseOutcome;
+  /** Project rules pinned before the first case, shared by both comparison sources. */
+  scorerEvaluation?: ScorerEvaluation;
   /** Bounded transcript evidence returned by the AI assessment. Absent on older runs. */
   judgeEvidence?: string[];
   latencyMs?: number; assertions?: AssertionResult[]; sourceHash?: string; caseHash?: string;
@@ -126,7 +137,7 @@ export const AGENT_SOURCE_MAX = 10 * 1024 * 1024;
 export const AGENT_SOURCE_MAX_LABEL = '10 MB';
 
 export const STUDIO_LIMITS = { diagnostics: 50, selectionText: 2000, quote: 2000, commentBody: 2000 } as const;
-export const STUDIO_TOOLS: readonly StudioTool[] = ['code', 'preview', 'tests', 'graph', 'actions', 'data', 'deploy', 'assistant', 'comments', 'agents'];
+export const STUDIO_TOOLS: readonly StudioTool[] = ['code', 'preview', 'tests', 'graph', 'actions', 'data', 'deploy', 'assistant', 'comments', 'agents', ...BUILDER_TOOLS];
 export const STUDIO_ENGINES: readonly StudioEngine[] = ['rehearse', 'simulate', 'live'];
 /** The engines Preview offers. Rehearse is hidden for now; saved Rehearse runs still load and replay. */
 export const PREVIEW_ENGINES: readonly StudioEngine[] = ['simulate', 'live'];

@@ -122,6 +122,109 @@ const seedWorkspace = (tabs: ReturnType<typeof scriptTab>[], activeTab = scriptT
 };
 
 describe('AgentScriptPanel beside the host side panel', () => {
+  it('reuses the full testing editor view when the host cannot open Evals', async () => {
+    navigate.openPanelTool.mockReturnValue(false);
+    const el = await mount(QC); await ready(el);
+    const choose = async (title: string) => {
+      await act(async () => { el.querySelector<HTMLButtonElement>('[aria-label="Add Studio tool"]')!.click(); });
+      const catalog = el.querySelector<HTMLElement>('[aria-label="Studio tool catalog"]')!;
+      await act(async () => { [...catalog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith(title))!.click(); });
+      await flush();
+    };
+    await choose('Evals');
+    const pane = el.querySelector<HTMLElement>('[data-testid="studio-view-tests"]')!;
+    expect(pane.querySelector('h2')?.textContent).toBe('Evals');
+    await act(async () => { [...pane.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Role-play')!.click(); });
+    expect(pane.querySelector('[data-testid="stub-lab"]')).toBeTruthy();
+    await choose('Tests');
+    expect(el.querySelectorAll('[data-testid="studio-view-tests"]')).toHaveLength(1);
+    expect(el.querySelector('[data-testid="studio-view-tests"]')).toBe(pane);
+    expect(pane.querySelector('[data-testid="studio-tests-pane"]')?.getAttribute('data-view')).toBe('roleplay');
+  });
+
+  it('shares the complete Evals workspace with the original Tests route, preserving subviews, drafts and agent owners', async () => {
+    const el = await mount(QC); await ready(el);
+    const editor = el.querySelector('iframe');
+    await act(async () => { el.querySelector<HTMLButtonElement>('[aria-label="Add Studio tool"]')!.click(); });
+    const catalog = el.querySelector<HTMLElement>('[aria-label="Studio tool catalog"]')!;
+    await act(async () => { [...catalog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Evals'))!.click(); });
+    expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: 'studio-evals' });
+    const evals = await hostTab('evals', 'proj-1', 'evals');
+    const pane = evals.el.querySelector<HTMLElement>(`[data-testid="studio-view-tests"][data-agent="${QC}"]`)!;
+    expect(pane.querySelector('h2')?.textContent).toBe('Evals');
+    const select = async (root: HTMLElement, name: string) => {
+      const button = [...root.querySelectorAll<HTMLButtonElement>('[data-testid="tests-header"] button')].find(button => button.textContent === name)!;
+      expect(button).toBeTruthy();
+      await act(async () => { button.click(); }); await flush();
+    };
+    await select(pane, 'Test cases');
+    await act(async () => { [...pane.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '+ Case')!.click(); });
+    const name = pane.querySelector<HTMLInputElement>('.sf-tp-form input[name="name"]');
+    expect(name).toBeTruthy();
+    await act(async () => { fireEvent.change(name!, { target: { value: 'Keep my case draft' } }); });
+    await select(pane, 'Role-play');
+    const lab = pane.querySelector('[data-testid="stub-lab"]');
+    expect(lab).toBeTruthy();
+    await select(pane, 'Browse tests');
+    expect(pane.querySelector('[data-testid="stub-org-tests-ask"]')).toBeTruthy();
+    await select(pane, 'Batch simulations');
+    expect(pane.querySelector('[data-testid="studio-tests-pane"]')?.getAttribute('data-view')).toBe('simulations');
+    await select(pane, 'Scenarios');
+    expect(pane.querySelector('[data-testid="studio-scenarios"]')).toBeTruthy();
+    await evals.unmount();
+    const legacy = await hostTab('test', 'proj-1', 'original-tests');
+    expect(legacy.el.querySelector(`[data-testid="studio-view-tests"][data-agent="${QC}"]`)).toBe(pane);
+    expect(pane.querySelector('[data-testid="studio-tests-pane"]')?.getAttribute('data-view')).toBe('scenarios');
+    await select(pane, 'Test cases');
+    expect(name!.value).toBe('Keep my case draft');
+    await select(pane, 'Role-play');
+    expect(pane.querySelector('[data-testid="stub-lab"]')).toBe(lab);
+    await act(async () => { await exec('file.open', { path: HELP }); }); await ready(el);
+    const help = legacy.el.querySelector<HTMLElement>(`[data-testid="studio-view-tests"][data-agent="${HELP}"]`)!;
+    expect(help.style.display).toBe('');
+    expect(pane.style.display).toBe('none');
+    expect(help.querySelector('[data-testid="studio-tests-pane"]')?.getAttribute('data-view')).toBe('cases');
+    await act(async () => { el.querySelector<HTMLButtonElement>(`[role="tab"][title="${QC}"]`)!.click(); }); await flush();
+    expect(pane.style.display).toBe('');
+    expect(pane.querySelector('[data-testid="stub-lab"]')).toBe(lab);
+    expect(el.querySelector('iframe')).toBe(editor);
+    expect(control.options.state().panels.tabs).toEqual(['test']);
+  });
+
+  it('keeps the Settings checkbox on the same sharing preference that Studio publishes', async () => {
+    localStorage.setItem('salesforce:studio:share', 'true');
+    const el = await mount(QC);
+    await ready(el);
+    const settings = await hostTab('settings');
+    const sharing = () => settings.el.querySelector<HTMLInputElement>('[aria-label="Share context with Assistant"]')!;
+    expect(sharing().checked).toBe(true);
+    await act(async () => { fireEvent.click(sharing()); });
+    expect(sharing().checked).toBe(false);
+    expect(localStorage.getItem('salesforce:studio:share')).toBe('false');
+    await waitFor(() => expect(rpc.mock.calls.filter(call => call[1] === 'studio.view.publish').at(-1)?.[2].state.share).toBe(false));
+    await settings.unmount();
+    const reopened = await hostTab('settings');
+    const toggle = reopened.el.querySelector<HTMLInputElement>('[aria-label="Share context with Assistant"]')!;
+    expect(toggle.checked).toBe(false);
+    await act(async () => { fireEvent.click(toggle); });
+    expect(toggle.checked).toBe(true);
+    await waitFor(() => expect(rpc.mock.calls.filter(call => call[1] === 'studio.view.publish').at(-1)?.[2].state.share).toBe(true));
+  });
+  it('keeps Script visible without a mode switch when Graph opens in the host panel', async () => {
+    const el = await mount(QC); await ready(el);
+    const editor = el.querySelector('iframe[title="Agentforce playground"]');
+    expect(editor).toBeTruthy();
+    expect(el.querySelector('[aria-label="Editor view"]')).toBeNull();
+    await act(async () => { await exec('panel.open', { tool: 'graph' }); });
+    expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: 'studio-graph' });
+    const graph = await hostTab('graph');
+    expect(graph.el.querySelector('[data-testid="stub-graph"]')).toBeTruthy();
+    expect(el.querySelector('iframe[title="Agentforce playground"]')).toBe(editor);
+    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
+    expect(el.querySelector('.sf-etab[data-kind="view"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Editor view"]')).toBeNull();
+  });
+
   it('locks a resource window to its primary script while retaining related tool portals', async () => {
     resourceId = QC; panelScope = vi.fn();
     const el = await mount(HELP); await ready(el);
@@ -522,7 +625,7 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(el.querySelector('.sf-etab[data-kind="view"]')).toBeNull();
   });
 
-  it.each(['graph', 'preview', 'test', 'org-preview'] as const)('handles the host New Tab launcher for %s before an agent is open', async tool => {
+  it.each(['graph', 'preview', 'test', 'evals', 'org-preview'] as const)('handles the host New Tab launcher for %s before an agent is open', async tool => {
     const el = await mount();
     await ready(el);
     const panel = await hostTab(tool);
@@ -532,7 +635,7 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(rpc.mock.calls.some(call => /preview\.start|simulations\.start|suites\.start/.test(call[1]))).toBe(false);
     await act(async () => { await exec('file.open', { path: QC }); });
     await flush();
-    const target = tool === 'test' ? 'tests' : tool;
+    const target = tool === 'test' || tool === 'evals' ? 'tests' : tool;
     expect(panel.el.querySelector(`[data-testid="studio-view-${target}"][data-agent="${QC}"]`)).toBeTruthy();
     expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
     expect(el.querySelector('.sf-etab[data-kind="view"]')).toBeNull();

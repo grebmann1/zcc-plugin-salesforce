@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search } from 'lucide-react';
 import { useExclusivePopover } from './use-exclusive-popover.js';
@@ -132,6 +132,8 @@ export interface PopoverPicklistProps<T extends string> {
   triggerClassName?: string;
   /** Optional data-testid on the trigger button. */
   triggerTestId?: string;
+  /** Field validation and help text stay attached to the focusable trigger. */
+  triggerProps?: Pick<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-describedby' | 'aria-invalid' | 'onBlur'> & { [key: `data-${string}`]: string | undefined };
   /** Optional leading icon inside the trigger. */
   triggerIcon?: ReactNode;
   /** Minimum popover width in px; defaults to 200. */
@@ -218,6 +220,7 @@ export function PopoverPicklist<T extends string>({
   className = '',
   triggerClassName = 'launch-model-picker-trigger',
   triggerTestId,
+  triggerProps,
   triggerIcon,
   minWidth = 200,
   anchorToParent = false
@@ -229,6 +232,7 @@ export function PopoverPicklist<T extends string>({
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const wasOpenRef = useRef(false);
+  const restoreFocusRef = useRef(true);
   const menuId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
   const selected = options.find((option) => option.value === value);
@@ -244,7 +248,15 @@ export function PopoverPicklist<T extends string>({
 
   const optionId = (option: PopoverPicklistOption<T>) => `${menuId}-${option.value}`;
   const selectOption = (option: PopoverPicklistOption<T> | undefined) => {
-    if (!option || option.disabled) return;
+    if (!option || option.disabled || disabled || triggerRef.current?.matches(':disabled')) return;
+    // The menu is portaled outside the fieldset. Preserve inherited disabling,
+    // including the native first-legend exception, when choosing an option.
+    for (let parent = triggerRef.current?.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLFieldSetElement && parent.disabled) {
+        const legend = [...parent.children].find(child => child.tagName === 'LEGEND');
+        if (!legend?.contains(triggerRef.current)) return;
+      }
+    }
     onChange(option.value);
     setOpen(false);
   };
@@ -259,6 +271,9 @@ export function PopoverPicklist<T extends string>({
     });
   };
   const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement | HTMLInputElement>) => {
+    // Portal events bubble through the owning form/dialog. Handle navigation once
+    // and keep Escape local to this menu rather than closing the parent too.
+    if (['Escape', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter'].includes(event.key)) event.stopPropagation();
     if (event.key === 'Escape') {
       event.preventDefault();
       setOpen(false);
@@ -279,6 +294,12 @@ export function PopoverPicklist<T extends string>({
     } else if (event.key === 'Enter') {
       event.preventDefault();
       selectOption(activeOption);
+    } else if (event.key === 'Tab') {
+      // Resume the form's tab order from the trigger. The close effect must
+      // not pull focus back after the browser (or dialog) advances it.
+      restoreFocusRef.current = false;
+      triggerRef.current?.focus();
+      setOpen(false);
     }
   };
 
@@ -293,6 +314,10 @@ export function PopoverPicklist<T extends string>({
       minWidth
     ));
   }, [open, anchorToParent, minWidth]);
+
+  useEffect(() => {
+    if (disabled && open) setOpen(false);
+  }, [disabled, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -320,12 +345,13 @@ export function PopoverPicklist<T extends string>({
 
   useEffect(() => {
     if (open) {
+      restoreFocusRef.current = true;
       const selectedIndex = visibleOptions.findIndex((option) => option.value === value && !option.disabled);
       const firstEnabledIndex = visibleOptions.findIndex((option) => !option.disabled);
       setActiveIndex(selectedIndex >= 0 ? selectedIndex : Math.max(0, firstEnabledIndex));
     } else {
       setQuery('');
-      if (wasOpenRef.current) triggerRef.current?.focus();
+      if (wasOpenRef.current && restoreFocusRef.current) triggerRef.current?.focus();
     }
     wasOpenRef.current = open;
   }, [open, searchable, value]);
@@ -352,6 +378,7 @@ export function PopoverPicklist<T extends string>({
   return (
     <>
       <button
+        {...triggerProps}
         ref={triggerRef}
         id={id}
         type="button"

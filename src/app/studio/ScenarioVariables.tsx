@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useId, useState } from 'react';
 import { CONTEXT_TYPES, validateContextEntries, parsePreviewContext, type ContextEntry, type ContextType, type PreviewContextField, type PreviewContextVariable } from '../../../lib/preview-context.js';
 import type { ContextPreset } from '../../../lib/preview-context-preset-contract.js';
@@ -44,7 +45,7 @@ export function ScenarioVariables({ entries, fields = [], inherited = [], onChan
       return <div className="sf-sim-variable" key={name}>
         <div className="sf-sim-variable-heading"><label htmlFor={inputId}>{fields.find(row => row.name === name)?.label ?? name}</label><small>{entry.type}</small><button type="button" aria-label={`Reset ${name} to ${defaultsLabel === 'Runtime defaults' ? 'runtime' : 'batch'} default`} onClick={() => { const next = { ...entries }; delete next[name]; onChange(next); }}>Reset</button></div>
         {entry.isNull ? <div id={inputId} className="sf-sim-variable-null">null</div> : entry.type === 'Boolean'
-          ? <select id={inputId} aria-label={`${name} value`} value={entry.text} onChange={event => update(name, { text: event.target.value })}><option value="false">False</option><option value="true">True</option></select>
+          ? <SalesforcePicklist id={inputId} ariaLabel={`${name} value`} value={entry.text} onChange={text => update(name, { text })} searchable={false} options={[{ value: 'false', label: 'False' }, { value: 'true', label: 'True' }]} />
           : ['Json', 'List', 'Object'].includes(entry.type) ? <textarea id={inputId} aria-label={`${name} value`} aria-invalid={Boolean(issue)} value={entry.text} rows={3} onChange={event => update(name, { text: event.target.value })} />
           : <input id={inputId} aria-label={`${name} value`} aria-invalid={Boolean(issue)} type={entry.type === 'Date' ? 'date' : 'text'} inputMode={entry.type === 'Number' ? 'decimal' : undefined} value={entry.text} onChange={event => update(name, { text: event.target.value })} />}
         <label className="sf-sim-variable-null-toggle"><input type="checkbox" aria-label={`Set ${name} to null`} checked={Boolean(entry.isNull)} onChange={event => update(name, { isNull: event.target.checked })} />Set to null</label>
@@ -55,7 +56,7 @@ export function ScenarioVariables({ entries, fields = [], inherited = [], onChan
     {adding && <div className="sf-sim-variable-add" onKeyDown={event => { if (event.key === 'Escape') { setAdding(false); setError(''); event.stopPropagation(); } }}>
       <label>Variable name<input autoFocus aria-label="New scenario variable name" list={`${id}-fields`} value={name} onChange={event => { setName(event.target.value); const field = fields.find(row => row.name === event.target.value) ?? inherited.find(row => row.name === event.target.value); if (field) setType(field.type); }} placeholder="Choose or enter a variable…" /></label>
       <datalist id={`${id}-fields`}>{[...new Set([...fields.map(row => row.name), ...inherited.map(row => row.name)])].filter(name => !Object.hasOwn(entries, name)).map(name => <option key={name} value={name} />)}</datalist>
-      <label>Type<select aria-label="New scenario variable type" value={type} disabled={fields.some(row => row.name === name) || inherited.some(row => row.name === name)} onChange={event => setType(event.target.value as ContextType)}>{CONTEXT_TYPES.map(type => <option key={type}>{type}</option>)}</select></label>
+      <label>Type<SalesforcePicklist<ContextType> ariaLabel="New scenario variable type" value={type} disabled={fields.some(row => row.name === name) || inherited.some(row => row.name === name)} onChange={setType} searchable={false} options={CONTEXT_TYPES.map(type => ({ value: type, label: type }))} /></label>
       <div><button type="button" onClick={add}>Add override</button><button type="button" onClick={() => { setAdding(false); setError(''); }}>Cancel</button></div>{error && <p role="alert">{error}</p>}
     </div>}
     {issues.errors.map(issue => <p key={issue} role="alert">{issue}</p>)}

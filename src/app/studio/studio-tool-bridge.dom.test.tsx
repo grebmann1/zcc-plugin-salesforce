@@ -14,6 +14,7 @@ import {
   useStudioToolScope,
   useStudioToolSlots
 } from './studio-tool-bridge.js';
+import { BUILDER_TOOLS } from '../../../lib/studio-builder-contract.js';
 import { StudioPanelTool, studioPanelTool } from './StudioPanelTool.js';
 
 beforeEach(() => {
@@ -24,7 +25,7 @@ afterEach(() => { cleanup(); resetStudioToolBridge(); });
 
 describe('studio-tool-bridge', () => {
   it('names the panel tools and their actions', () => {
-    expect(PANEL_TOOLS).toEqual(['graph', 'preview', 'test', 'org-preview', 'actions', 'comments']);
+    expect(PANEL_TOOLS).toEqual(['graph', 'preview', 'test', 'org-preview', 'actions', 'comments', ...BUILDER_TOOLS]);
     for (const tool of PANEL_TOOLS) {
       expect(isPanelTool(tool)).toBe(true);
       expect(panelToolActionId(tool)).toBe(`studio-${tool}`);
@@ -52,6 +53,27 @@ describe('studio-tool-bridge', () => {
     // Reattaching reuses the node, so whatever Studio rendered into it survives.
     act(() => { attachStudioTool('p1', 'actions', container); });
     expect(result.current[0].node).toBe(slot.node);
+  });
+
+  it('adopts one workspace through Tests and Evals aliases without duplicate slots or stale cleanup', () => {
+    const { result } = renderHook(() => useStudioToolSlots('p1'));
+    const removeStudio = registerStudio('p1');
+    const tests = document.createElement('div'), evals = document.createElement('div');
+    let releaseTests!: () => void, releaseEvals!: () => void;
+    act(() => { releaseTests = attachStudioTool('p1', 'test', tests, 'old-tests'); });
+    const node = result.current[0].node;
+    node.innerHTML = '<textarea>Retained scenario draft</textarea>';
+    const draft = node.firstChild;
+    act(() => { releaseEvals = attachStudioTool('p1', 'evals', evals, 'new-evals'); releaseTests(); });
+    expect(result.current).toHaveLength(1);
+    expect(result.current[0]).toMatchObject({ tool: 'test', attached: true, tabId: 'new-evals' });
+    expect(evals.firstChild).toBe(node);
+    expect(node.firstChild).toBe(draft);
+    act(() => releaseEvals());
+    act(() => { attachStudioTool('p1', 'test', tests, 'reopened-tests'); });
+    expect(tests.firstChild).toBe(node);
+    expect(result.current).toHaveLength(1);
+    act(() => removeStudio());
   });
 
   it('remembers the host tab that last showed a tool', () => {

@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { PanelRight, Plus, X } from 'lucide-react';
+import { StudioToolPicker } from './studio/StudioToolPicker.js';
+import { AGENT_SCRIPT_TOOLS, type AgentScriptTool } from './studio/studio-tool-catalog.js';
+export { AGENT_SCRIPT_TOOLS, type AgentScriptTool } from './studio/studio-tool-catalog.js';
 
-export const AGENT_SCRIPT_TOOLS = [
-  { id: 'agents', title: 'Agents', description: 'Browse org agents and retrieve source versions', icon: 'M9 4h6 M12 2v2 M4 8h16v12H4z M8 12h.01 M16 12h.01 M8 16h8' },
-  { id: 'files', title: 'File explorer', description: 'Project scripts and references', icon: 'M3 7h7l2 2h9v11H3z M3 7V4h7l2 3' },
-  { id: 'graph', title: 'Graph view', description: 'Topics, actions, and conversation routes', icon: 'M6 3v6h12V3 M12 9v6 M9 15h6v6H9z' },
-  { id: 'preview', title: 'Preview', description: 'Try the current draft in a conversation', icon: 'm8 4 12 8-12 8z' },
-  { id: 'test', title: 'Tests', description: 'Run scenarios and review evaluations', icon: 'M9 3h6 M10 3v7L4 20h16l-6-10V3 M7 16h10' },
-  { id: 'actions', title: 'Actions', description: 'Inspect Apex, Flow, inputs, and outputs', icon: 'm8 6-6 6 6 6 M16 6l6 6-6 6 M14 3l-4 18' },
-  { id: 'org-preview', title: 'Org preview', description: 'Talk to an agent in your connected org', icon: 'M7 18h11a4 4 0 0 0 0-8 6 6 0 0 0-11-3 5.5 5.5 0 0 0 0 11Z' },
-  { id: 'comments', title: 'Comments', description: 'Review notes anchored to lines of this agent', icon: 'M4 4h16v12H8l-4 4z M8 9h8 M8 12h5' },
-] as const;
-export type AgentScriptTool = typeof AGENT_SCRIPT_TOOLS[number]['id'];
-/** Tools that live in the Studio's own side column. Graph, Preview, Tests and Org preview are editor view tabs instead. */
-export const COLUMN_TOOLS: readonly AgentScriptTool[] = ['agents', 'files', 'actions', 'comments'];
+/** Fallback columns own local tools; conversation views use the editor workspace and Assistant uses the host. */
+export const COLUMN_TOOLS: readonly AgentScriptTool[] = AGENT_SCRIPT_TOOLS.filter(tool => !['graph', 'preview', 'test', 'evals', 'org-preview', 'assistant'].includes(tool.id)).map(tool => tool.id);
 export const isColumnTool = (value: unknown): value is AgentScriptTool => COLUMN_TOOLS.includes(value as AgentScriptTool);
 type ToolState = { tabs: AgentScriptTool[]; active: AgentScriptTool | 'new'; open: boolean };
 const initialState: ToolState = { tabs: ['files'], active: 'files', open: true };
@@ -46,9 +38,11 @@ export function useAgentScriptTools(scope: string) {
   };
 }
 
-export function AgentScriptTools({ tools, render, hiddenTools = [], chrome = true, open }: {
+export function AgentScriptTools({ tools, render, hiddenTools = [], chrome = true, open, onOpenTool }: {
   tools: ReturnType<typeof useAgentScriptTools>;
   render: (id: AgentScriptTool, visible: boolean) => ReactNode;
+  /** Route all catalog entries through the workspace, including editor views and Assistant. */
+  onOpenTool?: (id: AgentScriptTool) => void;
   /** Tools shown elsewhere in this layout (kept mounted, but without a tab or picker entry). */
   hiddenTools?: readonly AgentScriptTool[];
   /** False when an external strip switches tools (compact layout). */
@@ -66,7 +60,6 @@ export function AgentScriptTools({ tools, render, hiddenTools = [], chrome = tru
     strip.current?.querySelector('[aria-selected=true]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [state.active, state.open]);
   const title = (id: AgentScriptTool) => AGENT_SCRIPT_TOOLS.find(tool => tool.id === id)!.title;
-  const pickable = AGENT_SCRIPT_TOOLS.filter(tool => isColumnTool(tool.id) && !hiddenTools.includes(tool.id));
   return <aside className="af-tools" aria-label="AgentScript side panel" hidden={!state.open}>
     {chrome && <div className="thread-secondary-chrome">
       <div className="thread-secondary-tabs" role="tablist" aria-label="AgentScript tools" ref={strip}>
@@ -87,11 +80,7 @@ export function AgentScriptTools({ tools, render, hiddenTools = [], chrome = tru
       </div>
     </div>}
     {chrome && state.active === 'new' && <div className="af-tool-picker">
-      <h2>Add a tool</h2><p>Open beside your AgentScript editor.</p>
-      <div>{pickable.map(tool => <button type="button" key={tool.id} onClick={() => tools.openTool(tool.id)}>
-        <svg className="af-tool-icon" aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={tool.icon} /></svg><span><strong>{tool.title}</strong><small>{tool.description}</small></span>
-        {state.tabs.includes(tool.id) && <span className="af-tool-open">Open</span>}
-      </button>)}</div>
+      <StudioToolPicker onSelect={onOpenTool ?? tools.openTool} hiddenTools={hiddenTools} openTools={state.tabs} />
     </div>}
     {tools.state.tabs.map(id => <div key={id} className="af-tool-content" role="tabpanel" id={`${prefix}-${id}-panel`} aria-labelledby={`${prefix}-${id}`} hidden={state.active !== id}>
       {render(id, state.open && state.active === id)}

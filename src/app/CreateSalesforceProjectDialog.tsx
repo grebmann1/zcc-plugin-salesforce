@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { PluginCreateProjectDialogProps } from '@zana-ai/zcc-plugin-sdk/app';
 import { parseOrgLoginInput, type OrgLoginInstance } from '../../lib/org-login.js';
@@ -117,10 +118,7 @@ export function CreateSalesforceProjectDialog(props: PluginCreateProjectDialogPr
         {!connected ? <>
           {existing ? <>
             <label className="sf-login-field">Connected org
-              <select className="sf-select" value={selected} disabled={!!busy} onChange={event => setSelected(event.target.value)}>
-                <option value="">{busy === LOADING_ORGS ? 'Loading orgs…' : 'Choose an org'}</option>
-                {orgs.map(org => <option key={org.username} value={org.alias || org.username}>{org.alias || org.username} · {org.username}</option>)}
-              </select>
+              <SalesforcePicklist triggerClassName="sf-select" ariaLabel="Connected org" value={selected} disabled={!!busy} onChange={setSelected} searchable={orgs.length > 6} searchPlaceholder="Search connected orgs…" options={[{ value: '', label: busy === LOADING_ORGS ? 'Loading orgs…' : 'Choose an org' }, ...orgs.map(org => ({ value: org.alias || org.username, label: `${org.alias || org.username} · ${org.username}` }))]} />
             </label>
             {busy === LOADING_ORGS && <div className="sf-login-waiting" role="status"><span className="sf-login-spinner" aria-hidden="true" /><div><strong>Loading your connected orgs…</strong><span>This can take a minute if some orgs can’t be reached.</span></div></div>}
             {!busy && !orgs.length && <p className="sf-muted">No connected orgs yet. Log in to continue.</p>}

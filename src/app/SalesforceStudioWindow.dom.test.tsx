@@ -97,9 +97,9 @@ describe("Salesforce Studio window", () => {
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.getByTestId("script")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open beside agent" })).toBeNull();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Salesforce org" }).getAttribute("disabled")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Salesforce org" }).getAttribute("disabled")).toBeNull());
     expect(screen.getByText("Agentforce")).toBeTruthy();
-    expect(screen.getAllByRole("combobox", { name: "Salesforce org" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Salesforce org" })).toHaveLength(1);
     // The stored view is ignored and never rewritten from the Studio window.
     expect(localStorage.getItem("salesforce:studio-window:p")).toBe("deployments");
   });
@@ -128,14 +128,14 @@ describe("Salesforce Studio window", () => {
     const prod = { ...org, alias: "prod", kind: "production" as const };
     call.mockImplementation(async (method: string) => method === "status" ? { ...status, selectedAlias: "prod", orgs: [prod] } : respond(method));
     mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" />);
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Salesforce org" }).getAttribute("disabled")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Salesforce org" }).getAttribute("disabled")).toBeNull());
     expect(useWindowTitle).toHaveBeenLastCalledWith({ title: "Agentforce · Help", detail: "prod", badge: "Production", tone: "danger" });
   });
 
   it("warns when the selected org is not one the CLI lists", async () => {
     call.mockImplementation(async (method: string) => method === "status" ? { ...status, selectedAlias: "gone", orgs: [org] } : respond(method));
     mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" />);
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Salesforce org" }).getAttribute("disabled")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Salesforce org" }).getAttribute("disabled")).toBeNull());
     expect(useWindowTitle).toHaveBeenLastCalledWith({ title: "Agentforce · Help", detail: "gone", badge: "Unknown org", tone: "warning" });
   });
 

@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../../test/picklist.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SelfHealingPanel, type SelfHealingPanelProps } from './SelfHealingPanel.js';
@@ -16,7 +17,7 @@ function setup(overrides: Partial<SelfHealingPanelProps> = {}) {
 it('starts a bounded run and hands a complete autonomous brief to the agent', async () => {
   const { props, rpc } = setup();
   fireEvent.click(screen.getByText('Options · up to 3 attempts'));
-  fireEvent.change(screen.getByLabelText('Maximum attempts'), { target: { value: '2' } });
+  choosePicklistValue(screen.getByLabelText('Maximum attempts'), '2');
   fireEvent.click(screen.getByRole('button', { name: 'Ask assistant to improve' }));
   await screen.findByText(/Diagnosing failures/);
   expect(rpc).toHaveBeenCalledWith(SELF_HEALING_RPC.start, { batchId: 'base', source: 'source', maxAttempts: 2 });

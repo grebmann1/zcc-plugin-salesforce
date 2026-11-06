@@ -15,6 +15,7 @@ import { AGENT_SCRIPT_TOOLS } from './src/app/AgentScriptTools.js';
 import { studioPanelTool } from './src/app/studio/StudioPanelTool.js';
 import { STUDIO_TAB_ID } from './src/app/studio-window-route.js';
 import { isPanelTool, panelToolActionId } from './src/app/studio/studio-tool-bridge.js';
+import { isBuilderTool } from './lib/studio-builder-contract.js';
 
 const STUDIO_TOOL_ICONS: Record<string, string> = { actions: 'Zap', comments: 'MessageSquare' };
 
@@ -153,7 +154,7 @@ export default definePluginApp((app) => {
       category: 'Agent Script Studio',
       icon: STUDIO_TOOL_ICONS[tool.id],
       layout: 'flush',
-      scopes: ['plugin-page'],
+      scopes: isBuilderTool(tool.id) ? ['plugin-page', 'thread', 'agent-session'] : ['plugin-page'],
       pages: ['salesforce'],
       component: studioPanelTool(tool.id, tool.title)
     });

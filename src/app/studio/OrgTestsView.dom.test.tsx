@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../../test/picklist.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { OrgTestsView, type OrgTestsViewProps } from './OrgTestsView.js';
@@ -603,7 +604,7 @@ it('detail: tabs, search, sort and expansion', () => {
   fireEvent.change(screen.getByLabelText('Search cases'), { target: { value: 'case 2' } });
   expect(screen.getByTestId('org-case-2')).toBeTruthy();
   fireEvent.change(screen.getByLabelText('Search cases'), { target: { value: '' } });
-  fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'verdict' } });
+  choosePicklistValue(screen.getByLabelText('Sort by'), 'verdict');
   const order = within(screen.getByTestId('org-run-table')).getAllByTestId(/org-case-/).map(r => r.getAttribute('data-testid'));
   expect(order).toEqual(['org-case-2', 'org-case-3', 'org-case-1']);
   fireEvent.click(within(screen.getByTestId('org-case-2')).getByRole('button', { name: 'case 2' }));

@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useEffect, useRef, useState } from 'react';
 import { SELF_HEALING_RPC, selfHealingActive, selfHealingPrompt, type SelfHealingRun } from '../../../lib/self-healing-contract.js';
 import type { SimulationBatch } from '../../../lib/simulation-contract.js';
@@ -57,7 +58,7 @@ export function SelfHealingPanel({ path, source, batch, visible, rpc, onAskAgent
     <div className="sf-healing-heading"><div><strong>{active ? 'Improving with assistant' : improved ? 'Proposed improvements are ready' : `Improve ${failures || 'the'} failing ${failures === 1 ? 'conversation' : 'conversations'}`}</strong>
       <p className="sf-tp-foot">Let the assistant propose script changes and test them against this batch. Review changes before applying.</p></div>
       <div className="sf-healing-controls">{active ? <button type="button" className="sf-tp-btn is-danger" disabled={busy} onClick={() => void perform(SELF_HEALING_RPC.stop, { runId: run.id })}>Stop improving</button>
-        : <><details className="sf-healing-options"><summary>Options · up to {budget} attempts</summary><label>Maximum attempts <select aria-label="Maximum attempts" value={budget} disabled={busy} onChange={e => setBudget(Number(e.target.value))}>{[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}</select></label></details>
+        : <><details className="sf-healing-options"><summary>Options · up to {budget} attempts</summary><label>Maximum attempts <SalesforcePicklist ariaLabel="Maximum attempts" value={String(budget)} disabled={busy} onChange={value => setBudget(Number(value))} searchable={false} options={[1, 2, 3, 4, 5].map(n => ({ value: String(n), label: String(n) }))} /></label></details>
           {eligible && !improved ? <button type="button" className="sf-tp-btn is-primary" disabled={busy || !onAskAgent} onClick={() => void perform(SELF_HEALING_RPC.start, { batchId: batch!.id, source, maxAttempts: budget }, true)}>{busy ? 'Starting…' : 'Ask assistant to improve'}</button>
             : !improved && <button type="button" className="sf-tp-btn" disabled={busy || !onInvestigate} onClick={onInvestigate}>Ask assistant to investigate</button>}</>}
       </div>

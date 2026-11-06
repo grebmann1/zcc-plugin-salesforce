@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../test/picklist.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { lastChanged, OrgAgentsPanel } from './OrgAgentsPanel.js';
@@ -20,7 +21,7 @@ it('loads on demand, searches, selects the exact version and opens the retrieved
   view.rerender(panel()); await screen.findByText('Support Agent');
   fireEvent.change(screen.getByLabelText('Search org agents'), { target: { value: 'Support' } });
   expect(screen.queryByText('Concierge')).toBeNull();
-  fireEvent.change(screen.getByLabelText('Source version for Support_Agent'), { target: { value: 'Support_Agent_v1' } });
+  choosePicklistValue(screen.getByLabelText('Source version for Support_Agent'), 'Support_Agent_v1');
   fireEvent.click(screen.getByRole('button', { name: 'Retrieve & open Support_Agent' }));
   await waitFor(() => expect(onOpen).toHaveBeenCalledWith(file, expect.any(Function)));
   expect(rpc).toHaveBeenCalledWith('salesforce', 'agents.retrieve.start', { projectId: 'project', orgId: data.org.orgId, fullName: 'Support_Agent_v1' });
@@ -250,7 +251,7 @@ it('shows a version picker only for agents with several versions, and the last c
   await screen.findByText('Support Agent');
   expect(screen.getByLabelText('Source version for Support_Agent')).toBeTruthy();
   expect(screen.queryByLabelText('Source version for Concierge')).toBeNull();
-  expect([...(screen.getByLabelText('Source version for Support_Agent') as HTMLSelectElement).options].map(option => option.textContent)).toEqual(['v2', 'v1']);
+  fireEvent.click(screen.getByLabelText('Source version for Support_Agent')); expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['v2', 'v1']);
   expect(document.querySelector('time')?.getAttribute('dateTime')).toBe('2026-03-04T10:00:00.000Z');
 });
 

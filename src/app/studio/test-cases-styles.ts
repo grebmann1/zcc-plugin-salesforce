@@ -1,11 +1,14 @@
+import { TEST_WORKSPACE_STYLES } from './test-workspace-styles.js';
+import { STUDIO_RESIZE_STYLES } from './StudioResize.js';
 export const TEST_CASES_STYLES = `
-.sf-cases { flex:1; display:grid; grid-template-columns:minmax(260px, 36%) minmax(0,1fr); min-height:240px; min-width:0; overflow:hidden; border:1px solid var(--sf-border); border-radius:8px; }
+${STUDIO_RESIZE_STYLES}
+.sf-cases { flex:1; display:grid; grid-template-columns:minmax(0,calc((100% - 9px) * var(--sf-pane-ratio,36) / 100)) 9px minmax(0,1fr); min-height:0; min-width:0; overflow:hidden; border:1px solid var(--sf-border); border-radius:8px; }
 .sf-cases-catalogue,.sf-cases-detail { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; }
 .sf-cases-catalogue { border-right:1px solid var(--sf-border); }
 .sf-cases-search { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px; border-bottom:1px solid var(--sf-border); flex-shrink:0; }
 .sf-cases-search input,.sf-cases-search select { min-height:34px; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid var(--sf-border); border-radius:6px; padding:6px 8px; background:var(--sf-bg); color:var(--sf-text); font:inherit; }
 .sf-cases-search input { flex:1 1 150px; width:100%; }
-.sf-cases-search select { flex:1 1 110px; }
+.sf-cases-search .sf-cases-filter { display:inline-flex; align-items:center; justify-content:space-between; gap:12px; flex:1 1 110px; min-height:34px; border:1px solid var(--sf-border); border-radius:6px; padding:6px 8px; background:var(--sf-bg); color:var(--sf-text); font:inherit; cursor:pointer; }
 .sf-cases-rows { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:6px; }
 .sf-cases-row { display:flex; flex-direction:column; gap:7px; width:100%; box-sizing:border-box; padding:12px; border:1px solid transparent; border-bottom-color:var(--sf-border); border-radius:6px; background:transparent; color:var(--sf-text); font:inherit; text-align:left; cursor:pointer; }
 .sf-cases-row:hover { background:var(--sf-soft); }
@@ -62,5 +65,7 @@ export const TEST_CASES_STYLES = `
 .sf-cases-back { display:none; margin-bottom:12px; }
 .sf-cases button:focus-visible,.sf-cases summary:focus-visible,.sf-cases input:focus-visible,.sf-cases select:focus-visible,.sf-cases [tabindex]:focus-visible { outline:2px solid var(--sf-accent); outline-offset:-2px; }
 .sf-cases .sf-cases-detail-head h3:focus { outline:none; }
+@container (max-width:450px) { .sf-cases-tabs { gap:2px; }.sf-cases-tabs button { font-size:11px; padding:10px 4px; } }
 @container (max-width:760px) { .sf-cases { grid-template-columns:minmax(0,1fr); }.sf-cases-catalogue { border:0; }.sf-cases-detail { display:none; }.sf-cases.has-selection .sf-cases-catalogue { display:none; }.sf-cases.has-selection .sf-cases-detail { display:flex; }.sf-cases-back { display:inline-flex; }.sf-cases-detail-head { padding:12px 12px 0; }.sf-cases-content { padding:12px; } }
+${TEST_WORKSPACE_STYLES}
 `;

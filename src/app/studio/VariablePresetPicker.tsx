@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useState } from 'react';
 import { parsePreviewContext, type PreviewContextField, type PreviewContextVariable } from '../../../lib/preview-context.js';
 import { presetCompatibility, sameContext, type ContextPreset } from '../../../lib/preview-context-preset-contract.js';
@@ -11,11 +12,11 @@ export function VariablePresetPicker({ presets, values, fields, custom, loading,
   const [issue, setIssue] = useState('');
   const matching = !custom && presets.find(preset => sameContext(preset.values, values));
   return <div className="sf-variable-presets">
-    <style>{`.sf-variable-presets{padding:14px;background:var(--sf-sunken);border:1px solid var(--sf-border);border-radius:8px;margin:14px 0}.sf-variable-presets label{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--sf-text)}.sf-variable-presets select{flex:1;min-width:140px;max-width:100%;padding:9px;border:1px solid var(--sf-border);border-radius:6px;background:var(--sf-bg);color:var(--sf-text);font:inherit}.sf-variable-presets p{font-size:11px;line-height:1.6;margin:8px 0 0;color:var(--sf-muted)}.sf-variable-presets p[role=alert]{color:var(--sf-danger)}`}</style>
-    <label>Variable preset<select aria-label="Variable preset" disabled={loading || Boolean(error)} value={custom || values.length ? matching ? matching.id : '__custom' : ''} onChange={event => {
+    <style>{`.sf-variable-presets{padding:14px;background:var(--sf-sunken);border:1px solid var(--sf-border);border-radius:8px;margin:14px 0}.sf-variable-presets label{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--sf-text)}.sf-variable-presets .sf-picklist{flex:1;min-width:140px;max-width:100%;padding:9px;border:1px solid var(--sf-border);border-radius:6px;background:var(--sf-bg);color:var(--sf-text);font:inherit}.sf-variable-presets p{font-size:11px;line-height:1.6;margin:8px 0 0;color:var(--sf-muted)}.sf-variable-presets p[role=alert]{color:var(--sf-danger)}`}</style>
+    <label>Variable preset<SalesforcePicklist ariaLabel="Variable preset" searchable={presets.length > 6} searchPlaceholder="Search variable presets…" disabled={loading || Boolean(error)} value={custom || values.length ? matching ? matching.id : '__custom' : ''} onChange={id => {
       setIssue('');
-      if (!event.target.value) { onApply([]); return; }
-      const preset = presets.find(row => row.id === event.target.value);
+      if (!id) { onApply([]); return; }
+      const preset = presets.find(row => row.id === id);
       if (!preset) { setIssue('This preset is unavailable. Reload presets and try again.'); return; }
       try {
         const values = parsePreviewContext(preset.values);
@@ -23,7 +24,7 @@ export function VariablePresetPicker({ presets, values, fields, custom, loading,
         if (issue) throw Error(issue);
         onApply(values);
       } catch (error) { setIssue((error as Error).message); }
-    }}><option value="">{defaultsLabel}</option>{(custom || values.length > 0) && !matching && <option value="__custom">Custom values</option>}{presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name} · revision {preset.revision}</option>)}</select></label>
+    }} options={[{ value: '', label: defaultsLabel }, ...((custom || values.length > 0) && !matching ? [{ value: '__custom', label: 'Custom values', disabled: true }] : []), ...presets.map(preset => ({ value: preset.id, label: `${preset.name} · revision ${preset.revision}` }))]} /></label>
     <p>{loading ? 'Loading saved presets…' : 'Reuse presets saved in Preview or Role-play for this agent and org. Values are copied; edits here keep the saved preset unchanged.'}</p>
     {!loading && !error && !presets.length && <p>No saved presets yet. Save one in Preview → Context or Role-play → Setup → Initial variables.</p>}
     {(error || issue) && <p role="alert">{error || issue}{onReload && <button type="button" onClick={() => { setIssue(''); onReload(); }}>Reload presets</button>}</p>}

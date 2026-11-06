@@ -79,14 +79,42 @@ it('sanitizes stored state and tolerates unavailable browser storage', () => {
   expect(screen.getByRole('tab', { name: 'Actions' }).getAttribute('aria-selected')).toBe('true');
 });
 
-it('offers only the column tools; graph, preview, tests and org preview are editor views, and Release is gone', () => {
-  expect([...COLUMN_TOOLS]).toEqual(['agents', 'files', 'actions', 'comments']);
+it('offers the complete Builder and Studio catalog without Canvas, Release or a duplicate Terminal', () => {
+  expect(COLUMN_TOOLS).toContain('scorers');
+  expect(COLUMN_TOOLS).not.toContain('preview');
+  expect(COLUMN_TOOLS).not.toContain('evals');
+  expect(COLUMN_TOOLS).not.toContain('assistant');
   expect(AGENT_SCRIPT_TOOLS.some(tool => (tool.id as string) === 'release')).toBe(false);
   expect(isColumnTool('graph')).toBe(false);
   expect(isColumnTool('comments')).toBe(true);
   render(<Workspace />);
   fireEvent.click(screen.getByRole('button', { name: 'Add side panel tab' }));
   const picker = within(document.querySelector('.af-tool-picker') as HTMLElement).getAllByRole('button').map(button => button.textContent ?? '');
-  expect(picker).toHaveLength(4);
-  for (const hidden of ['Graph view', 'Preview', 'Tests', 'Org preview', 'Release']) expect(picker.some(text => text.startsWith(hidden))).toBe(false);
+  expect(picker).toHaveLength(AGENT_SCRIPT_TOOLS.length);
+  for (const hidden of ['Canvas', 'Release', 'Terminal']) expect(picker.some(text => text.startsWith(hidden))).toBe(false);
+});
+
+it('dispatches view and Assistant picker entries through the owning workspace', () => {
+  const dispatch = vi.fn();
+  function RoutedWorkspace() {
+    const tools = useAgentScriptTools('routed');
+    return <AgentScriptTools tools={tools} onOpenTool={dispatch} render={id => <input aria-label={`${id} draft`} />} />;
+  }
+  render(<RoutedWorkspace />);
+  for (const title of ['Preview', 'Assistant']) {
+    add(title);
+    expect(dispatch).toHaveBeenLastCalledWith(title.toLowerCase());
+  }
+  expect(screen.queryByLabelText('preview draft')).toBeNull();
+  expect(screen.queryByLabelText('assistant draft')).toBeNull();
+});
+
+it('retires saved console tabs while keeping other tool drafts available', () => {
+  localStorage.setItem('salesforce:agent-tools:one', JSON.stringify({ tabs: ['files', 'terminal', 'comments'], active: 'terminal', open: true }));
+  render(<Workspace />);
+  expect(screen.queryByRole('tab', { name: 'Terminal' })).toBeNull();
+  expect(screen.queryByLabelText('terminal draft')).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: 'Comments' }));
+  expect(screen.getByLabelText('comments draft')).toBeTruthy();
+  expect(JSON.parse(localStorage.getItem('salesforce:agent-tools:one')!).tabs).toEqual(['files', 'comments']);
 });

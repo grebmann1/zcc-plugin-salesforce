@@ -1,5 +1,6 @@
-import { clearStudioRunWorkspaces } from './studio/run-workspaces.js';
 /** @vitest-environment happy-dom */
+import { choosePicklistValue, findPicklistOption } from '../test/picklist.js';
+import { clearStudioRunWorkspaces } from './studio/run-workspaces.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, cleanup, within } from '@testing-library/react';
 import { AgentforceLabPanel, elapsed, labExchanges, labSteps } from './AgentforceLabPanel.js';
@@ -65,11 +66,11 @@ describe('Agentforce rehearsal UI', () => {
     openVariables();
     await screen.findByLabelText('Session value');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Set Session' }));
-    fireEvent.change(screen.getByLabelText('Verified value'), { target: { value: 'false' } });
+    choosePicklistValue(screen.getByLabelText('Verified value'), 'false');
     fireEvent.change(screen.getByLabelText('Count value'), { target: { value: '0' } });
     fireEvent.click(screen.getByLabelText('Options for Details'));
     fireEvent.click(screen.getByRole('button', { name: 'Set Details to null' }));
-    fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '1' } });
+    choosePicklistValue(screen.getByLabelText('Conversation budget'), '1');
     await startRun(/Run AI role-play/);
     await screen.findByText('Run complete');
     expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.run', expect.objectContaining({ engine, path: 'Helper.agent', contextVariables }));
@@ -96,16 +97,16 @@ describe('Agentforce rehearsal UI', () => {
     });
     const view = render(<AgentforceLabPanel {...props} mode="test" agentPath="Helper.agent" orgAlias="dev" />);
     openVariables();
-    await screen.findByRole('option', { name: 'Existing customer' });
-    fireEvent.change(screen.getByLabelText('Context preset'), { target: { value: 'customer' } });
+    await findPicklistOption(screen.getByLabelText('Context preset'), 'Existing customer');
+    choosePicklistValue(screen.getByLabelText('Context preset'), 'customer');
     expect((screen.getByLabelText('Count value') as HTMLInputElement).value).toBe('0');
     fireEvent.change(screen.getByLabelText('Count value'), { target: { value: '-' } });
     fireEvent.blur(screen.getByLabelText('Count value'));
     expect(screen.getByRole('alert').textContent).toContain('Enter a number');
     expect((screen.getByRole('button', { name: /Run AI role-play/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(rpc.mock.calls.some(c => c[1] === 'agentLab.start')).toBe(false);
-    fireEvent.change(screen.getByLabelText('Context preset'), { target: { value: 'customer' } });
-    fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '1' } });
+    choosePicklistValue(screen.getByLabelText('Context preset'), 'customer');
+    choosePicklistValue(screen.getByLabelText('Conversation budget'), '1');
     await startRun(/Run AI role-play/);
     await screen.findByText('Run complete');
     expect(rpc.mock.calls.find(c => c[1] === 'agentLab.run')![2].contextVariables).toEqual(preset.values);
@@ -213,7 +214,7 @@ describe('Agentforce rehearsal UI', () => {
     fireEvent.change(screen.getByLabelText('Customer goal'), { target: { value: 'Find an order' } });
     fireEvent.change(screen.getByLabelText('Opening message'), { target: { value: 'Where is my order?' } });
     fireEvent.change(screen.getByLabelText('Success criteria'), { target: { value: 'Ask for the order ID' } });
-    fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '2' } });
+    choosePicklistValue(screen.getByLabelText('Conversation budget'), '2');
     fireEvent.change(screen.getByLabelText('Salesforce model API name'), { target: { value: 'CustomModel' } });
     await startRun(/Run AI role-play/);
     await screen.findByText('Run complete');
@@ -287,7 +288,7 @@ describe('Agentforce rehearsal UI', () => {
       clearStudioRunWorkspaces();
       rpc.mockImplementation(async (plugin, method, args) => { const result = await defaultRpc(plugin, method, args); if (method === 'agentLab.run') { session = { ...session, execution: { ...session.execution!, verdict: { outcome: outcome as 'fail' | 'inconclusive', reason: 'Needs review', evidence: ['Missing detail'] } } }; return { ok: true, data: session }; } return result; });
       const test = render(<AgentforceLabPanel {...props} mode="test" />);
-      fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '1' } });
+      choosePicklistValue(screen.getByLabelText('Conversation budget'), '1');
       await startRun(/Run AI role-play/);
       await screen.findByText(label);
       test.unmount();
@@ -426,7 +427,7 @@ describe('Agentforce rehearsal UI', () => {
     render(<AgentforceLabPanel {...props} mode="test" />);
     expect(within(screen.getByRole('region', { name: 'Run setup' })).getByText('Customer goal')).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Conversation' }).querySelector('.af-scenario-details')).toBeNull();
-    fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '2' } });
+    choosePicklistValue(screen.getByLabelText('Conversation budget'), '2');
     await startRun(/Run AI role-play/);
     await screen.findByText('Run complete');
     await waitFor(() => expect(evidence().textContent).toContain('Action plan-2'));
@@ -473,7 +474,7 @@ describe('Agentforce rehearsal UI', () => {
     fireEvent.keyDown(controls.at(-1)!, { key: 'Tab' });
     expect(document.activeElement).toBe(close);
     fireEvent.keyDown(dialog, { key: 'x' });
-    fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '1' } });
+    choosePicklistValue(screen.getByLabelText('Conversation budget'), '1');
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(toggle);
@@ -513,7 +514,7 @@ describe('Agentforce rehearsal UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Setup', exact: true }));
     const setup = screen.getByRole('dialog', { name: 'Run setup' });
     fireEvent.change(within(setup).getByLabelText('Customer goal'), { target: { value: 'Preserve this scenario' } });
-    fireEvent.change(within(setup).getByLabelText('Conversation budget'), { target: { value: '1' } });
+    choosePicklistValue(within(setup).getByLabelText('Conversation budget'), '1');
     fireEvent.click(within(setup).getByRole('button', { name: 'Close run setup' }));
     await startRun(/Run AI role-play/);
     await screen.findByText('Run complete');
@@ -572,7 +573,7 @@ describe('Agentforce rehearsal UI', () => {
       return defaultRpc(plugin, method, args);
     });
     render(<AgentforceLabPanel {...props} mode="test" agentPath="aiAuthoringBundles/Helper/Helper.agent" />);
-    fireEvent.change(screen.getByLabelText('Conversation budget'), { target: { value: '1' } });
+    choosePicklistValue(screen.getByLabelText('Conversation budget'), '1');
     await startRun(/Run AI role-play/);
     await screen.findByText('Run complete');
     await waitFor(() => expect(evidence().textContent).toContain('Orders'));
@@ -651,7 +652,7 @@ it('copies shared scenarios and typed variables into role-play without adopting 
   const shared = { scenarios: rows, loading: false, error: '', reload: vi.fn(), save: vi.fn(), remove: vi.fn(), onManage: vi.fn() };
   const view = render(<AgentforceLabPanel {...props} agentPath="Bot.agent" mode="test" scenarioLibrary={shared} />);
   await waitFor(() => expect((screen.getByRole('button', { name: /Run AI role-play/ }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.change(screen.getByLabelText('Shared scenario'), { target: { value: rows[1].id } });
+  choosePicklistValue(screen.getByLabelText('Shared scenario'), rows[1].id);
   expect((screen.getByLabelText('Customer goal') as HTMLInputElement).value).toBe(rows[1].goal);
   fireEvent.click(screen.getByRole('button', { name: 'Manage scenarios' })); expect(shared.onManage).toHaveBeenCalled();
   view.rerender(<AgentforceLabPanel {...props} agentPath="Bot.agent" mode="test" scenarioLibrary={{ ...shared, scenarios: rows.map(row => ({ ...row, goal: 'Later goal', revision: 2 })) }} />);

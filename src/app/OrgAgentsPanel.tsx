@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useEffect, useRef, useState } from 'react';
 import { Bot, Download, Plus, RefreshCw, Search } from 'lucide-react';
 import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
@@ -197,9 +198,7 @@ export function OrgAgentsPanel({ pluginId, projectId, visible, editorReady, onOp
           <span className="af-agent-row-main" title={agent.name}><Bot size={14} aria-hidden="true" /><span className="af-agent-row-name">{label(agent.name)}</span>
             {changed && <time className="af-agent-row-date" dateTime={changed.iso}>{changed.label}</time>}</span>
           <span className="af-agent-row-actions">
-            {agent.versions.length > 1 && <select aria-label={`Source version for ${agent.name}`} value={fullName} disabled={Boolean(retrieving)} onChange={event => setSelected(value => ({ ...value, [agent.name]: event.target.value }))}>
-              {agent.versions.map(version => <option key={version.fullName} value={version.fullName}>{version.version === null ? 'Current' : `v${version.version}`}</option>)}
-            </select>}
+            {agent.versions.length > 1 && <SalesforcePicklist ariaLabel={`Source version for ${agent.name}`} value={fullName} disabled={Boolean(retrieving)} onChange={fullName => setSelected(value => ({ ...value, [agent.name]: fullName }))} searchable={false} options={agent.versions.map(version => ({ value: version.fullName, label: version.version === null ? 'Current' : `v${version.version}` }))} />}
             <button className="af-secondary" type="button" aria-label={`Retrieve & open ${agent.name}`} disabled={Boolean(retrieving) || !editorReady} onClick={() => void retrieve(fullName)}>
               <Download size={13} aria-hidden="true" />{busy ? 'Retrieving…' : 'Retrieve'}
             </button>

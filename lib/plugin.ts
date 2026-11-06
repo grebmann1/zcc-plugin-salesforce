@@ -18,6 +18,7 @@ import { CONTEXT_CHANGED_CHANNEL, STUDIO_CHANGED_CHANNEL, contextOrigin } from '
 import { registerStudioAssistant } from './studio-threads.js';
 import { registerStudioContext } from './studio-view.js';
 import { registerStudioComments } from './studio-comments.js';
+import { registerStudioBuilder } from './studio-builder.js';
 import { registerStudioPreview, type SuiteEvalReply } from './scenario-suites.js';
 import { evalCaseOutcomes } from './eval-spec.js';
 import { registerStudioExplorer } from './studio-explorer.js';
@@ -879,6 +880,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   const assistant = registerStudioAssistant(studio);
   registerStudioContext(studio);
   registerStudioComments(studio);
+  registerStudioBuilder(studio);
   const agentAt = async (path: string) => {
     const loaded = await loadAgentBundles({ path }, await readSettings(), deps);
     if (!('projectRoot' in loaded)) return loaded as ToolFailure;

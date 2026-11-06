@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../../test/picklist.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SalesforceUiProvider } from '../components/client.js';
@@ -184,7 +185,7 @@ describe('SOQL workbench interactions', () => {
   it.each(['CSV', 'JSON', 'Excel'])('exports %s only after review', async kind => {
     await mount();
     await runQuery();
-    fireEvent.change(screen.getByLabelText('Export results'), { target: { value: kind === 'Excel' ? 'copy-tsv' : kind.toLowerCase() } });
+    choosePicklistValue(screen.getByLabelText('Export results'), kind === 'Excel' ? 'copy-tsv' : kind.toLowerCase());
     expect(downloadText).not.toHaveBeenCalled();
     expect(copyText).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -196,7 +197,7 @@ describe('SOQL workbench interactions', () => {
     const view = await mount();
     await runQuery();
     vi.mocked(copyText).mockRejectedValueOnce(Error('Clipboard unavailable'));
-    fireEvent.change(screen.getByLabelText('Export results'), { target: { value: 'copy-tsv' } });
+    choosePicklistValue(screen.getByLabelText('Export results'), 'copy-tsv');
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await screen.findByText(/Clipboard unavailable/);
     call.mockImplementation(async (method: string) => method === 'soql.query' ? { ok: false, error: 'Invalid field', line: 1, column: 8 } : respond(method));
