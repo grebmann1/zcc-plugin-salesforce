@@ -363,7 +363,7 @@ describe('opening a version read-only', () => {
       ok: true,
       data: { apiName: 'MyBot', versionNumber: 1, active: true, fullName: 'MyBot_v1', content: 'version one' }
     });
-    expect(sf.at(-1)).toEqual(['project', 'retrieve', 'start', '--metadata', 'AiAuthoringBundle:MyBot_v2', '--metadata', 'AiAuthoringBundle:MyBot_v1',
+    expect(sf.at(-1)).toEqual(['project', 'retrieve', 'start', '--metadata', 'AiAuthoringBundle:MyBot_v1', '--metadata', 'AiAuthoringBundle:MyBot_v2',
       '--metadata', 'AiAuthoringBundle:MyBot', '--target-org', 'dev', '--json', '--wait', '2']);
     expect(existsSync(state.retrievedIn!)).toBe(false);
     expect(files).toEqual(before);
@@ -408,7 +408,7 @@ describe('opening a version read-only', () => {
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ code: 'version_unavailable', error: expect.stringContaining('no authoring bundle on dev') });
     state.bundles = { MyBot: BUNDLES.MyBot!, MyBot_v2: BUNDLES.MyBot_v2! };
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({
-      code: 'version_unavailable', error: expect.stringContaining('None of the 2 newest MyBot authoring bundles on dev published v1.')
+      code: 'version_unavailable', error: expect.stringContaining('None of the 2 checked MyBot authoring bundles on dev published v1.')
     });
     state.queryStatus = 500;
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ code: 'api_error' });

@@ -10,7 +10,7 @@ const LIMIT = 1000;
 const SOURCE_LIMIT = AGENT_SOURCE_MAX;
 const TIMEOUT = 120_000;
 const META_LIMIT = 64_000;
-/** How many of an agent's newest authoring bundles one version read retrieves. */
+/** How many candidate authoring bundles one version read retrieves. */
 const VERSION_CANDIDATES = 10;
 const META_SUFFIX = '.bundle-meta.xml';
 const NAME = /^[A-Za-z][A-Za-z0-9_]*(?:#[1-9][0-9]*|\.v[1-9][0-9]*)?$/;
@@ -158,16 +158,22 @@ export class OrgAgentService {
       // already knows the exact BotDefinition name. Use it only to find a
       // bounded set of candidate bundles; <target> remains the version identity.
       const suffix = new RegExp(`^${apiName}(?:_v|_|\\.v|#)([1-9][0-9]*)$`);
-      const candidates = parseAgentCatalog(listed).agents.flatMap(agent => agent.versions)
+      const available = parseAgentCatalog(listed).agents.flatMap(agent => agent.versions)
         .flatMap(version => {
           if (version.fullName === apiName) return [{ ...version, version: 0 }];
           const match = suffix.exec(version.fullName);
           const number = match ? Number(match[1]) : NaN;
           return Number.isSafeInteger(number) ? [{ ...version, version: number }] : [];
         })
-        .sort((a, b) => b.version - a.version)
-        .slice(0, VERSION_CANDIDATES)
-        .map(version => version.fullName);
+        .sort((a, b) => b.version - a.version);
+      // The matching source suffix is a useful retrieval hint for older
+      // versions, never proof of identity. Keep the read bounded and still
+      // prefer the newest matching metadata target when several bundles match.
+      const candidates = [...new Set([
+        ...available.filter(version => version.version === versionNumber).map(version => version.fullName),
+        ...available.map(version => version.fullName),
+      ])].slice(0, VERSION_CANDIDATES);
+      const selectionOrder = available.filter(version => candidates.includes(version.fullName)).map(version => version.fullName);
       const older = 'Versions built before the new Agentforce Builder have no Agent Script.';
       if (!candidates.length) throw Error(`${apiName} has no authoring bundle on ${org.alias}. ${older}`);
       signal.throwIfAborted();
@@ -177,8 +183,8 @@ export class OrgAgentService {
       const result = cliResult(await this.deps.execSf(['project', 'retrieve', 'start', ...metadata, '--target-org', org.alias, '--json', '--wait', '2'], { cwd: temporary, timeoutMs: TIMEOUT, signal }));
       signal.throwIfAborted();
       if (record(result).success === false || record(result).done === false) throw Error('Salesforce did not complete the retrieval. Retry after it finishes.');
-      const found = targetSource(join(temporary, 'force-app'), `${apiName}.v${versionNumber}`, candidates);
-      if (!found) throw Error(`None of the ${candidates.length} newest ${apiName} authoring bundles on ${org.alias} published v${versionNumber}. ${older}`);
+      const found = targetSource(join(temporary, 'force-app'), `${apiName}.v${versionNumber}`, selectionOrder);
+      if (!found) throw Error(`None of the ${candidates.length} checked ${apiName} authoring bundles on ${org.alias} published v${versionNumber}. ${older}`);
       return found;
     } finally {
       if (temporary) rmSync(temporary, { recursive: true, force: true });
