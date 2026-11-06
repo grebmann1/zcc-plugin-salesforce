@@ -1,3 +1,4 @@
+import { SalesforcePicklist, containsPicklistTarget } from '../components/SalesforcePicklist.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageSquare, Play, SlidersHorizontal } from 'lucide-react';
 import { useStudioSplit } from './StudioResize.js';
@@ -116,7 +117,7 @@ function AgentSimulations(props: SimulationsViewProps) {
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
-    const close = (event: Event) => { if (settings.current && !settings.current.contains(event.target as Node)) settings.current.open = false; };
+    const close = (event: Event) => { if (settings.current && !containsPicklistTarget(settings.current, event.target)) settings.current.open = false; };
     document.addEventListener('pointerdown', close, true);
     document.addEventListener('focusin', close, true);
     return () => { document.removeEventListener('pointerdown', close, true); document.removeEventListener('focusin', close, true); };
@@ -305,10 +306,10 @@ function AgentSimulations(props: SimulationsViewProps) {
       <details ref={settings} className="sf-sim-settings" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); event.stopPropagation(); } }}>
         <summary><SlidersHorizontal size={14} aria-hidden="true" />Run settings</summary>
         <div className="sf-sim-settings-body" role="group" aria-label="Run settings">
-          <label>Engine<select value={engine} disabled={running || busy !== null} onChange={event => setEngine(event.target.value as LabEngine)} aria-label="Engine"><option value="preview">Simulate</option><option value="rehearsal">Rehearse</option></select></label>
-          <label>In parallel<select value={parallel} disabled={running || busy !== null} onChange={event => setParallel(Number(event.target.value))} aria-label="Parallel conversations">{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
-          <label>Repeats<select value={repeats} disabled={running || busy !== null} onChange={event => setRepeats(Number(event.target.value))} aria-label="Repeats">{Array.from({ length: SIMULATION_LIMITS.repeats }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}×</option>)}</select></label>
-          <label>Batch context preset<select aria-label="Simulation context preset" value={contextPreset} disabled={running || busy !== null} onChange={event => { const id = event.target.value; setReusedContext(parsePreviewContext(contextPresets.find(p => p.id === id)?.values ?? [])); setContextPreset(id); }}><option value="">Agent defaults</option>{contextPreset === '__batch' && <option value="__batch">Values from selected batch</option>}{contextPresets.map(p => <option key={p.id} value={p.id}>{p.name} · {contextPreset === p.id && !sameContext(p.values, reusedContext) ? 'copied values' : `revision ${p.revision}`}</option>)}</select></label>
+          <label>Engine<SalesforcePicklist<LabEngine> value={engine} disabled={running || busy !== null} onChange={setEngine} ariaLabel="Engine" searchable={false} options={[{ value: 'preview', label: 'Simulate' }, { value: 'rehearsal', label: 'Rehearse' }]} /></label>
+          <label>In parallel<SalesforcePicklist value={String(parallel)} disabled={running || busy !== null} onChange={value => setParallel(Number(value))} ariaLabel="Parallel conversations" searchable={false} options={[1, 2, 3, 4].map(n => ({ value: String(n), label: String(n) }))} /></label>
+          <label>Repeats<SalesforcePicklist value={String(repeats)} disabled={running || busy !== null} onChange={value => setRepeats(Number(value))} ariaLabel="Repeats" searchable={false} options={Array.from({ length: SIMULATION_LIMITS.repeats }, (_, i) => ({ value: String(i + 1), label: `${i + 1}×` }))} /></label>
+          <label>Batch context preset<SalesforcePicklist ariaLabel="Simulation context preset" value={contextPreset} disabled={running || busy !== null} onChange={id => { setReusedContext(parsePreviewContext(contextPresets.find(p => p.id === id)?.values ?? [])); setContextPreset(id); }} searchable={contextPresets.length > 6} searchPlaceholder="Search context presets…" options={[{ value: '', label: 'Agent defaults' }, ...(contextPreset === '__batch' ? [{ value: '__batch', label: 'Values from selected batch', disabled: true }] : []), ...contextPresets.map(p => ({ value: p.id, label: `${p.name} · ${contextPreset === p.id && !sameContext(p.values, reusedContext) ? 'copied values' : `revision ${p.revision}`}` }))]} /></label>
           {contextError && <p role="status">{contextError}</p>}
           <p>Create presets in Preview → Context. These are batch defaults; each scenario can override individual variables.</p>
         </div>
@@ -345,9 +346,7 @@ function AgentSimulations(props: SimulationsViewProps) {
       <span className="sf-tp-chip">{BATCH_LABEL[batch.status]}{running ? ` · ${finished}/${counts.total}` : ''}</span>
       <span className="sf-tp-sub">{batch.engine === 'preview' ? 'Simulate' : 'Rehearse'}{batch.orgAlias ? ` · ${batch.orgAlias}` : ''}{batch.candidate ? ' · draft' : ''}{batch.startedBy === 'thread' ? ' · started by the agent' : ''}</span>
       <span className="sf-tp-spacer" />
-      {batches.length > 1 && <select aria-label="Simulation batch" value={batch.id} onChange={event => pickBatch(event.currentTarget.value)}>
-        {batches.map(row => <option key={row.id} value={row.id}>{new Date(row.startedAt).toLocaleString()} · {row.counts.pass}/{row.counts.total} · {BATCH_LABEL[row.status]}</option>)}
-      </select>}
+      {batches.length > 1 && <SalesforcePicklist ariaLabel="Simulation batch" value={batch.id} onChange={pickBatch} searchable={batches.length > 6} searchPlaceholder="Search simulation batches…" options={batches.map(row => ({ value: row.id, label: `${new Date(row.startedAt).toLocaleString()} · ${row.counts.pass}/${row.counts.total} · ${BATCH_LABEL[row.status]}` }))} />}
     </div>}
     <SelfHealingPanel key={`${projectId}:${path}`} path={path} source={source} batch={batch} visible={visible} rpc={rpc} onAskAgent={onAskAgent} onInvestigate={batch && onAskAgent ? () => onAskAgent(improvePrompt(batch)) : undefined} />
     <div className="sf-sim-results-workspace" ref={resultsSplit.ref} style={resultsSplit.style}>

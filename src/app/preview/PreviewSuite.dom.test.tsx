@@ -1,5 +1,6 @@
-import { clearStudioRunWorkspaces } from '../studio/run-workspaces.js';
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../../test/picklist.js';
+import { clearStudioRunWorkspaces } from '../studio/run-workspaces.js';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PreviewSuite } from './PreviewSuite.js';
@@ -30,7 +31,7 @@ describe('Preview scenario summary', () => {
     fireEvent.click(name);
     expect(screen.queryByRole('region', { name: /Details for/ })).toBeNull();
     fireEvent.click(name);
-    fireEvent.change(screen.getByLabelText('Scenario result filter'), { target: { value: 'pass' } });
+    choosePicklistValue(screen.getByLabelText('Scenario result filter'), 'pass');
     expect(screen.queryByRole('region', { name: /Details for/ })).toBeNull();
   });
   it('shows full names and filters in a dedicated scenario view', () => {
@@ -42,13 +43,13 @@ describe('Preview scenario summary', () => {
     expect(container.textContent).toContain('1 not run');
     expect(screen.getByRole('region', { name: 'Scenario cases' })).toBeTruthy();
     expect(screen.getByText(suite.cases[0].name)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Scenario result filter'), { target: { value: 'fail' } });
+    choosePicklistValue(screen.getByLabelText('Scenario result filter'), 'fail');
     expect(container.querySelectorAll('.sf-pw-suite-case')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: `Rerun ${suite.cases[0].name}` }));
     expect(onRun).toHaveBeenCalledWith(['0']);
     fireEvent.change(screen.getByLabelText('Search scenarios'), { target: { value: 'no match' } });
     expect(screen.getByRole('status').textContent).toContain('No scenarios match');
-    fireEvent.change(screen.getByLabelText('Scenario result filter'), { target: { value: 'all' } });
+    choosePicklistValue(screen.getByLabelText('Scenario result filter'), 'all');
     fireEvent.change(screen.getByLabelText('Search scenarios'), { target: { value: '  CAPABILITIES  ' } });
     expect(container.querySelectorAll('.sf-pw-suite-case')).toHaveLength(1);
     expect(screen.getByText('Capabilities are clear')).toBeTruthy();
@@ -70,7 +71,7 @@ describe('Preview scenario summary', () => {
     rerender(<PreviewSuite pluginId="salesforce" {...props} suite={{ ...suite, lastResults: {} }} disabled={false} />);
     expect(container.textContent).toContain('0/4 pass');
     expect(container.textContent).toContain('4 not run');
-    for (const filter of ['pass', 'inconclusive', 'unrun']) fireEvent.change(screen.getByLabelText('Scenario result filter'), { target: { value: filter } });
+    for (const filter of ['pass', 'inconclusive', 'unrun']) choosePicklistValue(screen.getByLabelText('Scenario result filter'), filter);
     expect(container.querySelectorAll('.sf-pw-suite-case')).toHaveLength(4);
   });
   it('explains a blocked run, returns to the conversation and stops the active suite', () => {

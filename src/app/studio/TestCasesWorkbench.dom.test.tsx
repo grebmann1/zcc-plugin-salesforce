@@ -65,6 +65,19 @@ it('shows a concise list, opens a case, and keeps technical checks in Expectatio
   expect(screen.getByText('No expectations have been configured for this case.')).toBeTruthy();
 });
 
+it('describes each case button with its current visible result without changing its action name', () => {
+  const { props, rerender } = setup({ cases: [{ ...cases[0]!, id: 'case with spaces' }], results: { 'case with spaces': result({ outcome: 'fail' }) } });
+  const row = screen.getByRole('button', { name: 'Details for Quote journey' });
+  const description = () => document.getElementById(row.getAttribute('aria-describedby')!)!;
+  expect(description().textContent?.trim()).toBe('✕ Failed');
+  expect(screen.getByRole('button', { name: 'Details for Quote journey', description: 'Failed' })).toBe(row);
+  expect(description().querySelector('[aria-hidden="true"]')).toBeTruthy();
+  expect(row.getAttribute('aria-describedby')).not.toMatch(/\s/);
+  rerender(<TestCasesWorkbench {...props} results={{ 'case with spaces': result() }} />);
+  expect(description().textContent?.trim()).toBe('✓ Passed');
+  expect(screen.getByRole('button', { name: 'Details for Quote journey', description: 'Passed' })).toBe(row);
+});
+
 it('searches titles and messages, reports no matches, and clears filters', () => {
   const { props } = setup();
   const search = screen.getByRole('searchbox');
@@ -76,7 +89,8 @@ it('searches titles and messages, reports no matches, and clears filters', () =>
   fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
   expect(props.onFilterChange).toHaveBeenCalledWith('all');
   expect((search as HTMLInputElement).value).toBe('');
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'stopped' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Filter case results' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Stopped' }));
   expect(props.onFilterChange).toHaveBeenCalledWith('stopped');
 });
 

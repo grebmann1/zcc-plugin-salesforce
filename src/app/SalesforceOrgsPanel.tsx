@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useEffect, useMemo, useState } from 'react';
 import { AppWindow, Bot, Database, FileCode, FlaskConical, Home, Package, type LucideIcon } from 'lucide-react';
 import { useZccNavigate } from '@zana-ai/zcc-plugin-sdk/app';
@@ -113,14 +114,7 @@ export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string 
             <>
               <label className="sf-hub-project">
                 <span className="sf-muted">Project</span>
-                <select aria-label="Project" value={project.id} onChange={event => choose(event.target.value)}>
-                  {salesforceProjects.length > 0 && otherProjects.length > 0 ? (
-                    <>
-                      <optgroup label="Salesforce projects">{salesforceProjects.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</optgroup>
-                      <optgroup label="Other projects">{otherProjects.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</optgroup>
-                    </>
-                  ) : projects.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
-                </select>
+                <SalesforcePicklist ariaLabel="Project" value={project.id} onChange={choose} searchable={projects.length > 6} searchPlaceholder="Search projects…" options={salesforceProjects.length > 0 && otherProjects.length > 0 ? [...salesforceProjects.map(row => ({ value: row.id, label: row.name, group: 'Salesforce projects' })), ...otherProjects.map(row => ({ value: row.id, label: row.name, group: 'Other projects' }))] : projects.map(row => ({ value: row.id, label: row.name }))} />
                 <span className="sf-muted sf-small" data-testid="salesforce-hub-target">
                   {target ? <>Target <strong>{target}</strong></> : 'Uses the shared default org'}
                   {!project.dxProject && ' · drafts only, no DX project'}

@@ -137,10 +137,12 @@ describe('salesforce plugin contract', () => {
     expect(set.projectTabs[0]).toMatchObject({ label: 'Salesforce', icon: 'Cloud', global: false, detachable: true });
     expect(typeof set.projectTabs[0]?.detachedPlaceholder).toBe('function');
     expect(set.threadPanelActions.map((row) => row.id)).toEqual(['sf-org', 'sf-soql', 'sf-object', 'sf-record', 'sf-logs', 'sf-deployments', 'sf-operations', 'agent', 'preview',
-      'studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments']);
-    // Studio's tools are listed only beside the Salesforce tab, never in a thread or agent session.
+      'studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments',
+      'studio-evals', 'studio-sessions', 'studio-analytics', 'studio-issues', 'studio-scorers', 'studio-experiments', 'studio-compare', 'studio-artifacts', 'studio-settings', 'studio-import']);
+    // Builder tools also work independently beside threads; legacy Studio portals stay page-owned.
     for (const row of set.threadPanelActions.filter(row => row.id.startsWith('studio-'))) {
-      expect(row).toMatchObject({ scopes: ['plugin-page'], pages: ['salesforce'], layout: 'flush', category: 'Agent Script Studio' });
+      expect(row).toMatchObject({ scopes: ['studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments'].includes(row.id)
+        ? ['plugin-page'] : ['plugin-page', 'thread', 'agent-session'], pages: ['salesforce'], layout: 'flush', category: 'Agent Script Studio' });
     }
     expect(set.threadPanelActions.find(row => row.id === 'agent')).toMatchObject({ title: 'Agent', layout: 'flush', scopes: ['thread', 'agent-session'] });
     expect(set.threadPanelActions.find(row => row.id === 'preview')).toMatchObject({ title: 'Preview', layout: 'flush' });

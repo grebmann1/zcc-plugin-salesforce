@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, Cloud } from 'lucide-react';
 import { setPluginSettings } from '@zana-ai/zcc-plugin-sdk/app';
@@ -187,34 +188,27 @@ export function OrgPicker(props: OrgPickerProps) {
     const connections = Boolean(props.onConnect || props.onManage);
     const disabled = props.disabled || busy || (orgs.length === 0 && !connections);
     const description = selectedOrg ? orgOptionLabel(selectedOrg) : error || (busy ? 'Loading orgs…' : selected ? `${selected} (unavailable)` : orgs.length ? 'Choose an org' : 'No connected orgs');
-    const picker = <select
-        className="sf-org-picker"
-        aria-label="Salesforce org"
-        title={description}
-        data-testid="salesforce-org-picker"
-        disabled={disabled}
-        value={selected}
-        onChange={(event) => {
-          const value = event.target.value;
-          if (value === CONNECT_OPTION) props.onConnect?.();
-          else if (value === MANAGE_OPTION) props.onManage?.();
-          else void select(value);
-        }}
-      >
-        {orgs.length === 0 ? (
-          <option value="">{busy ? 'Loading orgs…' : error || 'No CLI orgs'}</option>
-        ) : (
-          <>{!selectedOrg && <option value={selected} disabled>{selected ? `${selected} (unavailable)` : 'Choose an org'}</option>}{orgs.map((org) => (
-            <option key={org.alias || org.username} value={org.alias || org.username}>
-              {orgOptionLabel(org)}
-            </option>
-          ))}</>
-        )}
-        {connections && <optgroup label="Connections">
-          {props.onConnect && <option value={CONNECT_OPTION}>Connect org…</option>}
-          {props.onManage && <option value={MANAGE_OPTION}>Manage orgs…</option>}
-        </optgroup>}
-      </select>;
+    const picker = <SalesforcePicklist
+      triggerClassName="sf-org-picker"
+      ariaLabel="Salesforce org"
+      title={description}
+      triggerTestId="salesforce-org-picker"
+      disabled={disabled}
+      value={selected}
+      searchable={orgs.length > 6}
+      searchPlaceholder="Search connected orgs…"
+      onChange={value => {
+        if (value === CONNECT_OPTION) props.onConnect?.();
+        else if (value === MANAGE_OPTION) props.onManage?.();
+        else void select(value);
+      }}
+      options={[
+        ...(!selectedOrg ? [{ value: selected, label: orgs.length === 0 ? (busy ? 'Loading orgs…' : error || 'No CLI orgs') : selected ? `${selected} (unavailable)` : 'Choose an org', disabled: true }] : []),
+        ...orgs.map(org => ({ value: org.alias || org.username, label: orgOptionLabel(org) })),
+        ...(props.onConnect ? [{ value: CONNECT_OPTION, label: 'Connect org…', group: 'Connections', sticky: true }] : []),
+        ...(props.onManage ? [{ value: MANAGE_OPTION, label: 'Manage orgs…', group: 'Connections', sticky: true }] : [])
+      ]}
+    />;
     return (
       <>
       {loginDialog}

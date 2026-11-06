@@ -10,8 +10,9 @@
  * never the identity of the tool or its agent-owned state.
  */
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { BUILDER_TOOLS } from '../../../lib/studio-builder-contract.js';
 
-export const PANEL_TOOLS = ['graph', 'preview', 'test', 'org-preview', 'actions', 'comments'] as const;
+export const PANEL_TOOLS = ['graph', 'preview', 'test', 'org-preview', 'actions', 'comments', ...BUILDER_TOOLS] as const;
 export type PanelTool = typeof PANEL_TOOLS[number];
 export const isPanelTool = (value: unknown): value is PanelTool => PANEL_TOOLS.includes(value as PanelTool);
 export const panelToolActionId = (tool: PanelTool) => `studio-${tool}`;
@@ -117,7 +118,9 @@ function slotFor(scope: Scope, tool: PanelTool): StudioToolSlot {
 /** A host tab shows `tool`'s node in `container`; returns the hand-back. */
 export function attachStudioTool(key: string, tool: PanelTool, container: HTMLElement, tabId?: string): () => void {
   const scope = scopeFor(key);
-  const slot = slotFor(scope, tool);
+  // Keep the public Tests and Evals actions compatible, with one agent-owned
+  // workspace. Restored host tabs can use either action without duplicating runs.
+  const slot = slotFor(scope, tool === 'evals' ? 'test' : tool);
   const attachment = Symbol();
   attachments.set(slot.node, attachment);
   container.appendChild(slot.node);

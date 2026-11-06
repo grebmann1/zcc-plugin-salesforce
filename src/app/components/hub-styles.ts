@@ -10,7 +10,7 @@ export const HUB_STYLES = `
 .sf-hub-studio-icon { flex:none; width:40px; height:40px; display:grid; place-items:center; border-radius:10px; color:var(--text-on-accent,#fff); background:var(--accent); }
 .sf-hub-studio-icon svg { width:20px; height:20px; }
 .sf-hub-project { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; }
-.sf-hub-project select { min-width:0; width:200px; max-width:100%; height:30px; padding:0 8px; color:var(--text-primary); border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); }
+.sf-hub-project .sf-picklist { min-width:0; width:200px; max-width:100%; height:30px; padding:0 8px; color:var(--text-primary); border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); }
 .sf-hub-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .sf-hub-actions .sf-btn { max-width:100%; white-space:normal; }
 .sf-hub-actions .sf-btn svg { width:15px; height:15px; }

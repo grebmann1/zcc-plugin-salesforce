@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './SalesforcePicklist.js';
 import { useState, type ReactNode } from "react";
 import type { PublicOrgView, PublicListedOrg } from "../../../lib/types.js";
 import type { SoqlSObjectDescribe } from "../../../lib/soql-describe.js";
@@ -59,31 +60,21 @@ export function OrgSwitcher({
   onChange(alias: string): void;
 }) {
   return (
-    <select
-      className="sf-org-picker"
-      aria-label="Salesforce org"
-      data-testid="salesforce-org-picker"
+    <SalesforcePicklist
+      triggerClassName="sf-org-picker"
+      ariaLabel="Salesforce org"
+      triggerTestId="salesforce-org-picker"
       value={value}
       disabled={disabled || !orgs.length}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      {!value && (
-        <option value="">
-          {orgs.length ? "Choose an org" : "No connected orgs"}
-        </option>
-      )}
-      {value && !orgs.some((org) => (org.alias || org.username) === value) && (
-        <option value={value}>{value} (not in connected list)</option>
-      )}
-      {orgs.map((org) => (
-        <option
-          key={org.alias || org.username}
-          value={org.alias || org.username}
-        >
-          {org.alias || org.username} ({org.kind})
-        </option>
-      ))}
-    </select>
+      onChange={onChange}
+      searchable={orgs.length > 6}
+      searchPlaceholder="Search connected orgs…"
+      options={[
+        ...(!value ? [{ value: '', label: orgs.length ? 'Choose an org' : 'No connected orgs' }] : []),
+        ...(value && !orgs.some(org => (org.alias || org.username) === value) ? [{ value, label: `${value} (not in connected list)` }] : []),
+        ...orgs.map(org => ({ value: org.alias || org.username, label: `${org.alias || org.username} (${org.kind})` }))
+      ]}
+    />
   );
 }
 export function ErrorState({

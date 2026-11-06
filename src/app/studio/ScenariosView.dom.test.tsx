@@ -1,4 +1,6 @@
 /** @vitest-environment happy-dom */
+import { findPicklistOption } from '../../test/picklist.js';
+import { choosePicklistValue } from '../../test/picklist.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
@@ -29,8 +31,8 @@ it('edits a revision, copies typed presets and explicitly saves before sharing a
   fireEvent.change(screen.getByLabelText('Scenario 1 goal'), { target: { value: 'Create a quote' } });
   expect((screen.getByRole('button', { name: 'Add to batch' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('tab', { name: 'Variables' }));
-  await screen.findByRole('option', { name: 'Customer preset · revision 2' });
-  fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'p' } });
+  await findPicklistOption(screen.getByLabelText('Variable preset'), 'Customer preset · revision 2');
+  choosePicklistValue(screen.getByLabelText('Variable preset'), 'p');
   fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   await screen.findByText('Saved “Happy path” · revision 2.');
   expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Happy path', goal: 'Create a quote', contextVariables: [{ name: 'verified', type: 'Boolean', value: false }] }), 'starter-1', 1);

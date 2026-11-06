@@ -6,6 +6,8 @@
  * JSON or YAML specs, and backs the bounded "Make these pass" fix loop.
  */
 import { SuiteJobs } from './suite-jobs.js';
+import { readBuilderResources } from './studio-builder.js';
+import { emptyBuilderResources, parseBuilderResources, scoreEvidence, type BuilderResources } from './studio-builder-contract.js';
 import { randomUUID } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { AgentFilesError, sha256Hex } from './agent-files.js';
@@ -15,13 +17,15 @@ import { EvalSpecError, GENERATED_SPEC_MARKER, evalSpecCases, suiteToEvalSpec } 
 import { extraAssertions, parseExtraAssertions } from './scenario-assertions.js';
 import { parsePreviewContext } from './preview-context.js';
 import { FixLoopError, FixLoops, type FixLoop } from './fix-loop.js';
-import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type CaseObserved, type CaseOutcome, type CaseResult, type ScenarioCase, type ScenarioSuite, type SuiteComparison, type TraceStep, type SuiteEval, type SuiteProgress, type TurnTrace } from './studio-contract.js';
+import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type CaseObserved, type CaseOutcome, type CaseResult, type ScenarioCase, type ScenarioSuite, type ScorerEvaluation, type SuiteComparison, type TraceStep, type SuiteEval, type SuiteProgress, type TurnTrace } from './studio-contract.js';
 import { rpcFailure, rpcString, type RpcFailure, type StudioServerContext } from './studio-server-context.js';
 import { labRecord, type LabEngine, type LabScenario } from './agentforce-lab-contract.js';
 import type { AgentforceLab } from './agentforce-lab.js';
 import type { SalesforceDeps } from './types.js';
 
 export const SUITE_LIMITS = { cases: 50, utterances: 8, text: 4000, runCases: 50, stored: 40, fileBytes: 256_000 } as const;
+/** Reserve the remainder of the 750 KB job reply for existing suite and conversation evidence. */
+export const SCORER_RUN_EVIDENCE_LIMIT = 200_000;
 const SUITE_PATH = /^tests\/[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\.scenario\.json$/;
 const SPEC_PATH = /^tests\/[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\.eval\.yaml$/;
 const SUFFIX = '.scenario.json';
@@ -40,7 +44,8 @@ export const EVIDENCE_LIMITS = { notes: 5, note: 240, reply: 480, names: 10, nam
 /** The stored form of a run: outcome, bounded conversation and check evidence. */
 export function caseResult(detail: CaseRunDetail): CaseResult {
   const names = (values: string[]) => values.slice(0, EVIDENCE_LIMITS.names).map(value => value.slice(0, EVIDENCE_LIMITS.name));
-  const reply = [...detail.turns].reverse().find(turn => turn.role === 'agent')?.text.trim().slice(0, EVIDENCE_LIMITS.reply);
+  const fullReply = [...detail.turns].reverse().find(turn => turn.role === 'agent')?.text.trim();
+  const reply = fullReply?.slice(0, EVIDENCE_LIMITS.reply);
   const conversation: NonNullable<CaseResult['conversation']> = [];
   let remaining: number = EVIDENCE_LIMITS.conversationChars;
   for (const turn of detail.turns.slice(0, EVIDENCE_LIMITS.conversationTurns)) {
@@ -54,11 +59,12 @@ export function caseResult(detail: CaseRunDetail): CaseResult {
     outcome: detail.outcome, runId: detail.runId, at: detail.at,
     ...(detail.notes.length ? { notes: detail.notes.slice(0, EVIDENCE_LIMITS.notes).map(note => note.slice(0, EVIDENCE_LIMITS.note)) } : {}),
     ...(detail.observed ? { observed: { topics: names(detail.observed.topics), actions: names(detail.observed.actions), traced: detail.observed.traced, ...(detail.observed.traceComplete !== undefined ? { traceComplete: detail.observed.traceComplete } : {}) } } : {}),
-    ...(reply ? { reply } : {}),
+    ...(reply ? { reply, replyTruncated: fullReply!.length > EVIDENCE_LIMITS.reply } : {}),
     ...(conversation.length ? { conversation, ...(conversationTruncated ? { conversationTruncated: true } : {}) } : {}),
     ...(detail.setupBlocked ? { setupBlocked: true } : {}),
     ...(detail.stopped ? { stopped: true } : {}),
     ...(detail.deterministic ? { deterministic: detail.deterministic } : {}),
+    ...(detail.scorerEvaluation ? { scorerEvaluation: detail.scorerEvaluation } : {}),
     ...(detail.judge ? { judge: detail.judge } : {}),
     ...(detail.judgeEvidence?.length ? { judgeEvidence: detail.judgeEvidence.slice(0, 8).map(item => item.slice(0, EVIDENCE_LIMITS.note)) } : {}),
     ...(detail.sourceHash ? { sourceHash: detail.sourceHash, caseHash: detail.caseHash } : {}),
@@ -163,6 +169,20 @@ export function judgeCase(expect: ScenarioCase['expect'], observed: { agentText:
 
 interface Kv { get<T>(key: string): Promise<T | undefined | null>; set(key: string, value: unknown): Promise<void> }
 
+/** Corrupt optional provenance must not hide otherwise useful historical results. */
+function readScorerEvaluation(value: unknown): ScorerEvaluation | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const outcome = (value: unknown): value is CaseOutcome => typeof value === 'string' && ['pass', 'fail', 'inconclusive'].includes(value);
+  if (!outcome(row.baseOutcome) || !Array.isArray(row.checks) || !row.checks.length) return undefined;
+  const outcomes = row.checks.map(check => check && typeof check === 'object' ? (check as Record<string, unknown>).outcome : undefined);
+  if (!outcomes.every(outcome)) return undefined;
+  try {
+    const rules = parseBuilderResources({ ...emptyBuilderResources(), revision: row.revision, scorers: row.checks });
+    return { revision: rules.revision, baseOutcome: row.baseOutcome, checks: rules.scorers.map((rule, index) => ({ ...rule, outcome: outcomes[index] })) };
+  } catch { return undefined; }
+}
+
 /** What the plugin's eval runner answers: the org it ran on and, when the CLI said, one outcome per spec case. */
 export type SuiteEvalReply =
   | { ok: true; summary?: string; data: { passed: boolean; orgId: string; orgAlias?: string; orgKind?: string; botVersionId?: string; caseOutcomes?: Outcome[] | null } }
@@ -186,7 +206,18 @@ export class ScenarioSuites {
   }
   private resultsKey() { return `studio:suites:${this.o.project() || 'global'}`; }
   private evalsKey() { return `studio:suite-evals:${this.o.project() || 'global'}`; }
-  private async results(): Promise<Record<string, SuiteResults>> { return (await this.o.kv.get<Record<string, SuiteResults>>(this.resultsKey())) ?? {}; }
+  private async results(): Promise<Record<string, SuiteResults>> {
+    const saved = (await this.o.kv.get<Record<string, SuiteResults>>(this.resultsKey())) ?? {};
+    return Object.fromEntries(Object.entries(saved).map(([suiteId, results]) => [suiteId,
+      Object.fromEntries(Object.entries(results).map(([caseId, result]) => {
+        const restored = structuredClone(result);
+        const evaluation = readScorerEvaluation(restored.scorerEvaluation);
+        delete restored.scorerEvaluation;
+        if (evaluation) restored.scorerEvaluation = evaluation;
+        return [caseId, restored];
+      }))
+    ]));
+  }
   private async evals(): Promise<Record<string, SuiteEval>> { return (await this.o.kv.get<Record<string, SuiteEval>>(this.evalsKey())) ?? {}; }
   private updateProgress(lock: string, path: string, value: SuiteProgress | null): void {
     if (value) this.progress.set(lock, { path, value });
@@ -343,6 +374,21 @@ export class ScenarioSuites {
       if (!suite) throw new AgentFilesError('not_found', `Scenario suite not found: ${input.path}`);
       const cases = suite.cases.filter(c => !input.caseIds?.length || input.caseIds.includes(c.id)).slice(0, SUITE_LIMITS.runCases);
       if (!cases.length) throw new AgentFilesError('invalid_input', 'No matching cases to run.');
+      // Capture once, before starting either comparison source. Edits during a
+      // run apply only to the next run; saved evidence keeps the original rules.
+      const scorers = await readBuilderResources(this.o.kv, lock);
+      // Reserve every scorer copy in the actual RPC reply, including older
+      // results retained by partial runs. Comparisons return only two sources;
+      // proposals return their results/details plus the unchanged saved suite.
+      const comparing = input.referenceSource !== undefined, proposal = input.store === false;
+      const selected = new Set(cases.map(c => c.id));
+      const evidenceBytes = (evaluation: CaseResult['scorerEvaluation']) => evaluation ? JSON.stringify({ scorerEvaluation: evaluation }).length : 0;
+      const snapshotBytes = scorers.scorers.length ? evidenceBytes({ revision: scorers.revision, baseOutcome: 'inconclusive', checks: scorers.scorers.map(rule => ({ ...rule, outcome: 'inconclusive' })) }) : 0;
+      const retainedBytes = comparing ? 0 : Object.entries(suite.lastResults ?? {}).reduce((bytes, [id, result]) => bytes + (proposal || !selected.has(id) ? evidenceBytes(result.scorerEvaluation) : 0), 0);
+      const projectedBytes = snapshotBytes * cases.length * (comparing || proposal ? 2 : 3) + retainedBytes * (proposal ? 1 : 2);
+      if (projectedBytes > SCORER_RUN_EVIDENCE_LIMIT) {
+        throw new AgentFilesError('invalid_input', 'Scorer evidence exceeds the run display budget. Run fewer cases, or reduce the number or length of project scorer rules. If large older results remain, rerun the complete suite with shorter rules to replace them.');
+      }
       const results: SuiteResults = input.store === false || input.referenceSource !== undefined ? {} : { ...(suite.lastResults ?? {}) };
       const reference: SuiteResults = {};
       const details: CaseRunDetail[] = [];
@@ -356,7 +402,7 @@ export class ScenarioSuites {
         for (const c of cases) {
           input.signal?.throwIfAborted();
           update({ currentCaseId: c.id, stage: 'starting', turn: 0, totalTurns: c.utterances.length });
-          reference[c.id] = comparisonResult(caseResult(await this.runCase(c, { ...input, source: input.referenceSource }, update)));
+          reference[c.id] = comparisonResult(caseResult(this.scoreCase(await this.runCase(c, { ...input, source: input.referenceSource }, update), scorers)));
           update({ completed: Object.keys(reference).length, results: { ...reference } });
         }
         update({ comparisonPhase: 'candidate', completed: 0, results: {} });
@@ -364,7 +410,7 @@ export class ScenarioSuites {
       for (const c of cases) {
         input.signal?.throwIfAborted();
         update({ currentCaseId: c.id, stage: 'starting', turn: 0, totalTurns: c.utterances.length });
-        const detail = await this.runCase(c, input, update);
+        const detail = this.scoreCase(await this.runCase(c, input, update), scorers);
         details.push(detail);
         results[c.id] = input.referenceSource !== undefined ? comparisonResult(caseResult(detail)) : caseResult(detail);
         if (input.store !== false && input.referenceSource === undefined) await this.storeResults(suite.id, results);
@@ -383,6 +429,25 @@ export class ScenarioSuites {
       this.running.delete(lock);
       this.updateProgress(lock, input.path, null);
     }
+  }
+
+  private scoreCase(detail: CaseRunDetail, snapshot: Pick<BuilderResources, 'revision' | 'scorers'>): CaseRunDetail {
+    if (!snapshot.scorers.length) return detail;
+    // Score the complete in-memory final response before bounded storage clips
+    // it. Persist the decisions, so later edits cannot rewrite history.
+    const reply = [...detail.turns].reverse().find(turn => turn.role === 'agent')?.text.trim();
+    const checks = snapshot.scorers.map(rule => ({ ...rule, outcome: scoreEvidence(rule, { ...detail, reply, replyTruncated: false, setupBlocked: detail.setupBlocked || !detail.observed }) }));
+    detail.scorerEvaluation = { revision: snapshot.revision, baseOutcome: detail.outcome, checks };
+    for (const check of checks) {
+      if (check.outcome === 'fail' || check.outcome === 'inconclusive' && detail.outcome === 'pass') detail.outcome = check.outcome;
+    }
+    const failed = checks.filter(check => check.outcome === 'fail');
+    const inconclusive = checks.filter(check => check.outcome === 'inconclusive');
+    if (failed.length || inconclusive.length) {
+      const names = (rows: typeof checks) => rows.slice(0, 2).map(check => check.name.slice(0, 48)).join(', ');
+      detail.notes.unshift(`Scorers (snapshot ${snapshot.revision}): ${failed.length} failed${failed.length ? ` (${names(failed)})` : ''}; ${inconclusive.length} inconclusive${inconclusive.length ? ` (${names(inconclusive)})` : ''}.`);
+    }
+    return detail;
   }
 
   private async runCase(c: ScenarioCase, input: { source: string; engine: LabEngine; model?: string; agentPath?: string; threadId?: string; startedByUser?: boolean; signal?: AbortSignal; preparedCaseIds?: string[] }, update: (patch: Partial<SuiteProgress>) => void): Promise<CaseRunDetail> {
@@ -463,7 +528,7 @@ export class ScenarioSuites {
       }
       input.signal?.throwIfAborted();
     } catch (error) {
-      if (input.signal?.aborted) detail.stopped = true;
+      if (input.signal?.aborted) { detail.stopped = true; detail.outcome = 'inconclusive'; }
       detail.notes.push(error instanceof Error ? error.message : String(error));
     } finally {
       input.signal?.removeEventListener('abort', cancel);

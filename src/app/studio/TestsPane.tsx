@@ -1,3 +1,5 @@
+import { useToolWorkspaceState } from './tool-workspace-state.js';
+import { StudioActionMenu } from './StudioActionMenu.js';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { callPluginRpc, experimental_requestApproval, useRealtime } from '@zana-ai/zcc-plugin-sdk/app';
 import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type CaseOutcome, type CaseResult, type ScenarioCase, type ScenarioSuite } from '../../../lib/studio-contract.js';
@@ -27,7 +29,9 @@ import { TestsHeader, type TestsView } from './TestsHeader.js';
  * Test catalogue, batch simulations and role-play share the same navigation.
  */
 export interface TestsPaneProps {
+  workspaceKey?: string;
   pluginId: string;
+  title?: 'Tests' | 'Evals';
   projectId?: string;
   threadId?: string;
   path: string | null;
@@ -72,7 +76,20 @@ const STYLES = `
 .sf-tp-cases-view[hidden] { display:none; }
 .sf-tp-cases-view > :not(.sf-tp-cases-scroll) { flex-shrink:0; }
 .sf-tp-cases-scroll { flex:1; display:flex; flex-direction:column; min-height:0; min-width:0; overflow:hidden; overscroll-behavior:contain; }
-.sf-tp-cases-scroll > :not(.sf-cases) { flex-shrink:0; max-height:45%; overflow:auto; margin-bottom:10px; }
+.sf-tp-cases-scroll[hidden] { display:none; }
+.sf-tp-case-editor,.sf-tp-comparison-workspace { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:4px 4px 16px; }
+.sf-tp-comparison-workspace { padding:8px 6px 20px; }
+.sf-tp-bar.sf-tp-actions { align-items:center; flex-wrap:nowrap; }
+.sf-tp-visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.sf-tp-action-short { display:none; }
+.sf-tp-actions-heading { flex:1; min-width:0; font-weight:500; }
+.sf-tp-actions > .sf-action-menu { margin-left:auto; }
+.sf-tp-cases-view > .sf-tp-loop { margin:0; }
+.sf-tp-loop > summary { cursor:pointer; list-style:none; }
+.sf-tp-loop > summary::-webkit-details-marker { display:none; }
+.sf-tp-loop > summary::before { content:'›'; font-size:16px; color:var(--sf-muted); }
+.sf-tp-loop[open] > summary::before { transform:rotate(90deg); }
+@container (max-width:420px) { .sf-tp-actions { gap:4px; }.sf-tp-actions .sf-tp-btn { padding:6px 8px; }.sf-tp-actions-heading,.sf-tp-action-full { display:none; }.sf-tp-action-short { display:inline; } }
 .sf-tp-cases-scroll .sf-tp-table thead { position:sticky; top:0; z-index:1; background:var(--sf-bg); }
 .sf-tp-cases-scroll:focus-visible { outline:2px solid var(--sf-accent); outline-offset:-2px; }
 .sf-tp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -82,8 +99,14 @@ const STYLES = `
 .sf-tp-seg button[aria-pressed="true"] { background: var(--sf-soft); color: var(--sf-text); }
 .sf-tp-spacer { flex: 1; }
 .sf-tp-bar { display: flex; gap: 6px; flex-wrap: wrap; }
-.sf-tp-btn { border: 1px solid var(--sf-border); background: transparent; color: var(--sf-text); border-radius: 6px; padding: 3px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
-.sf-tp-btn.is-primary { border-color: var(--sf-accent); color: var(--sf-accent); }
+.sf-tp-btn { border: 1px solid var(--sf-border); background: transparent; color: var(--sf-text); border-radius: 8px; padding: 6px 10px; min-height:32px; line-height:1.5; font: inherit; cursor: pointer; white-space: nowrap; }
+.sf-tp-btn.is-primary { background:var(--sf-accent); border-color:var(--sf-accent); color:#fff; }
+.sf-tp-btn.is-primary:not(:disabled):hover { background:color-mix(in srgb,var(--sf-accent) 90%,var(--sf-bg)); }
+/* Keep white labels readable against the brighter host accent in dark mode. */
+html:not([data-theme=light]) .sf-tp button.sf-tp-btn.is-primary,
+html:not([data-theme=light]) .sf-tp .af-roleplay-toolbar > .af-primary { background:color-mix(in srgb,var(--sf-accent) 85%,#000); border-color:color-mix(in srgb,var(--sf-accent) 85%,#000); }
+html:not([data-theme=light]) .sf-tp button.sf-tp-btn.is-primary:not(:disabled):hover,
+html:not([data-theme=light]) .sf-tp .af-roleplay-toolbar > .af-primary:not(:disabled):hover { background:color-mix(in srgb,var(--sf-accent) 75%,#000); }
 .sf-tp-btn.is-danger { border-color: var(--sf-danger); color: var(--sf-danger); }
 .sf-tp-btn.is-danger:hover { background: color-mix(in srgb, var(--sf-danger) 10%, transparent); }
 .sf-tp-btn:disabled { opacity: 0.5; cursor: default; }
@@ -222,11 +245,11 @@ export function TestsPane(props: TestsPaneProps) {
   const { pluginId, projectId, threadId, path, source, visible, dirty, proposalSource, roleplay, onAskAgent, onShowPath } = props;
   const call = props.call ?? callPluginRpc;
   const requestApproval = props.requestApproval ?? experimental_requestApproval;
-  const [view, setView] = useState<TestsView>('cases');
-  const [roleplayShown, setRoleplayShown] = useState(false);
-  const [simulationsShown, setSimulationsShown] = useState(false);
-  const [orgShown, setOrgShown] = useState(false);
-  const [scenariosShown, setScenariosShown] = useState(false);
+  const [view, setView] = useToolWorkspaceState<TestsView>(props.workspaceKey, 'view', 'cases');
+  const [roleplayShown, setRoleplayShown] = useState(view === 'roleplay');
+  const [simulationsShown, setSimulationsShown] = useState(view === 'simulations');
+  const [orgShown, setOrgShown] = useState(view === 'org');
+  const [scenariosShown, setScenariosShown] = useState(view === 'scenarios');
   const library = useScenarioLibrary({ pluginId, projectId, path, call, enabled: !props.casesOnly });
   const [roleplayScenario, setRoleplayScenario] = useState<ScenarioSelection>();
   const [batchScenario, setBatchScenario] = useState<ScenarioSelection>();
@@ -249,7 +272,20 @@ export function TestsPane(props: TestsPaneProps) {
   const [startedAt, setStartedAt] = useState(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [adding, setAdding] = useState(false);
-  const [comparison, setComparison] = useState<{ value: SuiteComparison; source: string; cases: string } | null>(null);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  const comparisonHeading = useRef<HTMLHeadingElement>(null);
+  const casesReturn = useRef<HTMLButtonElement>(null);
+  const caseCatalogue = useRef<HTMLDivElement>(null);
+  const returningToCases = useRef(false);
+  useEffect(() => {
+    if (comparisonOpen) comparisonHeading.current?.focus();
+    else if (!adding && returningToCases.current) {
+      if (casesReturn.current && !casesReturn.current.disabled) casesReturn.current.focus();
+      else caseCatalogue.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
+      returningToCases.current = false;
+    }
+  }, [comparisonOpen, adding]);
+  const [comparison, setComparison] = useState<{ value: SuiteComparison; source: string; cases: string; caseDefinitions: ScenarioCase[] } | null>(null);
   const comparisonTarget = useRef('');
   comparisonTarget.current = JSON.stringify([projectId, path]);
   const [filter, setFilter] = useState<CaseFilter>('all');
@@ -280,7 +316,7 @@ export function TestsPane(props: TestsPaneProps) {
     }
   }, [path, rpc]);
 
-  useEffect(() => { setBusy(null); setSuite(null); setLoop(null); setDetails({}); setProposal({}); setComparison(null); setNotice(null); setAdding(false); setFilter('all'); setLoaded(false); }, [path, projectId]);
+  useEffect(() => { setBusy(null); setSuite(null); setLoop(null); setDetails({}); setProposal({}); setComparison(null); setComparisonOpen(false); setNotice(null); setAdding(false); setFilter('all'); setLoaded(false); }, [path, projectId]);
   useEffect(() => { setProposal({}); }, [proposalSource]);
   useEffect(() => { if (visible) void load(); }, [visible, load]);
   useRealtime(STUDIO_CHANGED_CHANNEL, payload => {
@@ -332,11 +368,12 @@ export function TestsPane(props: TestsPaneProps) {
 
   const compare = () => perform('compare', async () => {
     const target = comparisonTarget.current;
-    const snapshot = { source, cases: JSON.stringify(suite?.cases) };
+    const snapshot = { source, cases: JSON.stringify(suite?.cases), caseDefinitions: structuredClone(suite?.cases ?? []) };
     const reply = await background({ compare: true, source, startedByUser: true, ...(threadId ? { threadId } : {}) });
     if (!alive.current || target !== comparisonTarget.current) return null;
     if (reply.ok === false || !reply.comparison) return { tone: 'error', text: reply.error || 'The comparison could not run.' };
-    setComparison({ value: reply.comparison as SuiteComparison, ...snapshot, cases: reply.suite ? JSON.stringify((reply.suite as ScenarioSuite).cases) : snapshot.cases });
+    setComparison({ value: reply.comparison as SuiteComparison, ...snapshot, cases: reply.suite ? JSON.stringify((reply.suite as ScenarioSuite).cases) : snapshot.cases, caseDefinitions: reply.suite ? structuredClone((reply.suite as ScenarioSuite).cases) : snapshot.caseDefinitions });
+    setAdding(false); setComparisonOpen(true);
     return null;
   });
 
@@ -402,7 +439,7 @@ export function TestsPane(props: TestsPaneProps) {
     };
     void perform('add', async () => {
       const failed = await save([...existing, next]);
-      if (!failed && alive.current) setAdding(false);
+      if (!failed && alive.current) { returningToCases.current = true; setAdding(false); }
       return failed;
     });
   };
@@ -452,7 +489,7 @@ export function TestsPane(props: TestsPaneProps) {
   };
   useEffect(() => { if (props.simulationsFocus && !props.casesOnly) { setView('simulations'); setSimulationsShown(true); } }, [props.simulationsFocus, props.casesOnly]);
   useEffect(() => { if (props.roleplayFocus !== undefined && !props.casesOnly) { setView('roleplay'); setRoleplayShown(true); } }, [props.roleplayFocus, props.casesOnly]);
-  const header = <TestsHeader view={view} onViewChange={showView} dirty={dirty} suite={suite} scenarioCount={library.scenarios.length} casesOnly={props.casesOnly} />;
+  const header = <TestsHeader view={view} onViewChange={showView} dirty={dirty} suite={suite} scenarioCount={library.scenarios.length} casesOnly={props.casesOnly} title={props.title} />;
   const controls: ScenarioLibraryControls = { ...library, onManage: () => showView('scenarios') };
   const scenariosView = scenariosShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'scenarios'}>{path ? <ScenariosView key={JSON.stringify([pluginId, projectId, path])} library={controls} pluginId={pluginId} projectId={projectId} path={path} source={source} call={call}
     onRoleplay={scenario => { setRoleplayScenario({ scenario, seq: ++scenarioSequence.current }); showView('roleplay'); }}
@@ -464,7 +501,7 @@ export function TestsPane(props: TestsPaneProps) {
   const orgView = orgShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'org'}><OrgTestsView key={`${pluginId}:${projectId}:${path}`} pluginId={pluginId} projectId={projectId} threadId={threadId} path={path} visible={visible && view === 'org'} onAskAgent={onAskAgent} call={props.call} requestApproval={props.requestApproval} renderLocalSuite={renderLocalSuite} /></div>;
 
   if (!path) {
-    return <section className="sf-tp" data-view={view} aria-label="Tests" data-testid="studio-tests-pane"><style>{STYLES}</style>
+    return <section className="sf-tp" data-view={view} aria-label={props.title ?? 'Tests'} data-testid="studio-tests-pane"><style>{STYLES}</style>
       {header}
       {view === 'cases' && <div className="sf-tp-empty">Open an agent file to test it.</div>}
       {scenariosView}
@@ -494,12 +531,12 @@ export function TestsPane(props: TestsPaneProps) {
   };
 
   return (
-    <section className="sf-tp" data-view={view} aria-label="Tests" data-testid="studio-tests-pane">
+    <section className="sf-tp" data-view={view} aria-label={props.title ?? 'Tests'} data-testid="studio-tests-pane">
       <style>{STYLES}</style>
       {header}
       <div className="sf-tp-cases-view" hidden={view !== 'cases'}>
         <header className="sf-tests-view-heading"><h2>Test cases</h2><p>Replay saved customer messages and check expected outcomes.</p></header>
-        {summary.ran > 0 && <div className="sf-tp-summary" data-testid="tests-summary">
+        {!comparisonOpen && !adding && summary.ran > 0 && <div className="sf-tp-summary" data-testid="tests-summary">
           <span className="sf-tp-score" aria-label={`${summary.pass} of ${summary.ran} pass`}>{summary.pass}/{summary.ran}</span>
           <span className="sf-tp-passbar" aria-hidden="true"><i className="is-pass" style={{ width: `${(summary.pass / summary.ran) * 100}%` }} /><i className="is-fail" style={{ width: `${(summary.fail / summary.ran) * 100}%` }} /><i className="is-review" style={{ width: `${(cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'inconclusive').length / summary.ran) * 100}%` }} /></span>
           <span className="sf-tp-chip">{hasRun ? 'Previous Simulate results' : 'Simulate'}</span>
@@ -512,31 +549,39 @@ export function TestsPane(props: TestsPaneProps) {
             <button type="button" aria-pressed={filter === 'inconclusive'} onClick={() => setFilter('inconclusive')}>Needs review {cases.filter(c => caseStatus(suite?.lastResults?.[c.id]) === 'inconclusive').length}</button>
           </div>
         </div>}
-        <div className="sf-tp-bar" role="toolbar" aria-label="Test actions">
-          <button type="button" className="sf-tp-btn is-primary" disabled={running || !cases.length || !source.trim()} onClick={() => void simulate()}>{busy === 'simulate' ? 'Running…' : 'Run all in Simulate'}</button>
-          {!running && remaining.length > 0 && remaining.length < cases.length && <button type="button" className="sf-tp-btn" disabled={!source.trim()} onClick={() => void simulate(remaining)}>Run remaining {remaining.length}</button>}
+        <div className="sf-tp-bar sf-tp-actions" role="toolbar" aria-label="Test actions">
+          {comparisonOpen || adding ? <>
+            <button type="button" className="sf-tp-btn" onClick={() => { returningToCases.current = true; setComparisonOpen(false); setAdding(false); casesReturn.current?.focus(); }}>← Test cases</button>
+            <span className="sf-tp-actions-heading">{adding ? 'New test case' : 'Source comparison'}</span>
+            {comparisonOpen && !activeJob && <button type="button" className="sf-tp-btn is-primary" disabled={running || !cases.length || !source.trim()} aria-label="Run comparison again" onClick={() => void compare()}><span className="sf-tp-action-full">Run comparison again</span><span className="sf-tp-action-short" aria-hidden="true">Run again</span></button>}
+          </> : <>
+            <button ref={casesReturn} type="button" className="sf-tp-btn is-primary" disabled={running || !cases.length || !source.trim()} aria-label={busy === 'simulate' ? 'Running…' : 'Run all in Simulate'} onClick={() => void simulate()}><span className="sf-tp-action-full">{busy === 'simulate' ? 'Running…' : 'Run all in Simulate'}</span><span className="sf-tp-action-short" aria-hidden="true">{busy === 'simulate' ? 'Running…' : 'Run all'}</span></button>
+            {!activeJob && <button type="button" className="sf-tp-btn" disabled={running} aria-expanded={adding} onClick={() => { setComparisonOpen(false); setAdding(true); }}>+ Case</button>}
+          </>}
           {activeJob && <button type="button" className="sf-tp-btn is-danger" onClick={() => void rpc(STUDIO_RPC.suiteStop, { jobId: activeJob }).then(() => load())}>Stop suite</button>}
-          <button type="button" className="sf-tp-btn" disabled={running || !cases.length || !source.trim()} title="Run the saved source and editor draft on the same cases. Results do not replace ordinary suite results." onClick={() => void compare()}>{busy === 'compare' ? 'Comparing…' : 'Compare saved vs draft'}</button>
-          <button type="button" className="sf-tp-btn" disabled={running || !cases.length} onClick={() => void perform('eval', evaluate)}>{busy === 'eval' || busy === 'reads' ? 'Running org eval…' : 'Run org eval'}</button>
-          {showProposal && <button type="button" className="sf-tp-btn" disabled={running || !cases.length} onClick={() => void runProposal()}>{busy === 'proposal' ? 'Running…' : 'Run with proposal'}</button>}
-          <button type="button" className="sf-tp-btn" disabled={running} aria-expanded={adding} onClick={() => setAdding(open => !open)}>+ Case</button>
-          <button type="button" className="sf-tp-btn" disabled={running} onClick={() => fileInput.current?.click()}>{busy === 'import' ? 'Importing…' : 'Import YAML / JSON'}</button>
+          <StudioActionMenu label="More test actions" actions={[
+            { id: 'compare', group: 'Evaluate', label: busy === 'compare' ? 'Comparing…' : 'Compare saved vs draft', disabled: running || !cases.length || !source.trim(), title: 'Run both sources on the same cases without replacing suite results.', onSelect: () => { void compare(); } },
+            ...(comparison && !comparisonOpen ? [{ id: 'last-comparison', group: 'Evaluate', label: 'View last comparison', onSelect: () => { setAdding(false); setComparisonOpen(true); } }] : []),
+            { id: 'org', group: 'Evaluate', label: busy === 'eval' || busy === 'reads' ? 'Running org eval…' : 'Run org eval', disabled: running || !cases.length, onSelect: () => { void perform('eval', evaluate); } },
+            ...(remaining.length > 0 && remaining.length < cases.length ? [{ id: 'remaining', group: 'Evaluate', label: `Run remaining ${remaining.length}`, disabled: running || !source.trim(), onSelect: () => { void simulate(remaining); } }] : []),
+            ...(showProposal ? [{ id: 'proposal', group: 'Evaluate', label: busy === 'proposal' ? 'Running…' : 'Run with proposal', disabled: running || !cases.length, onSelect: () => { void runProposal(); } }] : []),
+            ...(onAskAgent ? [{ id: 'fix', group: 'Improve', label: failing.length === 1 ? 'Make this pass' : 'Make these pass', disabled: running || loopLive || !failing.length || dirty, title: dirty ? 'Save first: the agent starts from the file on disk.' : !failing.length ? 'Run in Simulate first; the fix loop takes the failing cases.' : undefined, onSelect: () => { void startLoop(); } }] : []),
+            { id: 'import', group: 'Manage cases', label: busy === 'import' ? 'Importing…' : 'Import YAML / JSON', disabled: running, onSelect: () => fileInput.current?.click() },
+            { id: 'export', group: 'Manage cases', label: 'Write eval spec', disabled: running || !cases.length, onSelect: () => { void writeSpec(); } }
+          ]} />
           <input ref={fileInput} type="file" accept=".yaml,.yml,.json" hidden aria-label="Import test spec" data-testid="tests-import-input" onChange={event => importFile(event.currentTarget.files?.[0])} />
-          <button type="button" className="sf-tp-btn" disabled={running || !cases.length} onClick={() => void writeSpec()}>Write eval spec</button>
-          <span className="sf-tp-spacer" />
-          {onAskAgent && <button type="button" className="sf-tp-btn" disabled={running || loopLive || !failing.length || dirty}
-            title={dirty ? 'Save first: the agent starts from the file on disk.' : !failing.length ? 'Run in Simulate first; the fix loop takes the failing cases.' : undefined}
-            onClick={() => void startLoop()}>{failing.length ? `Make ${failing.length === 1 ? 'this' : 'these'} pass` : 'Make these pass'}</button>}
         </div>
         {hasRun && <SuiteRunProgress progress={progress} cases={busy?.startsWith('case:') ? cases.filter(c => busy === `case:${c.id}`) : cases} startedAt={startedAt} orgEval={busy === 'eval' || busy === 'reads'} />}
         {notice && <div className={`sf-tp-message is-${notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>
           <span>{notice.text}</span>
           {notice.allowReads && <button type="button" className="sf-tp-btn" disabled={running} onClick={() => void allowReads()}>Allow reads…</button>}
         </div>}
-        <div className="sf-tp-cases-scroll">
-        {comparison && <SuiteComparisonView comparison={comparison.value} cases={cases} stale={comparison.source !== source || comparison.cases !== JSON.stringify(suite?.cases)} />}
-        {adding && <form className="sf-tp-form" aria-label="New test case" onSubmit={addCase}>
-          <label>Name<input name="name" required maxLength={200} /></label>
+        {comparisonOpen && comparison && <div className="sf-tp-comparison-workspace" data-testid="tests-comparison-workspace">
+          <h2 ref={comparisonHeading} tabIndex={-1} className="sf-tp-visually-hidden">Source comparison results</h2>
+          <SuiteComparisonView comparison={comparison.value} cases={comparison.caseDefinitions} stale={comparison.source !== source || comparison.cases !== JSON.stringify(suite?.cases)} />
+        </div>}
+        {adding && <div className="sf-tp-case-editor"><form className="sf-tp-form" aria-label="New test case" onSubmit={addCase}>
+          <label>Name<input autoFocus name="name" required maxLength={200} /></label>
           <label>Expected topic<input name="topic" maxLength={200} /></label>
           <label className="is-wide">Utterances, one per line<textarea name="utterances" rows={2} required /></label>
           <label>Expected actions, comma separated<input name="actions" /></label>
@@ -549,19 +594,20 @@ export function TestsPane(props: TestsPaneProps) {
           <p className="is-wide sf-tp-foot">Action checks use equals, contains, less_than or greater_than. Missing or private evidence is Unclear. Latency and field checks run in Simulate.</p>
           <label className="is-wide">Criteria for the AI judge<input name="criteria" maxLength={4000} /></label>
           <div className="sf-tp-bar is-wide"><button type="submit" className="sf-tp-btn is-primary" disabled={running}>Add case</button>
-            <button type="button" className="sf-tp-btn" onClick={() => setAdding(false)}>Cancel</button></div>
-        </form>}
-        {loop && <div className="sf-tp-loop" data-testid="tests-loop" aria-label="Fix loop">
-          <div className="sf-tp-head">
+            <button type="button" className="sf-tp-btn" onClick={() => { returningToCases.current = true; setAdding(false); }}>Cancel</button></div>
+        </form></div>}
+        {loop && !comparisonOpen && !adding && <details className="sf-tp-loop" data-testid="tests-loop" aria-label="Fix loop">
+          <summary className="sf-tp-head">
             <strong>Fix loop</strong>
             <span className="sf-tp-sub">{loop.status} · {loop.attempts.length} of {loop.budget} attempts · {loop.caseIds.length} case{loop.caseIds.length === 1 ? '' : 's'}</span>
             <span className="sf-tp-spacer" />
             {loopLive && <button type="button" className="sf-tp-btn" disabled={running} onClick={() => void stopLoop()}>Stop</button>}
-          </div>
+          </summary>
           {loop.attempts.length > 0 ? <ol>{loop.attempts.map(attempt => <li key={attempt.n}>
             {attempt.pass} of {attempt.total} pass{attempt.failing.length ? ` · still failing ${attempt.failing.join(', ')}` : ''}
           </li>)}</ol> : <span className="sf-tp-sub">Waiting for the agent's first run.</span>}
-        </div>}
+        </details>}
+        <div ref={caseCatalogue} className="sf-tp-cases-scroll" hidden={comparisonOpen || adding}>
         {!loaded && !suite && <div className="sf-tp-empty">Loading cases…</div>}
         {loaded && !cases.length && <div className="sf-tp-empty">No cases yet. Add one, import a spec, or pin a conversation from Preview with Save as scenario.</div>}
         {cases.length > 0 && <TestCasesWorkbench key={`${projectId}:${path}`} storageKey={`salesforce:studio:test-cases:${projectId}:${path}`} cases={cases}

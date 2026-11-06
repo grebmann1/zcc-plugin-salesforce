@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../test/picklist.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SalesforceUiProvider } from './components/client.js';
@@ -33,9 +34,9 @@ const mount = () => render(<SalesforceUiProvider client={{ call }}><SalesforceOr
 describe('Salesforce hub', () => {
   it('opens the Studio in the chosen project and keeps the org manager', async () => {
     mount();
-    const select = await screen.findByRole('combobox', { name: 'Project' }) as HTMLSelectElement;
-    expect(select.value).toBe('sf');
-    expect([...select.querySelectorAll('optgroup')].map(group => group.label)).toEqual(['Salesforce projects', 'Other projects']);
+    const select = await screen.findByRole('button', { name: 'Project' }) as HTMLSelectElement;
+    expect(select.textContent).toBe(projects[0].name);
+    fireEvent.click(select); expect(document.querySelector('[role=listbox]')?.textContent).toContain('Salesforce projects'); expect(document.querySelector('[role=listbox]')?.textContent).toContain('Other projects'); fireEvent.click(select);
     expect(screen.getByTestId('salesforce-hub-target').textContent).toBe('Target dev');
     expect(screen.getByTestId('org-picker')).toBeTruthy();
 
@@ -43,7 +44,7 @@ describe('Salesforce hub', () => {
     expect(readProjectView('sf')).toBe('agentforce');
     expect(navigate.toProject).toHaveBeenCalledWith('sf', { tabId: 'salesforce' });
 
-    fireEvent.change(select, { target: { value: 'draft' } });
+    choosePicklistValue(select, 'draft');
     expect(screen.getByTestId('salesforce-hub-target').textContent).toBe('Uses the shared default org · drafts only, no DX project');
     expect(localStorage.getItem('salesforce:hub:project')).toBe('draft');
     fireEvent.click(screen.getByRole('button', { name: /Data/ }));
@@ -54,11 +55,11 @@ describe('Salesforce hub', () => {
   it('restores the remembered project and falls back when it is gone', async () => {
     localStorage.setItem('salesforce:hub:project', 'notes');
     mount();
-    expect(((await screen.findByRole('combobox', { name: 'Project' })) as HTMLSelectElement).value).toBe('notes');
+    expect((await screen.findByRole('button', { name: 'Project' })).textContent).toBe(projects.find(row => row.id === 'notes')!.name);
     cleanup();
     localStorage.setItem('salesforce:hub:project', 'removed');
     mount();
-    expect(((await screen.findByRole('combobox', { name: 'Project' })) as HTMLSelectElement).value).toBe('sf');
+    expect((await screen.findByRole('button', { name: 'Project' })).textContent).toBe(projects.find(row => row.id === 'sf')!.name);
   });
 
   it('opens the Studio window on Agentforce and explains when it cannot', async () => {
@@ -101,7 +102,7 @@ describe('Salesforce hub', () => {
     expect(takeQueuedAgentScriptOpen('draft')).toBe('bots/Day.agent');
     expect(readProjectView('draft')).toBe('agentforce');
     expect(navigate.toProject).toHaveBeenCalledWith('draft', { tabId: 'salesforce' });
-    expect((screen.getByRole('combobox', { name: 'Project' }) as HTMLSelectElement).value).toBe('draft');
+    expect(screen.getByRole('button', { name: 'Project' }).textContent).toBe(projects.find(row => row.id === 'draft')!.name);
     vi.restoreAllMocks();
   });
 
@@ -116,14 +117,14 @@ describe('Salesforce hub', () => {
 
     call.mockImplementation(async () => ({ ok: true, projects: [projects[2]] }));
     mount();
-    const select = await screen.findByRole('combobox', { name: 'Project' });
-    expect(select.querySelectorAll('optgroup')).toHaveLength(0);
+    const select = await screen.findByRole('button', { name: 'Project' });
+    fireEvent.click(select); expect(document.querySelectorAll('.launch-model-picker-group-label')).toHaveLength(0); fireEvent.click(select);
     cleanup();
 
     call.mockImplementationOnce(async () => ({ ok: false, error: 'Projects unavailable.' }));
     mount();
     expect((await screen.findByRole('alert')).textContent).toMatch(/Projects unavailable/);
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByRole('combobox', { name: 'Project' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Project' })).toBeTruthy();
   });
 });

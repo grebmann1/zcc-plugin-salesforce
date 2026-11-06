@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { PopoverPicklist } from '@zana-ai/zcc-ui/popover-picklist';
 import { Trash2 } from 'lucide-react';
 import type { CaseOutcome, CaseResult, ScenarioCase, SuiteEval, SuiteProgress } from '../../../lib/studio-contract.js';
 import { caseChecks, failureReason } from '../../../lib/case-checks.js';
@@ -20,8 +21,8 @@ export function caseStatus(result?: CaseResult): CaseStatus {
   return result.outcome;
 }
 
-function Badge({ status }: { status: CaseStatus }) {
-  return <span className={`sf-cases-badge is-${status}`}><span aria-hidden="true">{SYMBOL[status]}</span> {LABEL[status]}</span>;
+function Badge({ status, id }: { status: CaseStatus; id?: string }) {
+  return <span id={id} className={`sf-cases-badge is-${status}`}><span aria-hidden="true">{SYMBOL[status]}</span> {LABEL[status]}</span>;
 }
 
 interface Props {
@@ -112,14 +113,15 @@ export function TestCasesWorkbench(props: Props) {
     <div className="sf-cases-catalogue">
       <div className="sf-cases-search">
         <input type="search" aria-label="Search cases" placeholder="Search cases…" value={query} onChange={e => { setQuery(e.target.value); setOpened(false); }} />
-        <select aria-label="Filter case results" value={filter} onChange={e => { onFilterChange(e.target.value as CaseFilter); setOpened(false); }}>
-          <option value="all">All results</option><option value="fail">Failed</option><option value="pass">Passed</option><option value="stopped">Stopped</option><option value="not-run">Not run</option><option value="inconclusive">Needs review</option><option value="setup">Setup required</option>
-        </select>
+        <PopoverPicklist<CaseFilter> ariaLabel="Filter case results" triggerClassName="sf-cases-filter" value={filter} searchable={false} minWidth={180} onChange={value => { onFilterChange(value); setOpened(false); }} options={[
+          { value: 'all', label: 'All results' }, { value: 'fail', label: 'Failed' }, { value: 'pass', label: 'Passed' },
+          { value: 'stopped', label: 'Stopped' }, { value: 'not-run', label: 'Not run' }, { value: 'inconclusive', label: 'Needs review' }, { value: 'setup', label: 'Setup required' },
+        ]} />
         <span className="sf-tp-sub" aria-live="polite">{shown.length} of {cases.length} cases</span>
       </div>
       <div className="sf-cases-rows" role="region" aria-label="Test case list" tabIndex={0} onKeyDown={navigate}>
-        {shown.map(c => <button key={c.id} ref={el => { if (el) rows.current.set(c.id, el); else rows.current.delete(c.id); }} type="button" className="sf-cases-row" data-testid={`tests-row-${c.id}`} title={c.name} aria-label={`Details for ${c.name}`} aria-pressed={selected?.id === c.id} aria-controls={`${prefix}-detail`} onClick={() => choose(c)}>
-          <span className="sf-cases-row-title"><strong>{c.name}</strong><Badge status={statusOf(c)} /></span>
+        {shown.map(c => <button key={c.id} ref={el => { if (el) rows.current.set(c.id, el); else rows.current.delete(c.id); }} type="button" className="sf-cases-row" data-testid={`tests-row-${c.id}`} title={c.name} aria-label={`Details for ${c.name}`} aria-describedby={`${prefix}-status-${encodeURIComponent(c.id)}`} aria-pressed={selected?.id === c.id} aria-controls={`${prefix}-detail`} onClick={() => choose(c)}>
+          <span className="sf-cases-row-title"><strong>{c.name}</strong><Badge id={`${prefix}-status-${encodeURIComponent(c.id)}`} status={statusOf(c)} /></span>
           <span className="sf-cases-opening">{c.utterances[0]}</span>
           <span className="sf-cases-meta">{c.utterances.length} {c.utterances.length === 1 ? 'turn' : 'turns'}{c.pinned && <span className="sf-tp-chip is-pinned" title={`Pinned from run ${c.pinned.runId}`}>Pinned</span>}{proposal && <span>Proposal: {proposal[c.id] ? LABEL[proposal[c.id]!] : 'Not run'}</span>}</span>
         </button>)}
@@ -134,7 +136,7 @@ export function TestCasesWorkbench(props: Props) {
           <button type="button" className="sf-tp-btn sf-cases-back" onClick={() => { returnFocus.current = selected.id; setOpened(false); }}>← All cases</button>
           <div className="sf-cases-meta"><Badge status={status} /><span>Simulate · {selected.utterances.length} {selected.utterances.length === 1 ? 'turn' : 'turns'}</span><button type="button" className="sf-cases-remove" aria-label="Remove case" disabled={running || cases.length < 2} title={cases.length < 2 ? 'A suite keeps at least one case.' : 'Remove case'} onClick={() => props.onRemove(selected.id)}><Trash2 size={14} aria-hidden="true" /></button></div>
           <h3 ref={heading} tabIndex={-1}>{selected.name}</h3>
-          <div className="sf-tp-bar"><button type="button" className="sf-tp-btn sf-cases-run" disabled={running || !sourceReady} onClick={() => props.onRun(selected.id)}>{status === 'running' ? 'Running…' : evidence ? 'Run case again' : 'Run case'}</button>
+          <div className="sf-tp-bar"><button type="button" className="sf-tp-btn sf-cases-run is-primary" disabled={running || !sourceReady} onClick={() => props.onRun(selected.id)}>{status === 'running' ? 'Running…' : evidence ? 'Run case again' : 'Run case'}</button>
             {props.onFix && status === 'fail' && <button type="button" className="sf-tp-btn" onClick={() => props.onFix?.(selected)}>Fix this case</button>}
           </div>
           <div className="sf-cases-tabs" role="tablist" aria-label="Case detail" onKeyDown={navigateTabs}>{tabs.map(name => <button key={name} id={`${prefix}-${name}`} type="button" role="tab" aria-selected={tab === name} aria-controls={`${prefix}-content`} tabIndex={tab === name ? 0 : -1} onClick={() => setTab(name)}>{name}</button>)}</div>

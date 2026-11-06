@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Play, Square } from 'lucide-react';
 import type { ScenarioSuite } from '../../../lib/studio-contract.js';
@@ -26,7 +27,7 @@ ${STUDIO_RESIZE_STYLES}
 .sf-pw-suite-panel { display:flex; flex-direction:column; min-height:0; flex:1; border-bottom:1px solid var(--sf-border); container:sf-suite / inline-size; }
 .sf-pw-suite-filters { display:flex; flex-shrink:0; flex-wrap:wrap; gap:8px; padding:10px 14px; }
 .sf-pw-suite-filters input { flex:1; min-width:100px; }
-.sf-pw-suite-filters input, .sf-pw-suite-filters select { font:inherit; color:var(--sf-text); background:var(--sf-bg); padding:6px 8px; border:1px solid var(--sf-border); border-radius:6px; }
+.sf-pw-suite-filters input, .sf-pw-suite-filters .sf-picklist { font:inherit; color:var(--sf-text); background:var(--sf-bg); padding:6px 8px; border:1px solid var(--sf-border); border-radius:6px; }
 .sf-pw-suite-workspace { display:flex; flex:1; min-height:0; min-width:0; }
 .sf-pw-suite-cases { flex:var(--sf-pane-ratio,50) 1 0; min-width:0; overflow:auto; min-height:0; padding:0 14px 8px; overscroll-behavior:contain; user-select:text; -webkit-user-select:text; }
 .sf-pw-suite-detail { flex:calc(100 - var(--sf-pane-ratio,50)) 1 0; min-width:0; overflow:auto; overscroll-behavior:contain; padding:12px 14px; }
@@ -81,9 +82,7 @@ export function PreviewSuite({ pluginId, projectId, suite, busy, disabled, disab
     <div className="sf-pw-suite-panel" role="region" aria-label="Scenario cases">
       <div className="sf-pw-suite-filters">
         <input type="search" aria-label="Search scenarios" placeholder="Search scenarios…" value={search} onChange={e => setSearch(e.target.value)} />
-        <select aria-label="Scenario result filter" value={filter} onChange={e => setFilter(e.target.value)}>
-          <option value="all">All results</option>{Object.entries(LABELS).map(([state, label]) => <option key={state} value={state}>{label}</option>)}
-        </select>
+        <SalesforcePicklist ariaLabel="Scenario result filter" value={filter} onChange={setFilter} searchable={false} options={[{ value: 'all', label: 'All results' }, ...Object.entries(LABELS).map(([value, label]) => ({ value, label }))]} />
       </div>
       <div className="sf-pw-suite-workspace" ref={split.ref} style={scenario ? split.style : undefined}><div className="sf-pw-suite-cases" tabIndex={0} role="region" aria-label="Scenario list">
         {cases.map(c => { const state = suiteChip(suite!, c.id); return <div key={c.id} className="sf-pw-suite-case" data-state={state} data-selected={selected === c.id}>

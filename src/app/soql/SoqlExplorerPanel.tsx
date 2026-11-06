@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useSalesforceControl, controlText } from '../useSalesforceControl.js';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { EXPLORER_LOAD_ALL_CAP } from '../../../lib/types.js';
@@ -44,6 +45,7 @@ ${STUDIO_TOKENS}.sf-soql { height: 100%; min-height: 0; display: flex; flex-dire
 .sf-org-picker { font: inherit; font-size: 12px; color: var(--sf-text); background: var(--sf-sunken); border: 1px solid var(--sf-border); border-radius: 6px; height: 28px; max-width: 280px; }
 .sf-soql-spacer { flex: 1; }
 .sf-soql-btn { height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--sf-border); background: transparent; color: var(--sf-text); font-size: 12px; cursor: pointer; }
+.sf-picklist.sf-soql-btn { width:auto; flex-shrink:0; min-height:28px; }
 .sf-soql-btn.primary { background: var(--sf-accent); border-color: transparent; color: var(--text-on-accent,#fff); font-weight: 600; }
 .sf-soql-btn:disabled { opacity: .45; cursor: default; }
 .sf-soql-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sf-muted); }
@@ -481,9 +483,7 @@ export function SoqlExplorerPanel(props: { pluginId: string; projectId?: string;
           aria-label="Search table"
         />
 
-              <select className="sf-soql-btn" aria-label="Export results" value="" disabled={!result?.records?.length} onChange={event => void exportResult(event.target.value as 'csv' | 'json' | 'copy-tsv')}>
-                <option value="" disabled>Export…</option><option value="csv">CSV file</option><option value="json">JSON file</option><option value="copy-tsv">Copy for Excel</option>
-              </select>
+              <SalesforcePicklist<'csv' | 'json' | 'copy-tsv'> triggerClassName="sf-soql-btn" ariaLabel="Export results" value="" disabled={!result?.records?.length} onChange={value => void exportResult(value)} searchable={false} placeholder="Export…" options={[{ value: 'csv', label: 'CSV file' }, { value: 'json', label: 'JSON file' }, { value: 'copy-tsv', label: 'Copy for Excel' }]} />
             </div>
             {explain ? (
               <div className="sf-soql-empty" data-testid="soql-explain">

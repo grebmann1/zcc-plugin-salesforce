@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../../test/picklist.js';
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ function Harness({ values = [] }: { values?: PreviewContextVariable[] }) {
 function add(name: string, type?: ContextType) {
   fireEvent.click(screen.getByRole('button', { name: 'Add variable' }));
   fireEvent.change(screen.getByLabelText('New scenario variable name'), { target: { value: name } });
-  if (type) fireEvent.change(screen.getByLabelText('New scenario variable type'), { target: { value: type } });
+  if (type) choosePicklistValue(screen.getByLabelText('New scenario variable type'), type);
   fireEvent.click(screen.getByRole('button', { name: 'Add override' }));
 }
 it('inherits batch values and discovers typed defaults without losing false, zero or null', () => {
@@ -23,8 +24,8 @@ it('inherits batch values and discovers typed defaults without losing false, zer
   expect(screen.getByText(/1 variable inherited/)).toBeTruthy();
   add('locale'); expect((screen.getByLabelText('locale value') as HTMLInputElement).value).toBe('fr');
   fireEvent.change(screen.getByLabelText('locale value'), { target: { value: 'en' } });
-  add('verified'); expect((screen.getByLabelText('verified value') as HTMLSelectElement).value).toBe('true');
-  fireEvent.change(screen.getByLabelText('verified value'), { target: { value: 'false' } });
+  add('verified'); expect(screen.getByLabelText('verified value').textContent).toBe('True');
+  choosePicklistValue(screen.getByLabelText('verified value'), 'false');
   add('count'); expect((screen.getByLabelText('count value') as HTMLInputElement).value).toBe('0');
   fireEvent.click(screen.getByLabelText('Set locale to null'));
   expect(screen.getByText('null')).toBeTruthy();
@@ -41,7 +42,7 @@ it.each([['Text', 'hello'], ['Boolean', 'false'], ['Number', '0'], ['Json', '{}'
 it('reports malformed values and refuses invalid or duplicate names', () => {
   render(<Harness />); add('invalid.name'); expect(screen.getByRole('alert').textContent).toContain('variable name');
   fireEvent.change(screen.getByLabelText('New scenario variable name'), { target: { value: 'json' } });
-  fireEvent.change(screen.getByLabelText('New scenario variable type'), { target: { value: 'Json' } });
+  choosePicklistValue(screen.getByLabelText('New scenario variable type'), 'Json');
   fireEvent.click(screen.getByRole('button', { name: 'Add override' }));
   fireEvent.change(screen.getByLabelText('json value'), { target: { value: '{' } });
   expect(screen.getByRole('alert').textContent).toBe('Enter valid JSON.');

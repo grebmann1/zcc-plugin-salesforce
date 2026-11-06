@@ -1,3 +1,4 @@
+import { selectPicklistValue } from './fixtures/picklist.js';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, rmSync } from 'node:fs';
 import { join, delimiter } from 'node:path';
 import { test as base, expect } from './fixtures/app.js';
@@ -137,7 +138,7 @@ test('Salesforce connection failure leaves the new project available to open', a
   await page.getByRole('button', { name: 'Salesforce project', exact: true }).click();
   const wizard = page.getByTestId('salesforce-create-project');
   await wizard.getByRole('button', { name: 'Use a connected org', exact: true }).click();
-  await wizard.getByRole('combobox', { name: /^Connected org/ }).selectOption('dev');
+  await selectPicklistValue(wizard.getByRole('button', { name: /^Connected org/ }), 'dev');
   await wizard.getByRole('button', { name: 'Continue', exact: true }).click();
   await wizard.getByLabel('Project name', { exact: true }).fill('Available');
   await wizard.getByLabel('Parent folder', { exact: true }).fill(join(home, 'projects'));

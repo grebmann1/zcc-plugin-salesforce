@@ -1,5 +1,6 @@
-import { clearStudioRunWorkspaces } from '../studio/run-workspaces.js';
 /** @vitest-environment happy-dom */
+import { choosePicklistValue, findPicklistOption } from '../../test/picklist.js';
+import { clearStudioRunWorkspaces } from '../studio/run-workspaces.js';
 import { act } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -76,7 +77,7 @@ describe('Preview context editor and setup', () => {
     options('Session');
     fireEvent.click(within(screen.getByLabelText('Options for Session').parentElement!).getByRole('button', { name: 'Use runtime default' }));
     expect(current.values).toEqual([]);
-    fireEvent.change(screen.getByLabelText('Verified value'), { target: { value: 'false' } });
+    choosePicklistValue(screen.getByLabelText('Verified value'), 'false');
     expect(current.values[0]!.value).toBe(false);
   });
   it('keeps one options menu open at a time and closes it on a press outside', async () => {
@@ -126,7 +127,7 @@ describe('Preview context editor and setup', () => {
     expect(current.values[0]!.value).toBeNull();
     options('Session');
     fireEvent.click(screen.getByRole('button', { name: 'Set Session to null' }));
-    fireEvent.change(screen.getByLabelText('Verified value'), { target: { value: 'true' } });
+    choosePicklistValue(screen.getByLabelText('Verified value'), 'true');
     expect(current.values[1]!.value).toBe(true);
     enable('Details');
     expect(screen.queryByRole('alert')).toBeNull();
@@ -151,7 +152,7 @@ describe('Preview context editor and setup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add', exact: true }));
     expect(screen.getByRole('alert').textContent).toContain('already listed');
     fireEvent.change(screen.getByLabelText('Variable name'), { target: { value: 'amount' } });
-    fireEvent.change(screen.getByLabelText('Variable type'), { target: { value: 'Money' } });
+    choosePicklistValue(screen.getByLabelText('Variable type'), 'Money');
     fireEvent.click(screen.getByRole('button', { name: 'Add', exact: true }));
     enable('amount'); fireEvent.change(screen.getByLabelText('amount value'), { target: { value: '12.00' } });
     expect(current.values[0]!.value).toBe('12.00');
@@ -245,7 +246,7 @@ const saveAs = async (name: string) => {
   fireEvent.click(screen.getByRole('button', { name: 'Save preset' }));
   await waitFor(() => expect(screen.queryByLabelText('Preset name')).toBeNull());
 };
-const choose = (id: string) => fireEvent.change(screen.getByLabelText('Context preset'), { target: { value: id } });
+const choose = (id: string) => choosePicklistValue(screen.getByLabelText('Context preset'), id);
 describe('context presets and inline validation', () => {
   it('saves typed values, updates only explicitly, persists on reopen and tracks immutable applied provenance', async () => {
     const storage = presetRpcs(); const view = render(<Harness path="a.agent" />);
@@ -266,7 +267,7 @@ describe('context presets and inline validation', () => {
     expect(current.appliedPreset?.revision).toBe(1);
     expect(current.selected?.revision).toBe(2);
     view.unmount(); render(<Harness path="a.agent" />);
-    await screen.findByRole('option', { name: 'Unverified' });
+    await findPicklistOption(screen.getByLabelText('Context preset'), 'Unverified');
     expect(current.values.at(-1)!.value).toBe(3);
     expect(current.applied?.at(-1)!.value).toBe(0);
     expect(current.appliedPreset?.revision).toBe(1);
@@ -316,7 +317,7 @@ describe('context presets and inline validation', () => {
     storage.seed([{ id: 'old', name: 'Old schema', revision: 1, updatedAt: 1,
       values: [{ name: 'count', type: 'Text', value: 'old' }, { name: 'removed', type: 'Text', value: 'kept' }, { name: 'locale', type: 'Text', value: 'fr' }],
       fields: [{ name: 'count', label: 'Count', type: 'Text', declared: true }, { name: 'removed', label: 'Removed', type: 'Text', declared: true }, { name: 'locale', label: 'Locale', type: 'Text', declared: false }] }]);
-    render(<Harness path="a.agent" />); await screen.findByRole('option', { name: 'Old schema' }); choose('old');
+    render(<Harness path="a.agent" />); await findPicklistOption(screen.getByLabelText('Context preset'), 'Old schema'); choose('old');
     expect(screen.getByText('Needs review')).toBeTruthy(); expect(screen.getAllByRole('alert')).toHaveLength(2);
     expect((screen.getByLabelText('Removed value') as HTMLInputElement).value).toBe('kept');
     fireEvent.change(screen.getByLabelText('Count value'), { target: { value: '0' } });
@@ -326,7 +327,7 @@ describe('context presets and inline validation', () => {
   it('retains saved overrides when an open script changes declarations', async () => {
     const storage = presetRpcs(); storage.seed([{ id: 's', name: 'Saved', revision: 1, updatedAt: 1,
       values: [{ name: 'count', type: 'Number', value: 0 }], fields: [{ name: 'count', label: 'Count', type: 'Number', declared: true }] }]);
-    const view = render(<Harness path="a.agent" />); await screen.findByRole('option', { name: 'Saved' }); choose('s');
+    const view = render(<Harness path="a.agent" />); await findPicklistOption(screen.getByLabelText('Context preset'), 'Saved'); choose('s');
     const base = rpc.getMockImplementation()!;
     rpc.mockImplementation((p, m, a) => m === 'agentPreview.context' ? Promise.resolve({ ok: true, fields: [] }) : base(p, m, a));
     view.rerender(<Harness path="a.agent" source="changed" />);

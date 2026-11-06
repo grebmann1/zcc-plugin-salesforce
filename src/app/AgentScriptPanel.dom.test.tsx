@@ -1,3 +1,4 @@
+import { choosePicklistValue, findPicklistOption } from '../test/picklist.js';
 /**
  * @vitest-environment happy-dom
  * @vitest-environment-options {"settings":{"enableIframePageLoading":true}}
@@ -370,8 +371,8 @@ describe('AgentScriptPanel', () => {
     await act(async () => { within(tests).getByRole('button', { name: 'Role-play' }).click(); });
     const lab = tests.querySelector<HTMLElement>('[data-testid="agentforce-lab"]')!;
     const picker = within(lab).getByLabelText('Shared scenario');
-    await within(picker).findByRole('option', { name: 'Missing details · revision 1' });
-    await act(async () => fireEvent.change(picker, { target: { value: starterScenarios()[1].id } }));
+    await findPicklistOption(picker, 'Missing details · revision 1');
+    await act(async () => choosePicklistValue(picker, starterScenarios()[1].id));
     const persona = lab.querySelector<HTMLTextAreaElement>('textarea')!.value;
     expect(persona).toContain('distracted');
     await openView(el, 'Preview');

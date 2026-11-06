@@ -9,8 +9,8 @@ const VIEWS = [
 ] as const;
 
 /** The same two rows stay mounted while the test workspace changes underneath. */
-export function TestsHeader({ view, onViewChange, dirty, suite, scenarioCount = 0, casesOnly = false }: {
-  view: TestsView; onViewChange(view: TestsView): void; dirty: boolean;
+export function TestsHeader({ view, onViewChange, dirty, suite, scenarioCount = 0, casesOnly = false, title = 'Tests' }: {
+  title?: 'Tests' | 'Evals'; view: TestsView; onViewChange(view: TestsView): void; dirty: boolean;
   suite?: { path: string; cases: readonly unknown[] } | null; scenarioCount?: number; casesOnly?: boolean;
 }) {
   const label = view === 'cases' || casesOnly
@@ -32,7 +32,7 @@ export function TestsHeader({ view, onViewChange, dirty, suite, scenarioCount = 
 .sf-tests-nav > .sf-tp-btn[aria-pressed="true"] { background:var(--sf-soft); color:var(--sf-text); }
 @media (prefers-reduced-motion:reduce) { .sf-tp .sf-tp-seg button { transition:none; } }
     `}</style>
-    <div className="sf-tp-head"><h2>Tests</h2><TestsHelp dirty={dirty} /><span className="sf-tp-sub" title={label}>{label}</span></div>
+    <div className="sf-tp-head"><h2>{title}</h2><TestsHelp dirty={dirty} /><span className="sf-tp-sub" title={label}>{label}</span></div>
     {!casesOnly && <div className="sf-tests-nav">
       <div className="sf-tp-seg" role="group" aria-label="Tests view">
         {VIEWS.map(([key, name, title]) => <button key={key} type="button" title={title} aria-pressed={view === key} onClick={() => onViewChange(key)}>{name}</button>)}

@@ -1,3 +1,4 @@
+import { selectPicklistValue } from './fixtures/picklist.js';
 import { openThreadToolLauncher } from './fixtures/thread-tool-panel.js';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, realpathSync, cpSync } from 'node:fs';
@@ -395,7 +396,7 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     await tap(sims.locator('.sf-sim-scenario').first().getByRole('button'));
     await sims.getByLabel('Scenario 1 criteria',{exact:true}).scrollIntoViewIfNeeded(); await hold(2200);
     await tap(sims.locator('summary').filter({hasText:'Run settings'}));
-    await sims.getByLabel('Parallel conversations',{exact:true}).selectOption('3'); await page.keyboard.press('Escape'); await hold(1000);
+    await selectPicklistValue(sims.getByLabel('Parallel conversations',{exact:true}), '3'); await page.keyboard.press('Escape'); await hold(1000);
     await mark('06-parallel');
     await tap(sims.getByRole('button',{name:'Run 3 conversations',exact:true}));
     await expect(sims.locator('.sf-sim-lane.is-running')).toHaveCount(3);
@@ -408,7 +409,7 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     await hold(2500);
     await mark('08-handoff');
     const healing=sims.getByRole('region',{name:'Self-healing',exact:true});
-    await healing.getByLabel('Candidate attempts',{exact:true}).selectOption('3');
+    await selectPicklistValue(healing.getByLabel('Candidate attempts',{exact:true}), '3');
     await tap(healing.getByRole('button',{name:'Start self-healing',exact:true}));
     await page.getByTestId('thread-command-input').evaluate(el => { el.scrollTop = 0; });
     await hold(1800);

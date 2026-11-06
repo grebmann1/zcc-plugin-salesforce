@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { callPluginRpc, useZccContext, useZccNavigate } from '@zana-ai/zcc-plugin-sdk/app';
 import { PopoverPicklist } from '@zana-ai/zcc-ui/popover-picklist';
@@ -276,16 +277,15 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
           <div className="sf-org-preview-org" data-testid="salesforce-preview-org">
             {pinnedOrg ? <span className="sf-badge" title={orgSessionLabel(org) ?? pinnedOrg}>{pinnedOrg}</span> : <OrgPicker pluginId={pluginId} projectId={projectId} compact appearance="toolbar" disabled={busy || Boolean(sessionId)} onSelect={() => void refreshOrg()} />}
           </div>
-          <select
-            className="sf-as-dialect"
-            aria-label="Agentforce preview mode"
+          <SalesforcePicklist
+            triggerClassName="sf-as-dialect"
+            ariaLabel="Agentforce preview mode"
             value={mode}
             disabled={busy || Boolean(sessionId)}
-            onChange={(event) => setMode(normalizePreviewMode(event.target.value))}
-          >
-            <option value="simulate">Simulate</option>
-            <option value="live">Live</option>
-          </select>
+            onChange={value => setMode(normalizePreviewMode(value))}
+            searchable={false}
+            options={[{ value: 'simulate', label: 'Simulate' }, { value: 'live', label: 'Live' }]}
+          />
           {sessionId ? (
             <button
               type="button"

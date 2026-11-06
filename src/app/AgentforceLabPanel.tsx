@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useEffect, useId, useRef, useState } from 'react';
 import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import { DEFAULT_LAB_MODEL, LAB_SCENARIOS, parseLabScenario, type LabEngine, type LabScenario, type LabSnapshot, type LabTurn, type LabVerdict } from '../../lib/agentforce-lab-contract.js';
@@ -329,7 +330,7 @@ function AgentforceLabWorkspace(props: AgentforceLabPanelProps) {
       {!busy && <button className="af-primary" type="button" disabled={!props.source.trim() || context.loading || Boolean(context.error)} onClick={() => void perform(() => begin(testing))}><span aria-hidden="true">▶</span>{testing ? (session ? 'Run again' : 'Run AI role-play') : running ? 'New conversation' : 'Start conversation'}</button>}
       {(busy || running) && <button type="button" className="af-stop" onClick={() => void stop()}>Stop</button>}
     </header>
-    <style>{`.af-shared-scenario{display:flex;flex-direction:column;gap:10px;padding:12px 0}.af-shared-scenario label{display:flex;flex-direction:column;gap:6px}.af-shared-scenario select,.sf-shared-save input{font:inherit;max-width:100%;padding:8px;border:1px solid var(--sf-border);border-radius:6px;color:var(--sf-text);background:var(--sf-bg)}.sf-shared-save{padding:12px 0}.sf-shared-save form{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.sf-shared-save label{display:flex;flex-direction:column;gap:6px}`}</style><div className="af-roleplay-body">
+    <style>{`.af-shared-scenario{display:flex;flex-direction:column;gap:10px;padding:12px 0}.af-shared-scenario label{display:flex;flex-direction:column;gap:6px}.af-shared-scenario .sf-picklist,.sf-shared-save input{font:inherit;max-width:100%;padding:8px;border:1px solid var(--sf-border);border-radius:6px;color:var(--sf-text);background:var(--sf-bg)}.sf-shared-save{padding:12px 0}.sf-shared-save form{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.sf-shared-save label{display:flex;flex-direction:column;gap:6px}`}</style><div className="af-roleplay-body">
       {narrow && settingsOpen && <div className="af-setup-backdrop" onClick={closeSetup} />}
       <section ref={setup} id={setupId} className="af-setup" hidden={narrow && !settingsOpen} role={narrow ? 'dialog' : 'region'} aria-modal={narrow ? true : undefined} aria-label="Run setup" onKeyDown={event => {
         if (!narrow) return;
@@ -349,9 +350,7 @@ function AgentforceLabWorkspace(props: AgentforceLabPanelProps) {
             <button type="button" aria-pressed={engine === 'rehearsal'} disabled={busy || running} onClick={() => setEngine('rehearsal')}><strong>AI rehearsal</strong><span>Script only · no actions</span></button>
           </div>
           {testing && shared && <div className="af-shared-scenario">
-            <label>Shared scenario<select aria-label="Shared scenario" disabled={busy || running || shared.loading} value={shared.scenarios.some(row => row.id === scenario.origin?.id) ? scenario.origin?.id : ''} onChange={event => { const row = shared.scenarios.find(row => row.id === event.target.value); if (row) chooseScenario(row); else if (!event.target.value) { setScenario({ ...scenario, origin: undefined }); setPresetName('Custom scenario'); } }}>
-              <option value="">Local run setup</option>{shared.scenarios.map(row => <option key={row.id} value={row.id}>{row.name} · revision {row.revision}</option>)}
-            </select></label>
+            <label>Shared scenario<SalesforcePicklist ariaLabel="Shared scenario" searchable={shared.scenarios.length > 6} searchPlaceholder="Search shared scenarios…" disabled={busy || running || shared.loading} value={shared.scenarios.some(row => row.id === scenario.origin?.id) ? scenario.origin?.id ?? '' : ''} onChange={id => { const row = shared.scenarios.find(row => row.id === id); if (row) chooseScenario(row); else if (!id) { setScenario({ ...scenario, origin: undefined }); setPresetName('Custom scenario'); } }} options={[{ value: '', label: 'Local run setup' }, ...shared.scenarios.map(row => ({ value: row.id, label: `${row.name} · revision ${row.revision}` }))]} /></label>
             <button type="button" className="sf-tp-btn" onClick={shared.onManage}>Manage scenarios</button>
             {scenario.origin && <p className="af-caption">Based on {scenario.origin.name} · revision {scenario.origin.revision}. Edits below apply to this run only.</p>}
             {shared.selection && appliedSelection.current !== shared.selection.seq && (busy || running) && <p role="status">Your selected scenario will be ready after this run ends.</p>}
@@ -364,7 +363,7 @@ function AgentforceLabWorkspace(props: AgentforceLabPanelProps) {
             <label>Customer goal<textarea rows={2} value={scenario.goal} maxLength={2000} onChange={e => setScenario({ ...scenario, goal: e.target.value })} /></label>
             <label>Opening message<input value={scenario.opening} maxLength={4000} onChange={e => setScenario({ ...scenario, opening: e.target.value })} /></label>
             <label>Success criteria<textarea rows={2} value={scenario.criteria} maxLength={4000} onChange={e => setScenario({ ...scenario, criteria: e.target.value })} /></label>
-            <label className="af-turn-limit">Conversation budget<select value={scenario.maxTurns} onChange={e => setScenario({ ...scenario, maxTurns: Number(e.target.value) })}>{[1,2,3,4,5,6,7,8].map(n => <option value={n} key={n}>{n} turn{n > 1 ? 's' : ''}</option>)}</select></label>
+            <label className="af-turn-limit">Conversation budget<SalesforcePicklist ariaLabel="Conversation budget" value={String(scenario.maxTurns)} onChange={value => setScenario({ ...scenario, maxTurns: Number(value) })} searchable={false} options={[1,2,3,4,5,6,7,8].map(n => ({ value: String(n), label: `${n} turn${n > 1 ? 's' : ''}` }))} /></label>
           </fieldset></details>}
           {testing && shared && <SaveSharedScenario library={shared} scenario={scenario} name={presetName} values={context.values} disabled={busy || running || Boolean(context.error)} />}
           <details className="af-context-details"><summary>Initial variables <span>{context.error ? 'Review values' : context.count ? `${context.count} overrides` : 'Runtime defaults'}</span></summary>

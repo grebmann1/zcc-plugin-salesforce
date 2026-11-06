@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { Fragment, useMemo, useState } from 'react';
 import { orgMetricLabel, type OrgCaseResult, type OrgRunResults, type OrgTestCase } from '../../../lib/org-tests-contract.js';
 import {
@@ -96,9 +97,7 @@ export function OrgRunDetail({ run, previous, definitionCases, path, busy, onImp
         </button>)}
         </div>
         <input className="sf-ot-search" type="search" aria-label="Search cases" value={query} onChange={e => change(setQuery)(e.target.value)} placeholder="Search utterance, topic, reply…" />
-        <select className="sf-ot-select" aria-label="Sort by" value={sort} onChange={e => change(setSort)(e.target.value as CaseSort)}>
-          <option value="number">Sort: Case number</option><option value="verdict">Sort: Failures first</option><option value="latency">Sort: Latency</option><option value="score">Sort: Score</option>
-        </select>
+        <SalesforcePicklist<CaseSort> triggerClassName="sf-ot-select" ariaLabel="Sort by" value={sort} onChange={change(setSort)} searchable={false} options={[{ value: 'number', label: 'Sort: Case number' }, { value: 'verdict', label: 'Sort: Failures first' }, { value: 'latency', label: 'Sort: Latency' }, { value: 'score', label: 'Sort: Score' }]} />
         <span className="sf-tp-spacer" />
         <button type="button" className="sf-tp-btn" onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
         <button type="button" className="sf-tp-btn is-primary" disabled={busy || !failing.length || !path}

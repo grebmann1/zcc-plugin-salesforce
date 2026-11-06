@@ -1,4 +1,6 @@
 /** @vitest-environment happy-dom */
+import { findPicklistOption } from '../../test/picklist.js';
+import { choosePicklistValue } from '../../test/picklist.js';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CaseVariables } from './CaseVariables.js';
@@ -12,10 +14,10 @@ function setup(extra: Partial<Parameters<typeof CaseVariables>[0]> = {}) {
   const props = { scenario: { id: 'case1', name: 'Case', utterances: ['Hello'], expect: {} }, path: 'Bot.agent', source: 'source', projectId: 'p', disabled: false, rpc: vi.fn(async (method: string) => method.endsWith('list') ? { ok: true, presets: [preset] } : { ok: true, fields: [] }), onSave: vi.fn(async () => {}), ...extra };
   const view = render(<CaseVariables {...props} />); return { props, ...view };
 }
-const selectPreset = async () => { await screen.findByRole('option', { name: 'Existing customer · revision 1' }); fireEvent.change(screen.getByLabelText('Variable preset'), { target: { value: 'existing' } }); };
+const selectPreset = async () => { await findPicklistOption(screen.getByLabelText('Variable preset'), 'Existing customer · revision 1'); choosePicklistValue(screen.getByLabelText('Variable preset'), 'existing'); };
 it('reuses a saved preset, allows overrides, saves typed values and discards later edits', async () => {
   const { props } = setup(); await selectPreset();
-  expect((screen.getByLabelText('verified value') as HTMLSelectElement).value).toBe('false');
+  expect(screen.getByLabelText('verified value').textContent).toBe('False');
   fireEvent.change(screen.getByLabelText('count value'), { target: { value: '2' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save case variables' }));
   await screen.findByText(/Starting variables saved/);
@@ -35,7 +37,7 @@ it('keeps chosen values when the shared preset changes and reloads only relevant
   const before = props.rpc.mock.calls.length;
   await act(async () => channels['salesforce.context-presets.changed']({ projectId: 'other' })); expect(props.rpc).toHaveBeenCalledTimes(before);
   await act(async () => channels['salesforce.context-presets.changed']({ projectId: 'p' }));
-  await screen.findByRole('option', { name: 'Existing customer · revision 2' });
+  await findPicklistOption(screen.getByLabelText('Variable preset'), 'Existing customer · revision 2');
   expect((screen.getByLabelText('count value') as HTMLInputElement).value).toBe('0');
   await act(async () => channels['context.changed']({ projectId: 'p' })); expect(props.rpc.mock.calls.length).toBe(before + 4);
 });

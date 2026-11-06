@@ -1,3 +1,4 @@
+import { SalesforcePicklist } from '../components/SalesforcePicklist.js';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { MessageSquare, Play, Square } from 'lucide-react';
 import { callPluginRpc, useRealtime } from '@zana-ai/zcc-plugin-sdk/app';
@@ -562,9 +563,7 @@ function PreviewWorkspace(props: PreviewWorkbenchProps) {
         <div className="sf-pw-panel" aria-label="Compare runs">
           <div className="sf-pw-cmp">
             {JSON.stringify(cmpRuns[0]?.contextVariables ?? []) !== JSON.stringify(cmpRuns[1]?.contextVariables ?? []) && <p className="sf-pw-meta">These runs used different context values. Export each run to inspect its starting context.</p>}
-            {[0, 1].map(i => <select key={i} aria-label={`Run ${i === 0 ? 'A' : 'B'}`} value={compare[i]} onChange={e => setCompare(i === 0 ? [e.target.value, compare[1]] : [compare[0], e.target.value])}>
-              {runs.map(r => <option key={r.runId} value={r.runId}>{`${r.engine} · ${new Date(r.at).toLocaleTimeString()} · ${r.runId.slice(0, 6)}`}</option>)}
-            </select>)}
+            {[0, 1].map(i => <SalesforcePicklist key={i} ariaLabel={`Run ${i === 0 ? 'A' : 'B'}`} value={compare[i]} onChange={value => setCompare(i === 0 ? [value, compare[1]] : [compare[0], value])} searchable={runs.length > 6} searchPlaceholder="Search runs…" options={runs.map(r => ({ value: r.runId, label: `${r.engine} · ${new Date(r.at).toLocaleTimeString()} · ${r.runId.slice(0, 6)}` }))} />)}
             {rows.length === 0 && <div>No agent replies to compare.</div>}
             {rows.map(row => (
               <FragmentRow key={row.index} row={row} />

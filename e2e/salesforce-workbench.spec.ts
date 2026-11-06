@@ -1,3 +1,4 @@
+import { selectPicklistValue, expectPicklistValue } from './fixtures/picklist.js';
 import { openThreadToolLauncher } from './fixtures/thread-tool-panel.js';
 import { selectSalesforceSection } from './fixtures/salesforce-navigation.js';
 import { createServer } from "node:http";
@@ -250,8 +251,8 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
   await workbench.getByRole('button', { name: 'Open Salesforce tools' }).click();
   await expect(workbench.getByRole('dialog', { name: 'Salesforce tools' }).locator('[data-section]')).toHaveCount(5);
   await workbench.getByRole('button', { name: 'Close Salesforce tools' }).click();
-  await workbench.getByTestId("salesforce-org-picker").selectOption("org-159");
-  await expect(workbench.getByTestId("salesforce-org-picker")).toHaveValue("org-159");
+  await selectPicklistValue(workbench.getByTestId("salesforce-org-picker"), "org-159");
+  await expectPicklistValue(workbench.getByTestId("salesforce-org-picker"), "org-159");
   await expect(workbench.locator(".sf-summary")).toContainText("Project target");
   expect(
     await window.evaluate(() => window.cc.pluginApps.getSettings("salesforce")),
@@ -319,7 +320,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
       await expect(form.getByRole('button', { name: 'Waiting for sign-in…' })).toBeDisabled();
     }
     await expect(workbench.locator('.sf-org-switcher-name')).toHaveText(loginAlias, { timeout: 35_000 });
-    await expect(workbench.getByTestId('salesforce-org-picker')).toHaveValue(loginAlias);
+    await expectPicklistValue(workbench.getByTestId('salesforce-org-picker'), loginAlias);
     await expect(workbench.getByRole('status')).toContainText('selected it for this project');
     const loginTrace = readFileSync(join(home, 'sf-trace.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line)).find(row => row.args.includes(loginAlias));
     expect(loginTrace).toMatchObject({ home, cwd: realpathSync(join(home, 'dx')) });
@@ -331,14 +332,15 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
   await workbench.getByLabel('Org alias').fill('fail-login');
   await workbench.getByRole('button', { name: 'Sign in with browser' }).click();
   await expect(workbench.getByRole('alert')).toContainText('Sign-in did not finish');
-  await expect(workbench.getByTestId('salesforce-org-picker')).toHaveValue('browser-sso');
+  await expect(workbench.locator('.sf-org-switcher-name')).toHaveText('browser-sso');
   await expect(workbench).not.toContainText('FAKE_PRIVATE_TOKEN');
   const postLogin = await window.evaluate((projectId) => window.cc.pluginApps.callRpc('salesforce', 'orgs', { projectId }), projectId);
   expect(JSON.stringify(postLogin)).not.toMatch(/FAKE_PRIVATE_TOKEN|FAKE_REFRESH_TOKEN/);
   await screenshot(window, { path: testInfo.outputPath('salesforce-login.png') });
   await workbench.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await workbench.getByTestId('salesforce-org-picker').selectOption('org-159');
-  await expect(workbench.getByTestId('salesforce-org-picker')).toHaveValue('org-159');
+  await expectPicklistValue(workbench.getByTestId('salesforce-org-picker'), 'browser-sso');
+  await selectPicklistValue(workbench.getByTestId('salesforce-org-picker'), 'org-159');
+  await expectPicklistValue(workbench.getByTestId('salesforce-org-picker'), 'org-159');
   await selectSalesforceSection(workbench, 'data');
   await window.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   expect(await workbench.getByTestId('soql-run').evaluate(el => getComputedStyle(el).color)).toBe('rgb(255, 255, 255)');
@@ -372,7 +374,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
   await window.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
   // Standalone production browsing must not ask for an agent thread, including
   // schema loading, queries without LIMIT, and record inspection.
-  await workbench.getByTestId("salesforce-org-picker").selectOption("org-158");
+  await selectPicklistValue(workbench.getByTestId("salesforce-org-picker"), "org-158");
   await expect(workbench.locator(".sf-org-switcher-kind")).toHaveText("production");
   await expect(workbench.getByRole("alert")).toHaveCount(0);
   await workbench.getByTestId("soql-editor").fill("SELECT Id, Name FROM Account");
@@ -381,8 +383,8 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
   await workbench.getByRole("button", { name: "Customer 0", exact: true }).click();
   await expect(workbench.locator(".sf-soql-record")).toContainText("Read only");
   await expect(workbench.getByRole("alert")).toHaveCount(0);
-  await workbench.getByTestId("salesforce-org-picker").selectOption("org-159");
-  await expect(workbench.getByTestId("salesforce-org-picker")).toHaveValue("org-159");
+  await selectPicklistValue(workbench.getByTestId("salesforce-org-picker"), "org-159");
+  await expectPicklistValue(workbench.getByTestId("salesforce-org-picker"), "org-159");
   await selectSalesforceSection(workbench, 'deployments');
   await workbench.getByRole("button", { name: "Browse org metadata" }).click();
   await workbench.getByLabel('Search metadata').fill('Class179');
@@ -431,7 +433,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
   await screenshot(window, {
     path: testInfo.outputPath("salesforce-deployment-report.png"),
   });
-  await workbench.getByLabel("Metadata type").selectOption("Flow");
+  await selectPicklistValue(workbench.getByLabel("Metadata type"), "Flow");
   await workbench.getByRole("button", { name: "Browse org metadata" }).click();
   await expect(workbench.getByRole("alert")).toContainText(
     "Fixture metadata denied",
@@ -508,9 +510,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
     ).releaseTabSave?.();
   });
   expect(rendererErrors).toEqual([]);
-  await expect(
-    window.getByRole("combobox", { name: "Salesforce org", exact: true }),
-  ).toHaveValue("org-159");
+  await expectPicklistValue(window.getByRole("button", { name: "Salesforce org", exact: true }), "org-159");
   await expect
     .poll(() =>
       window.evaluate(async (id) => {
@@ -621,9 +621,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
     await window
       .getByRole("button", { name: "Salesforce record", exact: true })
       .click();
-    await expect(
-      window.getByRole("combobox", { name: "Salesforce org", exact: true }),
-    ).toHaveValue("org-159");
+    await expectPicklistValue(window.getByRole("button", { name: "Salesforce org", exact: true }), "org-159");
     await window
       .getByLabel("Record id", { exact: true })
       .fill("001000000000000");
@@ -641,7 +639,7 @@ test("Salesforce workbench: real plugin, project targeting, data, operations and
   }
   await route(window, `/projects/${projectId}`);
   await window.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
-  await expect(workbench.getByTestId('salesforce-org-picker')).toHaveValue('org-159');
+  await expectPicklistValue(workbench.getByTestId('salesforce-org-picker'), 'org-159');
   await selectSalesforceSection(workbench, 'apex');
   await workbench.getByRole('tab', { name: 'Debug logs', exact: true }).click();
   await expect(workbench.getByText('No debug logs returned')).toBeVisible();

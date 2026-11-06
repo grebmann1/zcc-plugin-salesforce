@@ -3,6 +3,8 @@ import { useZccContext, type PluginThreadPanelProps } from '@zana-ai/zcc-plugin-
 import { EmptyState } from '../components/SalesforceState.js';
 import { STUDIO_TOKENS } from './studio-tokens.js';
 import { attachStudioTool, useStudioMounted, useStudioToolScope, type PanelTool } from './studio-tool-bridge.js';
+import { isBuilderTool } from '../../../lib/studio-builder-contract.js';
+import { ThreadBuilderTool } from './ThreadBuilderTool.js';
 
 const HOST_STYLES = `${STUDIO_TOKENS}
 .sf-panel-tool-host { display:flex; flex-direction:column; height:100%; min-height:0; background:var(--sf-surface); color:var(--sf-text); }
@@ -32,6 +34,7 @@ export function StudioPanelTool({ tool, title, projectId, tabId, studioId }: { t
 /** The thread-panel action component for `tool`. */
 export function studioPanelTool(tool: PanelTool, title: string): ComponentType<PluginThreadPanelProps> {
   const Tool = (props: PluginThreadPanelProps) => {
+    if (props.surface !== 'plugin-page' && isBuilderTool(tool)) return <ThreadBuilderTool {...props} tool={tool} />;
     const studioId = props.params && typeof props.params === 'object' && !Array.isArray(props.params) && typeof props.params.studioId === 'string' ? props.params.studioId : undefined;
     return <StudioPanelTool tool={tool} title={title} projectId={props.projectId} tabId={props.tabId} studioId={studioId} />;
   };

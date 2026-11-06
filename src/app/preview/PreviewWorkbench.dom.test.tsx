@@ -1,5 +1,5 @@
-import { clearStudioRunWorkspaces } from '../studio/run-workspaces.js';
 /** @vitest-environment happy-dom */
+import { clearStudioRunWorkspaces } from '../studio/run-workspaces.js';
 import { fireEvent } from '@testing-library/react';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -500,8 +500,8 @@ describe('PreviewWorkbench', () => {
     expect(document.querySelector('[aria-label="Compare runs"]')).toBeTruthy();
     expect(el.textContent).toContain('differs');
     expect(el.querySelector('[data-testid=cmp-a]')?.textContent).toContain('Different');
-    const select = el.querySelector('select[aria-label="Run B"]') as HTMLSelectElement;
-    await act(async () => { select.value = select.options[0].value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    const select = el.querySelector<HTMLElement>('[aria-label="Run B"]')!;
+    await act(async () => { fireEvent.click(select); }); await act(async () => { fireEvent.click(document.querySelector<HTMLElement>('[role=listbox] [role=option]')!); });
     await click(btn(el, 'Export run'));
     expect((URL.createObjectURL as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
     await click(btn(el, 'Compare runs'));
@@ -867,9 +867,10 @@ describe('PreviewWorkbench failure paths and edge cases', () => {
     await click(btn(el, 'Start')); await typeAndSend(el, 'y');
     await click(btn(el, 'Compare runs'));
     expect(el.textContent).toContain('No agent replies to compare.');
-    const a = el.querySelector('select[aria-label="Run A"]') as HTMLSelectElement;
-    await act(async () => { a.value = a.options[1].value; a.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect((el.querySelector('select[aria-label="Run A"]') as HTMLSelectElement).value).toBe(a.options[1].value);
+    const a = el.querySelector<HTMLElement>('[aria-label="Run A"]')!;
+    let selected = '';
+    await act(async () => { fireEvent.click(a); }); await act(async () => { const option = document.querySelectorAll<HTMLElement>('[role=listbox] [role=option]')[1]; selected = option.textContent!; fireEvent.click(option); });
+    expect(a.textContent).toBe(selected);
   });
 
   it('shows matching replies as same across two runs', async () => {

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AGENT_SCRIPT_TOOLS, type AgentScriptTool } from '../AgentScriptTools.js';
 import { isBottomTab, type BottomTab } from './BottomPanel.js';
+import { isBuilderTool, type BuilderTool } from '../../../lib/studio-builder-contract.js';
 
 export type CompactTool = 'code' | AgentScriptTool;
 export const VIEW_TARGETS = ['preview', 'tests', 'graph', 'org-preview'] as const;
 export type ViewTarget = typeof VIEW_TARGETS[number];
 export const isViewTarget = (value: unknown): value is ViewTarget => VIEW_TARGETS.includes(value as ViewTarget);
-export type RailTab = 'assistant' | 'actions' | 'comments' | 'preview' | 'test' | 'graph' | 'org-preview';
+export type RailTab = 'assistant' | 'actions' | 'comments' | 'preview' | 'test' | 'graph' | 'org-preview' | BuilderTool;
 /**
  * `agent` is an agent's Script tab, `view` one of its Preview / Tests / Graph / Org preview views (one per kind),
  * `org` the Org agents browser: beside a host side panel it opens here instead of as a panel tool.
@@ -96,7 +97,7 @@ function parseTabs(value: unknown): EditorTab[] {
   }
   return tabs;
 }
-const parseRail = (value: unknown): RailTab | null => value === 'assistant' || value === 'actions' || value === 'comments' || value === 'preview' || value === 'test' || value === 'graph' || value === 'org-preview' ? value : null;
+const parseRail = (value: unknown): RailTab | null => value === 'assistant' || value === 'actions' || value === 'comments' || value === 'preview' || value === 'test' || value === 'graph' || value === 'org-preview' || isBuilderTool(value) ? value : null;
 export const viewRail = (target: ViewTarget): RailTab => target === 'tests' ? 'test' : target;
 
 function parseWorkspace(value: unknown): Workspace {

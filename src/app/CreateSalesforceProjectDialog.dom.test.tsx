@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { choosePicklistValue } from '../test/picklist.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -13,7 +14,7 @@ let el: HTMLDivElement;
 let props: PluginCreateProjectDialogProps;
 const ui = () => within(el);
 const click = async (name: string) => act(async () => { fireEvent.click(ui().getByRole('button', { name, exact: true })); });
-const change = async (label: string, value: string) => act(async () => { fireEvent.change(ui().getByLabelText(label, { exact: true }), { target: { value } }); });
+const change = async (label: string, value: string) => act(async () => { const field = ui().getByLabelText(label, { exact: true }); if (field.getAttribute('aria-haspopup') === 'listbox') choosePicklistValue(field, value); else fireEvent.change(field, { target: { value } }); });
 const submit = async () => act(async () => { fireEvent.submit(el.querySelector('form')!); });
 async function mount() { await act(async () => { root.render(createElement(CreateSalesforceProjectDialog, props)); }); }
 
@@ -87,7 +88,7 @@ describe('Salesforce project setup', () => {
     expect(rpc).toHaveBeenLastCalledWith('salesforce', 'orgs', expect.not.objectContaining({ refresh: true }));
     await click('Refresh');
     expect(rpc).toHaveBeenLastCalledWith('salesforce', 'orgs', expect.objectContaining({ refresh: true }));
-    expect(ui().getByRole('option', { name: /dev@example/ })).toBeTruthy();
+    expect(ui().getByLabelText('Connected org').textContent).toContain('Choose an org'); fireEvent.click(ui().getByLabelText('Connected org')); expect(document.querySelector('[role=listbox]')?.textContent).toContain('dev@example'); fireEvent.click(ui().getByLabelText('Connected org'));
   });
   it('locks the org picker and shows progress until connected orgs load', async () => {
     let finish!: (value: unknown) => void;
@@ -95,12 +96,12 @@ describe('Salesforce project setup', () => {
     await mount(); await click('Use a connected org');
     const picker = ui().getByLabelText<HTMLSelectElement>('Connected org');
     expect(picker.disabled).toBe(true);
-    expect(ui().getByRole('option', { name: 'Loading orgs…' })).toBeTruthy();
+    expect(picker.textContent).toBe('Loading orgs…');
     expect(ui().getByRole('status').textContent).toContain('Loading your connected orgs');
     expect(ui().queryByText('No connected orgs yet. Log in to continue.')).toBeNull();
     await act(async () => { finish({ ok: true, orgs }); });
     expect(picker.disabled).toBe(false);
-    expect(ui().getByRole('option', { name: 'Choose an org' })).toBeTruthy();
+    expect(picker.textContent).toBe('Choose an org');
     expect(ui().queryByRole('status')).toBeNull();
   });
   it('asks for an explicit org when login cannot identify the new connection', async () => {

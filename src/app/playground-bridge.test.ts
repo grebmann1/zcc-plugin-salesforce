@@ -136,6 +136,10 @@ describe('studio bridge messages', () => {
     rejects(isPlaygroundToHost, { type: 'askSelection', action: 'explain-selection', startLine: 1, endLine: 2, text: 't' }, [{ action: '' }, { action: 'x'.repeat(65) }, { startLine: 3 }, { text: 'x'.repeat(2001) }, { text: 1 }]);
     expect(isPlaygroundToHost(m({ type: 'saveRequest' }))).toBe(true);
   });
+  it('validates explicit editor preferences', () => {
+    rejects(isHostToPlayground, { type: 'setEditorOptions', lines: true, wrap: false }, [{ lines: 'yes' }, { wrap: undefined }, { wrap: 1 }]);
+    expect(isHostToPlayground(m({ type: 'setEditorOptions', lines: false, wrap: true }))).toBe(true);
+  });
   it('validates host messages for proposals, comments, hits and layout', () => {
     rejects(isHostToPlayground, { type: 'proposeEdit', proposalId: 'p', content: 'c', summary: 's', actor: 'a' }, [{ proposalId: '' }, { content: 1 }, { content: 'x'.repeat(AGENT_SOURCE_MAX + 1) }, { summary: 'x'.repeat(1001) }, { actor: 3 }]);
     rejects(isHostToPlayground, { type: 'clearProposal', proposalId: 'p' }, [{ proposalId: 1 }]);

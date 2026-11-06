@@ -40,6 +40,7 @@ export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => 
   for (const name of readdirSync(join(root, 'e2e')).filter(name => name.endsWith('.spec.ts'))) {
     let source = readFileSync(join(root, 'e2e', name), 'utf8');
     source = source.replaceAll("'./fixtures/salesforce-navigation.js'", "'" + join(root, "e2e/fixtures/salesforce-navigation.ts") + "'");
+    source = source.replaceAll("'./fixtures/picklist.js'", "'" + join(root, "e2e/fixtures/picklist.ts") + "'");
     source = source.replaceAll("'./fixtures/app.js'", "'./app.js'").replaceAll('"./fixtures/app.js"', '"./app.js"');
     source = source.replaceAll("'./fixtures/", "'" + join(host, 'e2e/fixtures/')).replaceAll('"./fixtures/', '"' + join(host, 'e2e/fixtures/'));
     source = source.replaceAll("'./sdk/", "'" + join(host, 'e2e/sdk/')).replaceAll('"./sdk/', '"' + join(host, 'e2e/sdk/'));
@@ -48,6 +49,7 @@ export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => 
     source = source.replaceAll("join(source, 'plugins/salesforce')", JSON.stringify(root));
     // Fixture servers import plugin modules by subpath, e.g. join(root, 'plugins/salesforce/lib/plugin.ts').
     source = source.replaceAll("join(root, 'plugins/salesforce/", "join(" + JSON.stringify(root) + ", '");
+    source = source.replaceAll("join(root, 'packages/", "join(" + JSON.stringify(host) + ", 'packages/");
     source = source.replace(/window\.cc\.extensions\.install\(\{\s*kind:\s*['"]bundled['"],\s*id:\s*['"]salesforce['"]\s*\}\)/g, "Promise.resolve({ ok: true })");
     writeFileSync(join(staged, name), source);
   }
