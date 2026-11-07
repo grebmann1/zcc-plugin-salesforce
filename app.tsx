@@ -16,6 +16,7 @@ import { studioPanelTool } from './src/app/studio/StudioPanelTool.js';
 import { STUDIO_TAB_ID } from './src/app/studio-window-route.js';
 import { isPanelTool, panelToolActionId } from './src/app/studio/studio-tool-bridge.js';
 import { isBuilderTool } from './lib/studio-builder-contract.js';
+import { CONTEXT_CHANGED_EVENT, useContextChangeRelay } from './src/app/context-sync.js';
 
 const STUDIO_TOOL_ICONS: Record<string, string> = { actions: 'Zap', comments: 'MessageSquare' };
 
@@ -30,6 +31,7 @@ function pluginHost() {
 
 function SalesforceComposerBanner(props: { pluginId?: string }) {
   const { scope } = useComposerView();
+  useContextChangeRelay();
   const projectId = 'projectId' in scope ? scope.projectId : undefined;
   const threadId = 'threadId' in scope ? scope.threadId : undefined;
   const React = hostReact();
@@ -37,15 +39,29 @@ function SalesforceComposerBanner(props: { pluginId?: string }) {
   const [status, setStatus] = React.useState<null | Record<string, unknown>>(null);
   React.useEffect(() => {
     let cancelled = false;
+    let latestRead = 0;
     setStatus(null);
-    pluginHost()
-      ?.callRpc(props.pluginId || 'salesforce', 'status', { projectId, threadId })
-      .then((next) => {
-        if (!cancelled) setStatus(next as Record<string, unknown>);
-      })
-      .catch(() => undefined);
+    const refresh = () => {
+      const read = ++latestRead;
+      pluginHost()
+        ?.callRpc(props.pluginId || 'salesforce', 'status', { projectId, threadId })
+        .then((next) => {
+          if (!cancelled && read === latestRead) setStatus(next as Record<string, unknown>);
+        })
+        .catch(() => {
+          if (!cancelled && read === latestRead) setStatus(null);
+        });
+    };
+    const changed = (event: Event) => {
+      const changedProject = (event as CustomEvent<{ projectId?: string | null }>).detail?.projectId;
+      if (changedProject && projectId && changedProject !== projectId) return;
+      refresh();
+    };
+    refresh();
+    window.addEventListener(CONTEXT_CHANGED_EVENT, changed);
     return () => {
       cancelled = true;
+      window.removeEventListener(CONTEXT_CHANGED_EVENT, changed);
     };
   }, [props.pluginId, projectId, threadId]);
   if (!status) return null;
