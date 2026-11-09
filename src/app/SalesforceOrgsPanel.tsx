@@ -1,9 +1,10 @@
 import { SalesforcePicklist } from './components/SalesforcePicklist.js';
 import { useEffect, useMemo, useState } from 'react';
-import { AppWindow, Bot, Database, FileCode, FlaskConical, Home, Package, type LucideIcon } from 'lucide-react';
+import { AppWindow, ArrowLeft, Bot, Database, FileCode, FlaskConical, Home, Package, type LucideIcon } from 'lucide-react';
 import { useZccNavigate } from '@zana-ai/zcc-plugin-sdk/app';
 import type { HubProject } from '../../lib/hub-projects.js';
 import type { WorkbenchView } from '../../lib/workbench-contract.js';
+import { SalesforceProjectTab } from './SalesforceProjectTab.js';
 import { OrgPicker } from './OrgPicker.js';
 import { rememberProjectView } from './project-view.js';
 import { queueAgentScriptOpen } from './agent-script-open.js';
@@ -16,7 +17,7 @@ import { readRecentAgents, type RecentAgent } from './recent-agents.js';
 const PROJECT_KEY = 'salesforce:hub:project';
 const TAB_ID = 'salesforce';
 
-/** Each tile opens the chosen project's Salesforce tab on one view; a new experience is one more row. */
+/** The global Salesforce page keeps tools here, scoped to the chosen project. */
 const EXPERIENCES: ReadonlyArray<{ view: WorkbenchView; title: string; description: string; Icon: LucideIcon }> = [
   { view: 'agentforce', title: 'Agentforce Studio', description: 'Edit, preview, test and publish agents.', Icon: Bot },
   { view: 'data', title: 'Data', description: 'Objects, fields, SOQL and records.', Icon: Database },
@@ -45,14 +46,16 @@ function ago(openedAt: number, now: number): string {
   return days === 1 ? 'yesterday' : `${days} days ago`;
 }
 
-/** The global Salesforce page: open the Studio or a tool in a project, then manage orgs. */
+/** The hub and workbench share the Salesforce destination; project context stays explicit. */
 export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string }) {
   const navigate = useZccNavigate();
+  const activeView = EXPERIENCES.find(row => row.view === props.subPath)?.view;
   const call = useSalesforceCall(props.pluginId);
   const listed = useResource<{ projects?: HubProject[] }>(call, 'hub.projects');
   const projects = useMemo(() => listed.data?.projects ?? [], [listed.data]);
   const [chosen, setChosen] = useState(readStoredProject);
-  const [recent] = useState<RecentAgent[]>(readRecentAgents);
+  const [recent, setRecent] = useState<RecentAgent[]>(readRecentAgents);
+  useEffect(() => { if (!activeView) setRecent(readRecentAgents()); }, [activeView]);
   const [windowError, setWindowError] = useState<string | null>(null);
 
   // A remembered project that is gone falls back to the first Salesforce project.
@@ -72,7 +75,7 @@ export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string 
     if (!projectId) return;
     choose(projectId);
     rememberProjectView(projectId, view);
-    navigate.toProject(projectId, { tabId: TAB_ID });
+    navigate.toPluginPanel('orgs', { subPath: view });
   };
   const openWindow = async () => {
     if (!project || !navigate.openInWindow) return;
@@ -87,6 +90,25 @@ export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string 
   };
 
   const target = project?.targetAlias;
+  const projectPicker = project && (
+    <label className="sf-hub-project">
+      <span className="sf-muted">Project</span>
+      <SalesforcePicklist ariaLabel="Project" value={project.id} onChange={choose} searchable={projects.length > 6} searchPlaceholder="Search projects…" options={salesforceProjects.length > 0 && otherProjects.length > 0 ? [...salesforceProjects.map(row => ({ value: row.id, label: row.name, group: 'Salesforce projects' })), ...otherProjects.map(row => ({ value: row.id, label: row.name, group: 'Other projects' }))] : projects.map(row => ({ value: row.id, label: row.name }))} />
+    </label>
+  );
+  if (activeView && project) {
+    return (
+      <SalesforcePanelFrame actions={<>
+        <button className="sf-btn quiet" type="button" onClick={() => navigate.toPluginPanel('orgs')}><ArrowLeft aria-hidden="true" />Salesforce home</button>
+        {projectPicker}
+      </>} title="Salesforce">
+        <style>{HUB_STYLES}</style>
+        <div className="sf-hub-workbench" data-testid="salesforce-hub-workbench">
+          <SalesforceProjectTab key={project.id} pluginId={props.pluginId} projectId={project.id} view={activeView} onViewChange={view => open(view)} />
+        </div>
+      </SalesforcePanelFrame>
+    );
+  }
   return (
     <SalesforcePanelFrame title="Salesforce">
       <style>{HUB_STYLES}</style>
@@ -112,14 +134,13 @@ export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string 
             <div className="sf-hub-note">Add a local project folder from the sidebar to open the Studio in it.</div>
           ) : (
             <>
-              <label className="sf-hub-project">
-                <span className="sf-muted">Project</span>
-                <SalesforcePicklist ariaLabel="Project" value={project.id} onChange={choose} searchable={projects.length > 6} searchPlaceholder="Search projects…" options={salesforceProjects.length > 0 && otherProjects.length > 0 ? [...salesforceProjects.map(row => ({ value: row.id, label: row.name, group: 'Salesforce projects' })), ...otherProjects.map(row => ({ value: row.id, label: row.name, group: 'Other projects' }))] : projects.map(row => ({ value: row.id, label: row.name }))} />
+              <div className="sf-hub-project">
+                {projectPicker}
                 <span className="sf-muted sf-small" data-testid="salesforce-hub-target">
                   {target ? <>Target <strong>{target}</strong></> : 'Uses the shared default org'}
                   {!project.dxProject && ' · drafts only, no DX project'}
                 </span>
-              </label>
+              </div>
               <div className="sf-hub-actions">
                 <button className="sf-btn primary" type="button" onClick={() => open('agentforce')}><Bot aria-hidden="true" />Open Studio</button>
                 {canOpenWindow && (

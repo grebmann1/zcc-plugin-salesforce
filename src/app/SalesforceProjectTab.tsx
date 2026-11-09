@@ -76,6 +76,9 @@ export function SalesforceProjectTab(props: {
   pluginId: string;
   projectId: string;
   headerActions?: ReactNode;
+  /** A containing Salesforce page can own the tool route. */
+  view?: WorkbenchView;
+  onViewChange?(view: WorkbenchView): void;
   detached?: DetachedStudioHost;
 }) {
   useContextChangeRelay();
@@ -95,7 +98,7 @@ export function SalesforceProjectTab(props: {
   const views = studio ? VIEWS.filter(([id]) => id === STUDIO_ONLY) : detached ? VIEWS.filter(([id]) => id !== STUDIO_ONLY) : VIEWS;
   const fit = (stored: WorkbenchView): WorkbenchView => views.some(([id]) => id === stored) ? stored : views[0][0];
   const [viewState, setViewState] = useState<WorkbenchView>(() => readProjectView(props.projectId, studio));
-  const view = fit(viewState);
+  const view = fit(props.view ?? viewState);
   const [navigationTarget, setNavigationTarget] = useState<HTMLDivElement | null>(null);
   // Keep visited Studio sessions mounted while using the general tools. Runs, drafts and iframe survive.
   const [agentforceProject, setAgentforceProject] = useState<string | null>(() => view === 'agentforce' ? props.projectId : null);
@@ -116,6 +119,7 @@ export function SalesforceProjectTab(props: {
   }, [resourceId, context.resourceRequestId]);
   const setView = (next: WorkbenchView) => {
     setViewState(next);
+    props.onViewChange?.(next);
     if (next !== "agentforce") setAgentFocus(null);
     if (!studio) rememberProjectView(props.projectId, next, studio);
   };

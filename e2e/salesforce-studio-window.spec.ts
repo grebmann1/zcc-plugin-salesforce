@@ -350,12 +350,24 @@ test('Salesforce hub: project tools, recent agents, themes, narrow layout and St
   // The plugin runtime can be running before its navigation contribution reaches the renderer.
   await main.getByTestId('nav-salesforce/orgs').click();
   await openHub();
-  for (const [tile, tab] of [['Data', 'Data'], ['Apex & logs', 'Apex & logs'], ['Deployments', 'Deployments'], ['Project home', 'Overview']] as const) {
+  for (const [tile, tab, view] of [['Data', 'Data', 'data'], ['Apex & logs', 'Apex & logs', 'apex'], ['Deployments', 'Deployments', 'deployments'], ['Project home', 'Overview', 'overview']] as const) {
     await hub.locator('.sf-hub-tile').filter({ has: main.getByText(tile, { exact: true }) }).click();
+    await expect(main).toHaveURL(new RegExp(`/plugins/salesforce/orgs/${view}$`));
     await expect(main.getByTestId('salesforce-workbench').getByRole('button', { name: 'Open Salesforce tools' })).toContainText(tab);
-    await openHub();
+    await expect(main.getByTestId('salesforce-hub-workbench')).toBeVisible();
+    await expect(main.getByTestId('project-mode-pane')).toHaveCount(0);
+    await expectPicklistValue(main.getByRole('button', { name: 'Project', exact: true }), projectId);
+    await main.getByRole('button', { name: 'Salesforce home', exact: true }).click();
+    await expect(main).toHaveURL(/\/plugins\/salesforce\/orgs$/);
+    await expect(hub).toBeVisible();
   }
   await hub.getByRole('button', { name: 'Open Studio', exact: true }).click();
+  await expect(main).toHaveURL(/\/plugins\/salesforce\/orgs\/agentforce$/);
+  await expect(main.getByTestId('salesforce-agent-script-panel')).toBeVisible();
+  await selectSalesforceSection(main.getByTestId('salesforce-workbench'), 'data');
+  await expect(main).toHaveURL(/\/plugins\/salesforce\/orgs\/data$/);
+  await main.goBack();
+  await expect(main).toHaveURL(/\/plugins\/salesforce\/orgs\/agentforce$/);
   await expect(main.getByTestId('salesforce-agent-script-panel')).toBeVisible();
   await main.getByTestId('salesforce-agent-script-file:force-app/Help.agent').click();
   await expect(main.frameLocator('iframe[title="Agentforce playground"]').locator('.view-lines')).toContainText('Support_Concierge');

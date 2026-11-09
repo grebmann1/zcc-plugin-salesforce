@@ -1,5 +1,7 @@
 /** The global Salesforce page is a centered reading surface; tiles reflow to the panel width. */
 export const HUB_STYLES = `
+.sf-hub-workbench { flex:1; min-height:0; min-width:0; overflow:hidden; }
+.sf-header > .sf-hub-project { margin-left:auto; max-width:100%; }
 .sf-hub { width:100%; max-width:1040px; margin:0 auto; padding:28px 32px 40px; }
 .sf-hub.sf-content > h3 { margin:28px 0 10px; font-size:11.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); }
 .sf-hub.sf-content > h3 + p { margin:-4px 0 10px; }
@@ -9,7 +11,7 @@ export const HUB_STYLES = `
 .sf-hub-studio-head h3 { margin:0; font-size:16px; font-weight:600; }
 .sf-hub-studio-icon { flex:none; width:40px; height:40px; display:grid; place-items:center; border-radius:10px; color:var(--text-on-accent,#fff); background:var(--accent); }
 .sf-hub-studio-icon svg { width:20px; height:20px; }
-.sf-hub-project { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; }
+.sf-hub-project { min-width:0; max-width:100%; display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; }
 .sf-hub-project .sf-picklist { min-width:0; width:200px; max-width:100%; height:30px; padding:0 8px; color:var(--text-primary); border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); }
 .sf-hub-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .sf-hub-actions .sf-btn { max-width:100%; white-space:normal; }
