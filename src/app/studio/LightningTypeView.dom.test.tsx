@@ -19,6 +19,12 @@ const READY = {
 };
 
 describe('LightningTypeView', () => {
+  it('explains an Apex-backed schema instead of implying that the type has no fields', async () => {
+    rpc.mockResolvedValue({ ok: true, data: { ...READY, baseType: '@apexClassType/c__Order$Request', properties: [] } });
+    render(<LightningTypeView pluginId="sf" typeRef="c__OrderRequest" onOpenAgent={vi.fn()} />);
+    expect(await screen.findByText('@apexClassType/c__Order$Request')).toBeTruthy();
+    expect(screen.getByText('Fields are defined by the Apex class.')).toBeTruthy();
+  });
   it('shows its last answer at once when it remounts', async () => {
     rpc.mockResolvedValue({ ok: true, data: READY });
     const first = render(<LightningTypeView pluginId="sf" projectId="p1" typeRef="c__OrderRequest" onOpenAgent={vi.fn()} />);

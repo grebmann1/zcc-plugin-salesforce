@@ -1,9 +1,13 @@
+import { parseLightningTypeRef } from './lightning-type-ref.js';
+
 /** A small, serializable projection of the official Agent Script AST. */
 export interface ActionParameter {
   name: string;
   type: string;
   description: string;
   required: boolean;
+  /** A validated Lightning Type declared by complex_data_type_name; Apex class types are excluded. */
+  lightningType?: string;
 }
 export interface ActionUse {
   line: number;
@@ -13,6 +17,7 @@ export interface ActionUse {
 export interface AgentAction {
   id: string;
   name: string;
+  label?: string;
   owner: string;
   target: string;
   description: string;
@@ -46,7 +51,8 @@ function lineOf(value: any, offset: number, declaration = false): number {
 function parameters(value: any): ActionParameter[] {
   return entries(value).slice(0, 250).map(([name, param]) => ({
     name, type: scalar(param.type) || 'unknown', description: scalar(param.properties?.description),
-    required: scalar(param.properties?.is_required) === 'true'
+    required: scalar(param.properties?.is_required) === 'true',
+    ...(parseLightningTypeRef(scalar(param.properties?.complex_data_type_name)) ? { lightningType: scalar(param.properties.complex_data_type_name) } : {})
   }));
 }
 function walk(value: any, visit: (node: Ast) => void, seen = new Set<object>()): void {
@@ -62,7 +68,7 @@ export function actionsFromAst(ast: any, source: string, annotationLines = 0): A
   const lines = source.split('\n');
   const owners: Array<[string, Ast]> = [['agent', ast], ...['start_agent', 'subagent', 'topic'].flatMap(kind => entries(ast?.[kind]).map(([name, node]): [string, Ast] => [`${kind}.${name}`, node]))];
   const actions: AgentAction[] = owners.flatMap(([owner, node]) => entries(node?.actions).map(([name, action]) => ({
-    id: `${owner}/actions/${name}`, name, owner, target: scalar(action.target), description: scalar(action.description),
+    id: `${owner}/actions/${name}`, name, ...(scalar(action.label) ? { label: scalar(action.label) } : {}), owner, target: scalar(action.target), description: scalar(action.description),
     line: lineOf(action, annotationLines, true), inputs: parameters(action.inputs), outputs: parameters(action.outputs), uses: []
   })));
   for (const [owner, node] of owners) {

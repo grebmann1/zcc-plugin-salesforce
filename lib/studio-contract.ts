@@ -103,18 +103,21 @@ export interface LightningTypeProperty { name: string; type?: string; title?: st
 /** One Lightning Type as `studio.lightningType` returns it: a project bundle, a standard platform type, or a missing reference. */
 export interface LightningTypeView {
   ref: string; standard: boolean; status: 'ready' | 'standard' | 'missing'; path?: string; title?: string; description?: string; message?: string;
+  baseType?: string;
   properties: LightningTypeProperty[]; files: Array<{ path: string; content: string; truncated?: boolean }>;
   /** The LWCs the bundle's channel renderer.json / editor.json override with; `path` is set when the component is in this project. */
   components: LightningTypeComponent[];
 }
 /** `ref` is the `definition` as written (`c/offerCard`); `target` is the overridden property, `$` for the whole type. */
 export interface LightningTypeComponent { ref: string; namespace: string; name: string; role: 'renderer' | 'editor'; channel: string; target: string; path?: string }
+/** Lightweight agent-scoped catalogue; full source is read only when a type or component opens. */
+export type LightningTypeSummary = Omit<LightningTypeView, 'properties' | 'files'>;
 /** One LWC bundle as `studio.lwc` returns it: its source files, or why it is not in the project. */
 export interface LwcBundleView { ref: string; name: string; status: 'ready' | 'missing'; path?: string; message?: string; files: Array<{ path: string; content: string; truncated?: boolean }> }
 
 export const STUDIO_RPC = {
   askAgent: 'studio.askAgent', draftAgent: 'studio.draftAgent', threads: 'studio.threads', unlink: 'studio.unlinkThread',
-  viewPublish: 'studio.view.publish', viewGet: 'studio.view.get', explorer: 'studio.explorer', lightningType: 'studio.lightningType', lwc: 'studio.lwc',
+  viewPublish: 'studio.view.publish', viewGet: 'studio.view.get', explorer: 'studio.explorer', lightningType: 'studio.lightningType', agentTypes: 'studio.agentTypes', lwc: 'studio.lwc',
   comments: 'studio.comments.list', commentAdd: 'studio.comments.add', commentResolve: 'studio.comments.resolve',
   commentUpdate: 'studio.comments.update', commentDelete: 'studio.comments.delete',
   trace: 'agentLab.trace', suites: 'studio.suites.list', suiteSave: 'studio.suites.save', suiteRun: 'studio.suites.run', suiteStart: 'studio.suites.start', suiteResult: 'studio.suites.result', suiteStop: 'studio.suites.stop', suiteCompare: 'studio.suites.compare',

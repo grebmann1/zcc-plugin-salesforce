@@ -10,6 +10,8 @@ import { orgSessionLabel } from '../../lib/org-session.js';
 import { useAgentScriptDoc } from './agent-doc/useAgentScriptDoc.js';
 import { ActionCodePreview } from './ActionCodePreview.js';
 import { AgentActionExplorer, AgentActionPanel } from './AgentActionPanel.js';
+import { AgentTypesView, AGENT_TYPES_STYLES, type OpenAgentType } from './AgentTypesView.js';
+import { AGENT_ACTION_STYLES } from './agent-action-styles.js';
 import { AgentScriptGraphPanel } from './AgentScriptGraphPanel.js';
 import { AgentforcePreviewPanel } from './AgentforcePreviewPanel.js';
 import { CommentsPane } from './studio/CommentsPane.js';
@@ -20,12 +22,14 @@ import { agentSuitePath } from '../../lib/graph-coverage.js';
 import { queueAgentScriptOpen } from './agent-script-open.js';
 import { openInStudioWindow, STUDIO_TAB_ID } from './studio-window-route.js';
 import { AGENTFORCE_STUDIO_STYLES } from './agentforce-studio-styles.js';
+import { AGENTFORCE_PANEL_STYLES } from './agentforce-panel-styles.js';
+import { AGENTFORCE_AGENT_VIEWS } from './agentforce-panel-params.js';
 
 const PLUGIN_ID = 'salesforce';
 
-export const AGENT_THREAD_VIEWS = ['file', 'preview', 'tests', 'graph', 'actions', 'comments'] as const;
+export const AGENT_THREAD_VIEWS = AGENTFORCE_AGENT_VIEWS;
 export type AgentThreadView = typeof AGENT_THREAD_VIEWS[number];
-const VIEW_LABEL: Record<AgentThreadView, string> = { file: 'File', preview: 'Preview', tests: 'Tests', graph: 'Graph', actions: 'Actions', comments: 'Comments' };
+const VIEW_LABEL: Record<AgentThreadView, string> = { file: 'File', preview: 'Preview', tests: 'Tests', graph: 'Graph', actions: 'Actions', types: 'Types', comments: 'Comments' };
 
 export interface AgentThreadParams { path: string; view: AgentThreadView; line?: number; runId?: string; turn?: number; node?: string; projectId?: string }
 
@@ -84,23 +88,30 @@ export function diffRows(diff: DiffLine[], context = 2): Array<DiffLine | null> 
 }
 
 const STYLES = `
-.sf-atp { height:100%; min-height:0; display:flex; flex-direction:column; font-size:12px; color:var(--sf-text); background:var(--sf-surface); }
+.sf-atp { height:100%; min-height:0; min-width:0; display:flex; flex-direction:column; font-size:12px; color:var(--sf-text); background:var(--sf-surface); }
 .sf-atp-head { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--sf-border); flex-wrap:wrap; }
-.sf-atp-title { min-width:0; flex:1; }
+.sf-atp-title { min-width:0; flex:1 1 160px; }
 .sf-atp-name { font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sf-atp-path { color:var(--sf-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sf-atp-pill { border:1px solid var(--sf-border); border-radius:999px; padding:1px 8px; font-size:11px; color:var(--sf-muted); white-space:nowrap; }
+.sf-atp-pill { border:1px solid var(--sf-border); border-radius:999px; padding:1px 8px; font-size:11px; color:var(--sf-muted); white-space:nowrap; max-width:100%; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; }
 .sf-atp-pill.is-warn { color:var(--sf-warn); border-color:var(--sf-warn); }
 .sf-atp-btn { border:1px solid var(--sf-border); background:transparent; color:var(--sf-text); border-radius:6px; padding:3px 10px; font:inherit; cursor:pointer; }
 .sf-atp-btn.is-primary { border-color:var(--sf-accent); color:var(--sf-accent); }
 .sf-atp-btn.is-danger { border-color:var(--sf-danger); color:var(--sf-danger); }
 .sf-atp-btn:disabled { opacity:.5; cursor:default; }
+.sf-atp-head > .sf-atp-btn { flex-shrink:0; white-space:nowrap; }
 .sf-atp-tabs { display:flex; gap:2px; padding:0 6px; border-bottom:1px solid var(--sf-border); overflow:auto; }
 .sf-atp-tab { border:0; border-bottom:2px solid transparent; background:transparent; color:var(--sf-muted); padding:6px 9px; font:inherit; cursor:pointer; }
 .sf-atp-tab[aria-selected="true"] { color:var(--sf-accent); border-bottom-color:var(--sf-accent); }
-.sf-atp-body { flex:1; min-height:0; position:relative; display:flex; flex-direction:column; }
-.sf-atp-view { flex:1; min-height:0; display:flex; flex-direction:column; overflow:auto; }
+.sf-atp-body { flex:1; min-height:0; min-width:0; position:relative; display:flex; flex-direction:column; }
+.sf-atp-view { flex:1; min-height:0; min-width:0; display:flex; flex-direction:column; overflow:auto; }
 .sf-atp-view[hidden] { display:none; }
+.sf-atp-actions { flex:1; min-height:0; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+.sf-atp-action-list { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.sf-atp-action-list[hidden] { display:none; }
+.sf-atp-action-list > .af-action-explorer { flex:1; min-height:0; overflow:auto; margin:0; border:0; }
+.sf-atp-action-back { flex-shrink:0; padding:7px 12px; border-bottom:1px solid var(--sf-border); }
+.sf-atp-action-back button { display:inline-flex; align-items:center; gap:6px; padding:3px 0; }
 .sf-atp-banner { padding:5px 10px; background:var(--sf-soft); border-bottom:1px solid var(--sf-border); display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .sf-atp-code { flex:1; min-height:240px; width:100%; border:0; }
 .sf-atp-section { padding:8px 10px; border-top:1px solid var(--sf-border); display:flex; flex-direction:column; gap:6px; }
@@ -218,9 +229,15 @@ function TestsView({ pluginId, projectId, path, onOpenStudio }: { pluginId: stri
   </div>;
 }
 
-function ActionsView({ pluginId, projectId, source, org, onReveal }: { pluginId: string; projectId?: string; source: string | null; org: PublicOrgView | null; onReveal(line: number): void }) {
+function ActionsView({ pluginId, projectId, source, org, onReveal, onOpenType, request, visible }: { pluginId: string; projectId?: string; source: string | null; org: PublicOrgView | null; onReveal(line: number): void; onOpenType(ref: string): void; request: { id: string; seq: number } | null; visible: boolean }) {
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const typeButton = useRef<HTMLElement | null>(null);
+  useEffect(() => { if (visible) typeButton.current?.focus({ preventScroll: true }); }, [visible]);
+  useEffect(() => { if (request) { setSelected(request.id); setDetailOpen(true); } }, [request]);
+  const backButton = useRef<HTMLButtonElement>(null);
+  const openedFrom = useRef<HTMLButtonElement | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
     if (source === null) { setActions([]); return; }
@@ -233,11 +250,24 @@ function ActionsView({ pluginId, projectId, source, org, onReveal }: { pluginId:
     }).catch(err => { if (live) { setFailed(err instanceof Error ? err.message : String(err)); setActions([]); } });
     return () => { live = false; };
   }, [pluginId, source]);
-  const action = actions.find(row => row.id === selected) ?? null;
-  return <div className="sf-as" data-testid="atp-actions">
+  const action = detailOpen ? actions.find(row => row.id === selected) ?? null : null;
+  useEffect(() => {
+    if (action) backButton.current?.focus({ preventScroll: true });
+    else openedFrom.current?.focus({ preventScroll: true });
+  }, [action?.id]);
+  return <div className="sf-as sf-atp-actions" data-testid="atp-actions">
     {failed && <div className="sf-atp-section sf-atp-error" role="alert">{failed}</div>}
-    <AgentActionExplorer actions={actions} selected={action?.id} onOpen={row => setSelected(row.id)} />
-    {action && <AgentActionPanel key={action.id} pluginId={pluginId} projectId={projectId} org={org} action={action} onReveal={onReveal} onOpenTarget={() => undefined} />}
+    {/* Keep the list mounted so Back restores its scroll position and collapsed groups. */}
+    <div className="sf-atp-action-list" hidden={Boolean(action)} onClickCapture={event => {
+      const button = (event.target as HTMLElement).closest('button');
+      if (button) openedFrom.current = button;
+    }}>
+      <AgentActionExplorer actions={actions} selected={selected ?? undefined} onOpen={row => { setSelected(row.id); setDetailOpen(true); }} />
+    </div>
+    {action && <>
+      <div className="sf-atp-action-back"><button ref={backButton} type="button" className="sf-atp-link" onClick={() => setDetailOpen(false)}><span aria-hidden="true">←</span> Back to actions</button></div>
+      <AgentActionPanel key={action.id} pluginId={pluginId} projectId={projectId} org={org} action={action} onReveal={onReveal} onOpenType={ref => { typeButton.current = document.activeElement as HTMLElement; onOpenType(ref); }} onOpenTarget={() => undefined} />
+    </>}
   </div>;
 }
 
@@ -260,7 +290,7 @@ function CommentsView({ pluginId, projectId, path, source, onReveal }: { pluginI
 
 interface AgentThreadPanelProps { pluginId: string; threadId?: string; tabId?: string; projectId?: string; orgAlias?: string; params?: unknown }
 
-/** The thread side panel for one agent: read-only File, Preview, Tests, Graph, Actions and Comments over the shared document. */
+/** The thread side panel for one agent: read-only File, Preview, Tests, Graph, Actions, Types and Comments over the shared document. */
 export function AgentThreadPanel(props: AgentThreadPanelProps) {
   const parsed = parseAgentThreadParams(props.params);
   if (!parsed) {
@@ -288,6 +318,22 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
   const [org, setOrg] = useState<PublicOrgView | null>(null);
   const api = useAgentScriptDoc(pluginId, projectId ?? null, path);
   const { doc } = api;
+  const [typeRequest, setTypeRequest] = useState<OpenAgentType | null>(null);
+  const [actionRequest, setActionRequest] = useState<{ id: string; seq: number } | null>(null);
+  const [typeActions, setTypeActions] = useState<{ source: string; actions: AgentAction[]; error: string | null } | null>(null);
+  const typesVisited = visited.has('types');
+  const source = doc?.text ?? null;
+  useEffect(() => {
+    if (!typesVisited || source === null) return;
+    let live = true;
+    void Promise.resolve(callPluginRpc(pluginId, 'agentScript.parse', { source })).then(value => {
+      if (!live) return;
+      const out = value as { ok?: boolean; error?: string; result?: { actions?: AgentAction[] } } | null;
+      setTypeActions({ source, actions: out?.result?.actions ?? [], error: out?.ok === false ? out.error || 'Could not read the actions.' : null });
+    }).catch(err => { if (live) setTypeActions({ source, actions: [], error: err instanceof Error ? err.message : String(err) }); });
+    return () => { live = false; };
+  }, [pluginId, source, typesVisited]);
+  const currentTypes = typeActions?.source === source ? typeActions : null;
 
   const show = useCallback((next: AgentThreadView) => { setView(next); setVisited(prev => prev.has(next) ? prev : new Set([...prev, next])); }, []);
   useEffect(() => {
@@ -325,7 +371,7 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
   const orgLabel = orgSessionLabel(org);
 
   return <div className="sf-atp sf-as" data-testid="atp-root">
-    <style>{AGENTFORCE_STUDIO_STYLES}</style><style>{STYLES}</style>
+    <style>{AGENTFORCE_PANEL_STYLES}</style><style>{AGENTFORCE_STUDIO_STYLES}</style><style>{AGENT_ACTION_STYLES}</style><style>{AGENT_TYPES_STYLES}</style><style>{STYLES}</style>
     <div className="sf-atp-head">
       <div className="sf-atp-title"><div className="sf-atp-name">{name.replace(/\.(agent|afscript)$/i, '')}</div><div className="sf-atp-path" title={path}>{path}</div></div>
       {orgLabel && <span className="sf-atp-pill" data-testid="atp-org">{orgLabel}</span>}
@@ -342,7 +388,9 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
       {lazy('graph', () => doc?.text != null
         ? <AgentScriptGraphPanel source={doc.text} visible={view === 'graph'} compact focusNode={jump.node ?? null} focusSeq={jump.seq} onOpenAction={() => show('actions')} />
         : <div className="sf-atp-empty">{api.loading ? 'Loading agent…' : 'The graph needs the agent text.'}</div>)}
-      {lazy('actions', () => <ActionsView pluginId={pluginId} projectId={projectId} source={doc?.text ?? null} org={org} onReveal={revealLine} />)}
+      {lazy('actions', () => <ActionsView pluginId={pluginId} projectId={projectId} source={doc?.text ?? null} org={org} onReveal={revealLine} visible={view === 'actions'} request={actionRequest} onOpenType={ref => { setTypeRequest(prev => ({ ref, seq: (prev?.seq ?? 0) + 1, fromAction: true })); show('types'); }} />)}
+      {lazy('types', () => <AgentTypesView key={`${projectId}:${path}`} pluginId={pluginId} projectId={projectId} actions={currentTypes?.actions ?? []} loading={api.loading || (source !== null && !currentTypes)} error={api.error || currentTypes?.error || (source === null && !api.loading ? 'The agent text is unavailable.' : null)} request={typeRequest}
+        onOpenAction={id => { setActionRequest(prev => ({ id, seq: (prev?.seq ?? 0) + 1 })); show('actions'); }} onReturnToAction={() => show('actions')} />)}
       {lazy('comments', () => <CommentsView pluginId={pluginId} projectId={projectId} path={path} source={doc?.text ?? null} onReveal={revealLine} />)}
     </div>
   </div>;

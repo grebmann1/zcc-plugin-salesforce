@@ -4,6 +4,23 @@ import { actionsFromAst, parseActionTarget } from '../lib/agent-action-model.js'
 import { ACTION_AGENT } from './action-fixtures.js';
 
 describe('Agentforce action projection', () => {
+  it('preserves the declared action label without inventing a display name', () => {
+    const source = ACTION_AGENT.replace('lookup:', 'lookup:\n            label: "Find orders"');
+    const actions = parseAgentScriptSource(source, 'agentforce').actions;
+    expect(actions[0].label).toBe('Find orders');
+    expect(actions[1].label).toBeUndefined();
+  });
+  it('retains validated Lightning Types on inputs and outputs, excluding Apex types and prose', () => {
+    const source = ACTION_AGENT.replace('is_required: True', 'is_required: True\n                    complex_data_type_name: "c__OrderRequest"');
+    const actions = parseAgentScriptSource(source, 'agentforce').actions;
+    expect(actions[0].inputs[0].lightningType).toBe('c__OrderRequest');
+    const projected = actionsFromAst({ actions: new Map([['a', { outputs: new Map([
+      ['text', { properties: { complex_data_type_name: { value: 'lightning__textType' } } }],
+      ['apex', { properties: { complex_data_type_name: '@apexClassType/c__A$B' } }],
+      ['bad', { properties: { complex_data_type_name: '../secret' } }]
+    ]) }]]) }, '');
+    expect(projected[0].outputs.map(p => p.lightningType)).toEqual(['lightning__textType', undefined, undefined]);
+  });
   it('uses the official AST, retains scope, types, source lines, calls and mappings', () => {
     const parsed = parseAgentScriptSource(ACTION_AGENT, 'agentforce');
     const [apex, flow, duplicate] = parsed.actions;

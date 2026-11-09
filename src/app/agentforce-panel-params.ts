@@ -1,6 +1,6 @@
 import { AGENT_SCRIPT_TOOLS, type AgentScriptTool } from './AgentScriptTools.js';
 
-/** The thread side panel bound to one agent (File / Preview / Tests / Graph / Actions / Comments). */
+/** The thread side panel bound to one agent (File / Preview / Tests / Graph / Actions / Types / Comments). */
 export const AGENTFORCE_AGENT_ACTION = 'agent';
 export const AGENTFORCE_PREVIEW_ACTION = 'preview';
 
@@ -57,7 +57,7 @@ export function agentforcePanelParams(path?: string, apiName?: string, extra: Pi
   return next;
 }
 
-export const AGENTFORCE_AGENT_VIEWS = ['file', 'preview', 'tests', 'graph', 'actions', 'comments'] as const;
+export const AGENTFORCE_AGENT_VIEWS = ['file', 'preview', 'tests', 'graph', 'actions', 'types', 'comments'] as const;
 export type AgentforceAgentView = typeof AGENTFORCE_AGENT_VIEWS[number];
 
 /** Params of the thread `agent` panel (all strings across the host boundary); `path` is required. */

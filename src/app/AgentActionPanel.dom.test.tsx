@@ -19,6 +19,33 @@ beforeEach(() => { rpc.mockReset().mockResolvedValue(ok()); props.onReveal.mockC
 afterEach(() => { cleanup(); delete (globalThis as Record<string, unknown>).__ZCC_PLUGIN_HOST__; vi.restoreAllMocks(); });
 
 describe('Agent action explorer', () => {
+  it('uses declared labels, searches names, targets, descriptions and topics, and restores collapsed topics after search', () => {
+    const labelled = [{ ...actions[0], label: 'Find orders', description: 'Delivery status' }, ...actions.slice(1)];
+    const onOpen = vi.fn();
+    const view = render(<AgentActionExplorer actions={labelled} selected={actions[0].id} onOpen={onOpen} />);
+    const selected = screen.getByRole('button', { name: 'Inspect Find orders (lookup) in start_agent.orders' });
+    expect(selected.textContent).toContain('Find ordersapex://OrderLookupApex');
+    expect(selected.getAttribute('aria-current')).toBe('true');
+    const group = selected.closest('details')!;
+    group.open = false; fireEvent(group, new Event('toggle'));
+    const search = screen.getByRole('searchbox', { name: 'Search actions' });
+    for (const query of ['Find orders', 'OrderLookup', 'Delivery status']) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(screen.getAllByRole('button')).toHaveLength(1);
+      expect(screen.getByRole('button').closest('details')?.open).toBe(true);
+      expect(screen.getByRole('heading', { name: 'Actions 1 / 3' })).toBeTruthy();
+    }
+    fireEvent.change(search, { target: { value: 'subagent.returns' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect lookup in subagent.returns' }));
+    expect(onOpen).toHaveBeenCalledWith(actions[2]);
+    fireEvent.change(search, { target: { value: 'no match' } });
+    expect(screen.getByRole('status').textContent).toBe('No matching actions.');
+    fireEvent.change(search, { target: { value: '' } });
+    expect(view.container.querySelector('details')?.open).toBe(false);
+    const restored = view.container.querySelector('details')!;
+    restored.open = true; fireEvent(restored, new Event('toggle'));
+    expect(screen.getByRole('button', { name: 'Inspect Find orders (lookup) in start_agent.orders' })).toBeTruthy();
+  });
   it('keeps same-named actions scoped and supports empty and unsupported targets', () => {
     const onOpen = vi.fn(); const view = render(<AgentActionExplorer actions={actions} selected={actions[0].id} onOpen={onOpen} />);
     fireEvent.click(screen.getByRole('button', { name: 'Inspect lookup in subagent.returns' }));
@@ -30,6 +57,18 @@ describe('Agent action explorer', () => {
   });
 });
 describe('action implementation panel', () => {
+  it('links input and output Lightning Types from Contract, and shows them without a navigation host', async () => {
+    const action = { ...actions[0], inputs: [{ ...actions[0].inputs[0], lightningType: 'c__OrderRequest' }], outputs: [{ ...actions[0].outputs[0], lightningType: 'lightning__textType' }] };
+    const onOpenType = vi.fn();
+    const view = render(<AgentActionPanel {...props} action={action} onOpenType={onOpenType} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Contract' }));
+    fireEvent.click(screen.getByRole('button', { name: 'c__OrderRequest ↗' }));
+    fireEvent.click(screen.getByRole('button', { name: 'lightning__textType ↗' }));
+    expect(onOpenType.mock.calls).toEqual([['c__OrderRequest'], ['lightning__textType']]);
+    view.rerender(<AgentActionPanel {...props} action={action} />);
+    expect(screen.queryByRole('button', { name: 'c__OrderRequest ↗' })).toBeNull();
+    expect(screen.getByText('c__OrderRequest').tagName).toBe('CODE');
+  });
   it('keeps successful source scan information beside the path instead of above the canvas', async () => {
     const message = 'Opened from the standard source path. The project is too large to rule out another copy elsewhere.';
     rpc.mockResolvedValue(ok({ language: 'xml', content: ACTION_FLOW_XML, label: 'flows/CheckReturn.flow-meta.xml', message }));

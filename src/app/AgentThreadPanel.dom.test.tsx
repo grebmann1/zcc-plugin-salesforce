@@ -34,8 +34,8 @@ vi.mock('./AgentScriptGraphPanel.js', () => ({
 vi.mock('./AgentActionPanel.js', () => ({
   AgentActionExplorer: (props: { actions: Array<{ id: string; name: string }>; onOpen(a: unknown): void }) =>
     createElement('div', null, props.actions.map(a => createElement('button', { key: a.id, onClick: () => props.onOpen(a) }, `act:${a.name}`))),
-  AgentActionPanel: (props: { action: { name: string }; onReveal(line: number): void }) =>
-    createElement('button', { 'data-testid': 'action-panel', onClick: () => props.onReveal(9) }, `panel:${props.action.name}`)
+  AgentActionPanel: (props: { action: { name: string }; onReveal(line: number): void; onOpenType(ref: string): void }) =>
+    createElement('div', null, createElement('button', { 'data-testid': 'action-panel', onClick: () => props.onReveal(9) }, `panel:${props.action.name}`), createElement('button', { 'data-testid': 'action-type', onClick: () => props.onOpenType('c__Order') }, 'Open order type'))
 }));
 let suites: unknown[] = [];
 vi.mock('./studio/useSuites.js', () => ({ useSuites: () => suites }));
@@ -291,6 +291,46 @@ describe('AgentThreadPanel', () => {
     expect(host.textContent).toContain('graph needs the agent text');
   });
 
+  it('opens Types from a contract, returns to the selected action, and follows type usage back to Actions', async () => {
+    const action = { id: 'x1', name: 'Lookup', owner: 'topic.t', target: 'apex://L', line: 4, description: '', inputs: [{ name: 'input', type: 'object', required: false, description: '', lightningType: 'c__Order' }], outputs: [], uses: [] };
+    const type = { ref: 'c__Order', title: 'Order', standard: false, status: 'ready', components: [], files: [], properties: [] };
+    rpc.mockImplementation(async (_p: string, method: string) => {
+      if (method === 'agentScript.parse') return { ok: true, result: { actions: [action] } };
+      if (method === 'studio.agentTypes') return { ok: true, types: [type] };
+      if (method === 'studio.lightningType') return { ok: true, data: type };
+      return { ok: false };
+    });
+    await mount({ path: PATH, view: 'actions' });
+    await click([...host.querySelectorAll('button')].find(b => b.textContent === 'act:Lookup')!);
+    const typeLink = q('[data-testid="action-type"]')!;
+    typeLink.focus();
+    await click(typeLink);
+    expect(tab('Types').getAttribute('aria-selected')).toBe('true');
+    expect(q('[data-testid="lightning-type-view"]')?.textContent).toContain('Order');
+    await click([...host.querySelectorAll('button')].find(b => b.textContent === '← Back to action')!);
+    expect(tab('Actions').getAttribute('aria-selected')).toBe('true');
+    expect(q('[data-testid="action-panel"]')?.textContent).toBe('panel:Lookup');
+    expect(document.activeElement).toBe(typeLink);
+    await click(tab('Types'));
+    await click([...host.querySelectorAll('button')].find(b => b.textContent === 'Lookup ↗')!);
+    expect(tab('Actions').getAttribute('aria-selected')).toBe('true');
+    expect(q('[data-testid="action-panel"]')?.textContent).toBe('panel:Lookup');
+  });
+
+  it('Types follows draft changes and reports missing text and parser errors', async () => {
+    rpc.mockResolvedValue({ ok: false, error: 'Invalid draft' });
+    const ui = await mount({ path: PATH, view: 'types' });
+    expect(q('[data-testid="atp-types"]')?.textContent).toContain('Invalid draft');
+    rpc.mockRejectedValueOnce(new Error('Parser offline'));
+    docApi.doc = baseDoc({ text: 'changed draft' });
+    await ui.rerender({ path: PATH, view: 'types' });
+    expect(q('[data-testid="atp-types"]')?.textContent).toContain('Parser offline');
+    docApi.doc = baseDoc({ text: null });
+    await ui.rerender({ path: PATH, view: 'types' });
+    expect(q('[data-testid="atp-types"]')?.textContent).toContain('agent text is unavailable');
+    expect(parseAgentThreadParams({ path: PATH, view: 'types' })?.view).toBe('types');
+  });
+
   it('lists actions parsed from the doc and reveals lines in the file', async () => {
     await mount({ path: PATH, view: 'actions' });
     await click([...host.querySelectorAll('button')].find(b => b.textContent === 'act:Lookup')!);
@@ -298,6 +338,44 @@ describe('AgentThreadPanel', () => {
     await click(q('[data-testid="action-panel"]'));
     expect(tab('File').getAttribute('aria-selected')).toBe('true');
     expect(q('[data-testid="code-stub"]')?.getAttribute('data-line')).toBe('9');
+  });
+
+  it('replaces the action list with details and restores the list and keyboard focus on Back', async () => {
+    await mount({ path: PATH, view: 'actions' });
+    const list = q('.sf-atp-action-list')!;
+    const opener = [...list.querySelectorAll('button')].find(b => b.textContent === 'act:Lookup')!;
+    list.scrollTop = 180;
+    expect(list.hidden).toBe(false);
+    expect(q('[data-testid="action-panel"]')).toBeNull();
+    await click(opener);
+    expect(list.hidden).toBe(true);
+    expect(q('[data-testid="action-panel"]')?.textContent).toBe('panel:Lookup');
+    const back = [...host.querySelectorAll('button')].find(b => b.textContent?.includes('Back to actions'))!;
+    expect(document.activeElement).toBe(back);
+    // Agent-view switches retain the selected action, without showing its list underneath.
+    await click(tab('File'));
+    await click(tab('Actions'));
+    expect(list.hidden).toBe(true);
+    await click(back);
+    expect(q('.sf-atp-action-list')).toBe(list);
+    expect(list.hidden).toBe(false);
+    expect(list.scrollTop).toBe(180);
+    expect(document.activeElement).toBe(opener);
+    expect(q('[data-testid="action-panel"]')).toBeNull();
+    await click(opener);
+    expect(list.hidden).toBe(true);
+    expect(q('[data-testid="action-panel"]')).not.toBeNull();
+  });
+
+  it('returns to the list if the selected action disappears from the document', async () => {
+    const ui = await mount({ path: PATH, view: 'actions' });
+    await click([...host.querySelectorAll('button')].find(b => b.textContent === 'act:Lookup')!);
+    rpc.mockResolvedValue({ ok: true, result: { actions: [] } });
+    docApi.doc = baseDoc({ text: 'no actions remain' });
+    await ui.rerender({ path: PATH, view: 'actions' });
+    expect(q('.sf-atp-action-list')?.hidden).toBe(false);
+    expect(q('[data-testid="action-panel"]')).toBeNull();
+    expect(host.textContent).not.toContain('Back to actions');
   });
 
   it('reports action parse failures', async () => {

@@ -1,5 +1,6 @@
 import { selectPicklistValue, readPicklistValue } from './fixtures/picklist.js';
 import { selectSalesforceSection } from './fixtures/salesforce-navigation.js';
+import type { Locator } from '@playwright/test';
 import { openThreadToolLauncher } from './fixtures/thread-tool-panel.js';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
@@ -758,7 +759,20 @@ test('Agentforce Studio: edit, Preview API conversation, AI role-play, cancellat
   expect(errors).toEqual([]);
 });
 
-test('Thread Agent and Preview panels retain their agent when switching tabs, and a chat card opens the read-only Agent panel', async ({ app, home }) => {
+test('Thread Agent and Preview panels retain their agent when switching tabs, and a chat card opens the read-only Agent panel', async ({ app, home }, testInfo) => {
+  // A long action list scrolls independently and is replaced by full-height details.
+  const extraActions = Array.from({ length: 40 }, (_, i) => `        check_order_${i}:\n            description: "Check order ${i}"\n            target: "apex://OrderLookup"\n`).join('');
+  const implementation = 'OrderQuotePricingSummaryService';
+  writeFileSync(join(home, 'dx', 'force-app/main/default/classes', `${implementation}.cls`), ACTION_APEX.replaceAll('OrderLookup', implementation));
+  const typedAgent = ACTION_AGENT.replace('is_required: True', 'is_required: True\n                    complex_data_type_name: "c__OrderRequest"').replace('description: "Delivery status"', 'description: "Delivery status"\n                    complex_data_type_name: "lightning__textType"');
+  writeFileSync(join(home, 'dx', 'force-app/Orders.agent'), typedAgent.replace('apex://OrderLookup', `apex://${implementation}`).replace('    actions:\n', `    actions:\n${extraActions}`));
+  const typeDir = join(home, 'dx', 'force-app/main/default/lightningTypes/OrderRequest');
+  const lwcDir = join(home, 'dx', 'force-app/main/default/lwc/orderCard');
+  mkdirSync(join(typeDir, 'lightningDesktopGenAi'), { recursive: true }); mkdirSync(lwcDir, { recursive: true });
+  writeFileSync(join(typeDir, 'schema.json'), JSON.stringify({ title: 'Order request', 'lightning:type': '@apexClassType/c__OrderLookup$Request' }));
+  writeFileSync(join(typeDir, 'lightningDesktopGenAi/renderer.json'), JSON.stringify({ renderer: { componentOverrides: { $: { definition: 'c/orderCard' } } } }));
+  writeFileSync(join(lwcDir, 'orderCard.html'), '<template><lightning-card title="Order details"><p>{orderId}</p></lightning-card></template>');
+  writeFileSync(join(lwcDir, 'orderCard.js'), 'export default class OrderCard { orderId = "Example"; }');
   const page = app.window;
   expect(await page.evaluate(() => window.cc.extensions.install({ kind: 'bundled', id: 'salesforce' }))).toMatchObject({ ok: true });
   const trust = page.getByRole('button', { name: 'Install with full trust' });
@@ -812,10 +826,45 @@ test('Thread Agent and Preview panels retain their agent when switching tabs, an
   await expect(agent).toBeVisible();
   await expect(agent).toContainText('Orders');
   await expect(agent.getByRole('tablist', { name: 'Agent views' })).toBeVisible();
-  for (const view of ['file', 'preview', 'tests', 'graph', 'actions', 'comments']) await expect(agent.locator(`#atp-tab-${view}`)).toBeVisible();
+  for (const view of ['file', 'preview', 'tests', 'graph', 'actions', 'types', 'comments']) await expect(agent.locator(`#atp-tab-${view}`)).toBeVisible();
   await expect(agent.getByTestId('atp-view-file')).toBeVisible();
   await expect(agent.getByRole('button', { name: /Open in Studio/ })).toBeVisible();
   await expect(agent.locator('textarea, [contenteditable="true"]')).toHaveCount(0);
+  const source = agent.frameLocator('iframe[title="Agent script (read-only)"]');
+  const keywordColor = () => source.locator('.view-lines').evaluate(el => {
+    const token = [...el.querySelectorAll('span')].find(node => node.textContent === 'config');
+    return token ? getComputedStyle(token).color : 'uncolored';
+  });
+  // The plugin's semantic tokens must run in the reference iframe too. Basic
+  // quote/comment coloring alone leaves block keywords like `config` uncolored.
+  for (const [theme, color] of [['dark', 'rgb(86, 156, 214)'], ['light', 'rgb(5, 80, 174)']]) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await expect.poll(keywordColor, { timeout: 15_000 }).toBe(color);
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`thread-agent-highlighting-${theme}.png`));
+  }
+  // Types uses the current agent's declarations, with the same source and Sketch viewers as Studio.
+  await agent.locator('#atp-tab-types').click();
+  const typeBrowser = agent.getByTestId('atp-types');
+  await expect(typeBrowser.getByRole('button', { name: 'Lightning Types 2' })).toBeVisible();
+  await typeBrowser.getByRole('button', { name: /Order request c__OrderRequest/ }).click();
+  await expect(typeBrowser.getByText('Fields are defined by the Apex class.')).toBeVisible();
+  await typeBrowser.getByRole('button', { name: 'c/orderCard', exact: true }).click();
+  const component = typeBrowser.getByTestId('lwc-bundle-view');
+  await expect(component.getByLabel(/Source of .*orderCard.html/)).toContainText('Order details');
+  await component.getByRole('tab', { name: /controller$/ }).click();
+  await expect(component.getByLabel(/Source of .*orderCard.js/)).toContainText('class OrderCard');
+  await component.getByRole('tab', { name: 'Sketch' }).click();
+  await expect(component.locator('iframe[title="Sketch of orderCard"]')).toBeVisible();
+  await component.getByRole('button', { name: 'c__OrderRequest', exact: true }).click();
+  await typeBrowser.getByRole('button', { name: 'lookup ↗', exact: true }).click();
+  const typedAction = agent.getByTestId('agent-action-panel');
+  await typedAction.getByRole('button', { name: 'Contract', exact: true }).click();
+  const typeLink = typedAction.getByRole('button', { name: 'c__OrderRequest ↗', exact: true });
+  await typeLink.click();
+  await typeBrowser.getByRole('button', { name: '← Back to action', exact: true }).click();
+  await expect(typeLink).toBeFocused();
+  await expect(typedAction.getByRole('button', { name: 'Contract', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await typedAction.getByRole('button', { name: 'Source', exact: true }).click();
   await agent.locator('#atp-tab-graph').click();
   await expect(agent.getByTestId('atp-view-graph')).toBeVisible();
   // Switching host tabs keeps the Preview choice and returns to the same agent view.
@@ -824,9 +873,120 @@ test('Thread Agent and Preview panels retain their agent when switching tabs, an
   // The card opened its own host tab labelled with the agent; the empty Agent tab stays beside it.
   await expect(panel.locator('.thread-secondary-tabs').getByRole('button', { name: 'Agent', exact: true })).toBeVisible();
   await panel.locator('.thread-secondary-tabs').getByRole('button', { name: 'Orders', exact: true }).click();
-  // The host unmounts the panel on a tab switch; the agent binding (tab params) survives, the chosen view does not.
+  // The host unmounts the panel on a tab switch; its agent binding and remembered view survive.
   await expect(agent).toContainText('Orders');
   await expect(agent.getByRole('tablist', { name: 'Agent views' })).toBeVisible();
+  await agent.locator('#atp-tab-file').click();
+  await expect.poll(keywordColor, { timeout: 15_000 }).toBe('rgb(5, 80, 174)');
+
+  // Exercise the thread surface before Studio can inject any of its styles globally.
+  const referenceStyle = (row: Locator) => row.evaluate(el => {
+    const style = getComputedStyle(el);
+    const icon = getComputedStyle(el.querySelector('.sf-reference-icon')!);
+    return { padding: style.padding, gap: style.gap, minHeight: style.minHeight, fontSize: style.fontSize, iconWidth: icon.width, iconRadius: icon.borderRadius };
+  });
+  for (const [theme, width] of [['dark', 1500], ['light', 1000]] as const) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    await agent.locator('#atp-tab-types').click();
+    const browseAll = typeBrowser.getByRole('button', { name: 'Browse all', exact: true });
+    if (await browseAll.isVisible()) await browseAll.click();
+    await expect(typeBrowser.getByRole('button', { name: /Order request c__OrderRequest/ })).toBeVisible();
+    const commonStyle = await referenceStyle(typeBrowser.locator('.sf-reference-row').first());
+    expect(await typeBrowser.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: testInfo.outputPath(`thread-agent-types-${theme}.png`) });
+    await typeBrowser.getByRole('button', { name: 'Components 1', exact: true }).click();
+    await expect(typeBrowser.locator('.sf-reference-row')).toHaveCount(1);
+    expect(await referenceStyle(typeBrowser.locator('.sf-reference-row'))).toEqual(commonStyle);
+    await typeBrowser.getByRole('button', { name: 'Lightning Types 2', exact: true }).click();
+    await agent.locator('#atp-tab-actions').click();
+    const actions = agent.getByTestId('atp-actions');
+    const back = actions.getByRole('button', { name: 'Back to actions', exact: true });
+    if (await back.isVisible()) await back.click();
+    const list = actions.locator('.af-action-explorer');
+    const selectedRow = list.getByRole('button', { name: 'Inspect lookup in start_agent.orders', exact: true });
+    expect(await referenceStyle(selectedRow)).toEqual(commonStyle);
+    const returnsGroup = list.locator('details').last();
+    if (await returnsGroup.evaluate(el => (el as HTMLDetailsElement).open)) await returnsGroup.locator('summary').click();
+    await expect(returnsGroup).toHaveJSProperty('open', false);
+    const search = list.getByRole('searchbox', { name: 'Search actions' });
+    await search.fill('CheckReturn');
+    await expect(list.locator('.sf-reference-row')).toHaveCount(2);
+    await expect(list.getByRole('button', { name: 'Inspect lookup in subagent.returns', exact: true })).toBeVisible();
+    await search.fill('no matching action');
+    await expect(list.getByRole('status')).toHaveText('No matching actions.');
+    await search.fill('');
+    await expect(returnsGroup).toHaveJSProperty('open', false);
+    const listLayout = await list.evaluate(el => ({
+      width: el.clientWidth, rowWidth: el.querySelector('.sf-reference-row')!.clientWidth,
+      padding: parseFloat(getComputedStyle(el).paddingLeft) + parseFloat(getComputedStyle(el).paddingRight)
+    }));
+    expect(listLayout.rowWidth).toBeGreaterThan(listLayout.width - listLayout.padding - 2);
+    const nameBox = (await selectedRow.locator('.sf-as-tree-name').boundingBox())!;
+    if (await selectedRow.locator('.sf-as-tree-meta').isVisible()) expect(nameBox.x + nameBox.width).toBeLessThan((await selectedRow.locator('.sf-as-tree-meta').boundingBox())!.x);
+    await expect(selectedRow.locator('.sf-reference-chevron')).toBeVisible();
+    expect(await list.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    expect(await list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    expect((await list.boundingBox())!.height).toBeGreaterThan((await actions.boundingBox())!.height - 4);
+    await selectedRow.scrollIntoViewIfNeeded();
+    const listScroll = await list.evaluate(el => el.scrollTop);
+    await page.screenshot({ path: testInfo.outputPath(`thread-agent-actions-list-${theme}.png`) });
+    await selectedRow.focus();
+    await selectedRow.press('Enter');
+    const detail = actions.getByTestId('agent-action-panel');
+    await expect(list).toBeHidden();
+    await expect(back).toBeFocused();
+    await expect.poll(() => detail.evaluate(el => getComputedStyle(el).display)).toBe('flex');
+    const code = detail.locator('iframe[title="Action implementation source"]');
+    await expect(code).toBeVisible();
+    await expect(detail.frameLocator('iframe[title="Action implementation source"]').locator('.view-lines')).toContainText('InvocableMethod');
+    const detailBox = (await detail.boundingBox())!;
+    const codeBox = (await code.boundingBox())!;
+    expect(detailBox.height).toBeGreaterThan(300);
+    expect(codeBox.height).toBeGreaterThan(200);
+    expect(codeBox.width).toBeGreaterThan(detailBox.width - 4);
+    expect(detailBox.height).toBeGreaterThan((await actions.boundingBox())!.height - 50);
+    expect(await agent.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    expect(await detail.locator('.af-action-heading').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`thread-agent-apex-${theme}.png`));
+
+    await back.click();
+    await expect(list).toBeVisible();
+    await expect(selectedRow).toBeFocused();
+    await expect(returnsGroup).toHaveJSProperty('open', false);
+    expect(await list.evaluate(el => el.scrollTop)).toBe(listScroll);
+    await expect(detail).toHaveCount(0);
+    await actions.getByRole('button', { name: 'Inspect refund in start_agent.orders', exact: true }).click();
+    await expect(list).toBeHidden();
+    const flow = detail.locator('.af-flow-frame');
+    await expect(flow).toBeVisible();
+    await expect(detail.frameLocator('iframe[title="Salesforce Flow visualizer"]').getByRole('button', { name: /Collapse All/ })).toBeVisible();
+    expect((await flow.boundingBox())!.height).toBeGreaterThan(240);
+    expect((await flow.boundingBox())!.width).toBeGreaterThan((await detail.boundingBox())!.width - 4);
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`thread-agent-flow-${theme}.png`));
+
+    // The thread's narrow container must not constrain the expanded Flow dialog.
+    const expand = detail.getByRole('button', { name: 'Expand Flow', exact: true });
+    await expand.click();
+    const modal = page.getByRole('dialog', { name: 'Expanded Flow', exact: true });
+    await expect(modal).toBeVisible();
+    const modalBox = (await modal.boundingBox())!;
+    expect(modalBox.width).toBeGreaterThan(width - 70);
+    expect(modalBox.height).toBeGreaterThan(930);
+    const expandedFrame = modal.locator('iframe[title="Salesforce Flow visualizer"]');
+    const expandedCanvas = modal.frameLocator('iframe[title="Salesforce Flow visualizer"]');
+    await expect(expandedCanvas.getByRole('button', { name: /Collapse All/ })).toBeVisible();
+    expect((await expandedFrame.boundingBox())!.width).toBeGreaterThan(modalBox.width - 20);
+    expect((await expandedFrame.boundingBox())!.height).toBeGreaterThan(modalBox.height - 100);
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath(`thread-agent-flow-expanded-${theme}.png`));
+    // Escape also works when focus is inside the sandboxed official viewer.
+    await expandedCanvas.getByRole('button', { name: 'Zoom out', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+    await expect(expand).toBeFocused();
+    await expect(back).toBeVisible();
+    await expect(list).toBeHidden();
+  }
 });
 
 test('Org preview: agent-scoped target, employee-agent simulation and an unclipped composer', async ({ app, home }, testInfo) => {
@@ -1250,6 +1410,13 @@ test('Agentforce action explorer: real source RPC, Apex colors, Flow map and pre
   await studio.getByTestId('salesforce-agent-script-file:force-app/Orders.agent').click();
   await openTool(studio, 'Actions');
   await expect(studio.getByRole('button', { name: 'Inspect lookup in start_agent.orders' })).toBeVisible();
+  const actionList = studio.locator('.af-action-explorer');
+  await actionList.getByRole('searchbox', { name: 'Search actions' }).fill('CheckReturn');
+  await expect(actionList.locator('.sf-reference-row')).toHaveCount(2);
+  await expect(actionList.locator('.sf-reference-icon.flow').first()).toBeVisible();
+  await actionList.getByRole('searchbox', { name: 'Search actions' }).fill('');
+  await expect(actionList.getByRole('heading', { name: 'Actions 3' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('studio-actions-list-harmonized.png') });
   await agent.locator('.monaco-editor').click({ position: { x: 120, y: 45 } });
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowUp' : 'Control+Home');
   await page.keyboard.insertText('# preserve my action draft\n');

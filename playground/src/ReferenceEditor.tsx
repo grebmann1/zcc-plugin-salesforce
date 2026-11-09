@@ -8,7 +8,8 @@ export function ReferenceEditor() {
   useEffect(() => {
     const host = ensureAgentScriptMonaco();
     const model = host.editor.createModel('', 'apex');
-    const editor = host.editor.create(container.current!, { model, readOnly: true, domReadOnly: true, automaticLayout: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, wordWrap: 'on', padding: { top: 12 }, overviewRulerLanes: 0 });
+    // AgentScript's full coloring comes from semantic tokens, as in Studio.
+    const editor = host.editor.create(container.current!, { model, 'semanticHighlighting.enabled': true, readOnly: true, domReadOnly: true, automaticLayout: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, wordWrap: 'on', padding: { top: 12 }, overviewRulerLanes: 0 });
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== location.origin || event.source !== window.parent || !isHostToPlayground(event.data)) return;
       const message = event.data;

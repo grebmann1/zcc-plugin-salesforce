@@ -1,14 +1,20 @@
 import { STUDIO_TOKENS } from './studio/studio-tokens.js';
+import { AGENT_REFERENCE_STYLES } from './AgentReferenceList.js';
 export const AGENT_ACTION_STYLES = `
+${AGENT_REFERENCE_STYLES}
+.af-action-type { margin-top:5px; overflow-wrap:anywhere; }
+.af-action-type button { display:inline; font-size:10px; overflow-wrap:anywhere; text-align:left; }
+.af-action-type svg { display:inline; vertical-align:middle; margin-right:4px; }
+
 ${STUDIO_TOKENS}.af-action-workspace { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .af-related-tabs { display:flex; flex-shrink:0; overflow:auto; border-bottom:1px solid var(--sf-border); min-height:34px; background:var(--sf-surface); }
 .af-related-tab { display:flex; align-items:center; max-width:240px; flex-shrink:0; border-right:1px solid var(--sf-border); border-bottom:2px solid transparent; }
 .af-related-tab.is-active { border-bottom-color:var(--sf-accent); background:var(--sf-elevated); }
 .af-related-tab button { border:0; background:transparent; color:var(--sf-muted); font:inherit; font-size:11px; padding:8px 10px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .af-related-tab.is-active button { color:var(--sf-text); }
-.af-action-explorer { border-top:1px solid var(--sf-border); padding-top:10px; margin-top:12px; }
-.af-action-explorer .sf-as-section-label { display:flex; justify-content:space-between; }
-.af-action-explorer summary { cursor:pointer; font-size:11px; padding:8px 6px 4px; color:var(--sf-muted); overflow:hidden; text-overflow:ellipsis; }
+.af-action-explorer { border-top:1px solid var(--sf-border); padding:12px; margin-top:12px; container-type:inline-size; }
+.af-actions-list > .af-action-explorer { margin:0; border:0; }
+.af-action-explorer summary { cursor:pointer; }
 .af-action-icon { display:inline-flex; flex-shrink:0; align-items:center; justify-content:center; width:22px; height:22px; font:600 11px monospace; color:var(--sf-muted); }
 .af-action-icon.apex { color:var(--syntax-function, #a98ef5); }
 .af-action-icon.flow { color:var(--sf-accent); }
