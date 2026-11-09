@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agentforce Studio · V3</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eff3fb;color:#172239;font:16px system-ui,sans-serif}main{max-width:1240px;margin:36px auto;padding:0 24px}small{color:#2563eb;font-weight:700;letter-spacing:.1em}h1{font-size:36px;letter-spacing:-.035em;margin:12px 0}p{color:#53627c;line-height:1.6}video{width:100%;max-height:68vh;background:#111827;border-radius:14px;box-shadow:0 14px 40px #10204720}nav{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}button,a{font:inherit}button{border:1px solid #ccd8ef;border-radius:9px;background:white;padding:10px 14px;color:#243654;cursor:pointer}button:hover,button:focus-visible{background:#e3ecff;border-color:#2563eb}a{color:#2563eb}#note{font-size:14px;margin:18px 0}.downloads{display:flex;flex-wrap:wrap;gap:22px;margin:24px 0}#pending{padding:30px;background:white;border-radius:14px}
+</style></head><body><main>
+<small>AGENTFORCE STUDIO / V3 REVIEW CUT</small>
+<h1>Build an agent. Improve it. Evolve your editor.</h1>
+<p>Reuses the V2 walkthrough and recorded self-healing loop, then stages a new editor tool being added and used in the app without reinstalling.</p>
+<div id="pending">Preparing the video…</div>
+<video id="video" controls preload="metadata" playsinline hidden>
+<source src="agentforce-studio-v3.mp4" type="video/mp4">
+<track kind="captions" src="agentforce-studio-v3.en.vtt" srclang="en" label="English" default>
+</video>
+<nav id="chapters" aria-label="Video chapters"></nav>
+<p id="note">The screen recordings use the real built app with scripted model and Salesforce responses. The final chapter stages the assistant, new toolbar button and downloadable sample export in a disposable app profile. The installed editor is unchanged.</p>
+<div class="downloads"><a href="agentforce-studio-v3.mp4" download>Download MP4</a><a href="agentforce-studio-v3.en.vtt" download>English captions</a><a href="transcript.md">Transcript</a></div>
+</main><script>
+async function init(){const response=await fetch('manifest.json',{cache:'no-store'});if(!response.ok)throw Error('Rendering');const manifest=await response.json();const v=document.querySelector('video');document.querySelector('#pending').hidden=true;v.hidden=false;v.poster='poster.jpg';for(const [at,title] of manifest.chapters){const b=document.createElement('button');b.type='button';b.textContent=`${Math.floor(at/60)}:${String(Math.floor(at%60)).padStart(2,'0')}  ${title}`;b.addEventListener('click',()=>{v.currentTime=at;v.play().catch(()=>{});});document.querySelector('#chapters').append(b);}}
+init().catch(()=>setTimeout(()=>location.reload(),10000));
+</script></body></html>

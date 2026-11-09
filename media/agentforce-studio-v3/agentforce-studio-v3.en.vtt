@@ -1,0 +1,86 @@
+WEBVTT
+
+00:00:00.500 --> 00:00:03.325
+How to build an Agentforce agent in Zana.
+
+00:00:03.600 --> 00:00:10.038
+Use Pi with the SF-Pi plugin. It builds, previews, and tests the agent for you.
+
+00:00:11.301 --> 00:00:17.333
+Start a thread on the Pi harness, in your Salesforce project, and describe the
+agent you want.
+
+00:00:19.290 --> 00:00:24.140
+Pi plans it, writes the Agent Script, and compiles it, right in the thread.
+
+00:00:24.323 --> 00:00:26.585
+It hands back a card for the new agent.
+
+00:00:26.765 --> 00:00:32.860
+Click it, and the agent opens beside the thread: the script, and its
+conversation graph.
+
+00:00:33.041 --> 00:00:38.346
+Ask what the return window is. Pi previews the agent and links the run.
+
+00:00:39.012 --> 00:00:44.800
+The run opens in the same panel. Fourteen days. Our policy is thirty.
+
+00:00:44.981 --> 00:00:52.111
+Ask for thirty days, and five test scenarios. Pi edits the file, then writes the
+scenarios itself.
+
+00:00:52.292 --> 00:00:54.829
+Open it again, and the script reads thirty.
+
+00:00:55.009 --> 00:01:01.612
+Pi runs the five scenarios as simulated customers, four at a time. Five of five
+pass.
+
+00:01:01.794 --> 00:01:04.754
+Check it yourself, right in the panel: thirty days.
+
+00:01:08.213 --> 00:01:15.148
+When you want the full workbench, open it in Agentforce Studio: the same script,
+thirty days and all.
+
+00:01:15.330 --> 00:01:21.278
+Every action is one click away, like the return Flow, drawn as its real canvas.
+
+00:01:21.460 --> 00:01:26.168
+And the Lightning Type the order lookup returns, with the card that renders it.
+
+00:01:26.467 --> 00:01:31.652
+Here's a separate test run with a failing return policy. Ask the agent to
+improve it.
+
+00:01:32.288 --> 00:01:37.182
+Two pass. The judge shows exactly why the return policy failed.
+
+00:01:37.365 --> 00:01:44.156
+Ask it to improve the failing one. It tests every attempt against the same
+batch, without touching your file.
+
+00:01:48.360 --> 00:01:51.623
+Baseline two of three. Best, three of three.
+
+00:01:51.804 --> 00:01:56.040
+You review the change as a diff. Accept it, and save.
+
+00:01:56.665 --> 00:02:01.873
+Ask it to check again: thirty days. And the batch now passes, three of three.
+
+00:02:02.400 --> 00:02:08.004
+Your editor can evolve, too. Ask your coding agent to add a missing editor tool.
+
+00:02:08.436 --> 00:02:13.246
+It updates the editor, checks the change, and reloads the plugin in place.
+
+00:02:13.599 --> 00:02:17.069
+The export tool appears in the toolbar. No reinstall.
+
+00:02:17.425 --> 00:02:22.111
+Click it to export this agent's diagnostics, including its test results.
+
+00:02:22.464 --> 00:02:26.593
+Keep working in the same editor, with the new tool ready to use.

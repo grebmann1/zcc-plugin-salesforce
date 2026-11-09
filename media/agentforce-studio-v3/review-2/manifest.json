@@ -1,0 +1,35 @@
+{
+  "duration": 157.8,
+  "chapters": [
+    [
+      0,
+      "Build an agent \u2014 V2"
+    ],
+    [
+      92.201625,
+      "Self-healing in Studio"
+    ],
+    [
+      122.268292,
+      "Evolve the editor"
+    ],
+    [
+      133.866667,
+      "Ask for a new editor tool"
+    ],
+    [
+      143.965667,
+      "New tool ready \u2014 no reinstall"
+    ],
+    [
+      147.79166700000002,
+      "Use the new diagnostics export"
+    ]
+  ],
+  "revision": "staged-in-app",
+  "requestCardAt": 128.566667,
+  "inAppAt": 133.866667,
+  "afterRequest": "All remaining footage stays in the real built Electron app. No editorial slides after the request.",
+  "provenance": "Requested scripted scene: real app and Monaco; injected demo assistant, toolbar button, export dialog and downloadable sample JSON in an isolated profile. No installed product changes.",
+  "sha256": "33df2dabbbaca5059eb470404e5b2665acaf640ee41e3afc756c443ec03b7ba9"
+}

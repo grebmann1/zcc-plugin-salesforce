@@ -1,0 +1,33 @@
+{
+  "durationSeconds": 147.433333,
+  "bytes": 11022113,
+  "sizeMiB": 10.51,
+  "captionCues": 26,
+  "chapters": 6,
+  "video": {
+    "codec_name": "h264",
+    "width": 1440,
+    "height": 900,
+    "r_frame_rate": "30/1",
+    "pix_fmt": "yuv420p"
+  },
+  "captionTiming": "all cues ordered, nonoverlapping, within video duration",
+  "fullDecode": "passed, no FFmpeg errors",
+  "audioPeakDb": -3.5,
+  "continuousAppCheck": {
+    "sampledFrames": 122,
+    "maximumLuma": 46.8205,
+    "result": "No light editorial cards in any new section"
+  },
+  "stagedAppCapture": "existing verified built Electron recording; sample JSON download verified",
+  "inAppFromSeconds": 122.30000100000001,
+  "browserPlayback": {
+    "duration": 147.433333,
+    "time": 122.615933,
+    "paused": false,
+    "ready": 4,
+    "captions": 26,
+    "chapters": 6,
+    "passed": true
+  }
+}

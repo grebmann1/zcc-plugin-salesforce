@@ -1,0 +1,44 @@
+{
+  "duration": 155.301,
+  "chapters": [
+    [
+      0,
+      "Build an agent \u2014 reused V2"
+    ],
+    [
+      92.201625,
+      "Self-healing \u2014 recorded test workflow"
+    ],
+    [
+      122.268292,
+      "Extend and repair the editor"
+    ],
+    [
+      128.53495900000001,
+      "Ask for a new editor tool"
+    ],
+    [
+      142.50183400000003,
+      "Repair the editor"
+    ],
+    [
+      150.16850100000002,
+      "Keep working without reinstalling"
+    ]
+  ],
+  "cuts": [
+    {
+      "source": "/Users/grebmann/zcc-workspace/zcc-plugin-salesforce/media/agentforce-studio-thread/agentforce-studio-thread.mp4",
+      "start": 0,
+      "end": 86.35
+    },
+    {
+      "source": "/Users/grebmann/zcc-workspace/zcc-plugin-salesforce/media/agentforce-studio/agentforce-studio.mp4",
+      "start": 63.6,
+      "end": 93.65
+    }
+  ],
+  "editorChapter": "Animated workflow explanation; example export tool is not implemented or shown as a live result.",
+  "recordingProvenance": "Original V1/V2 built Electron footage; model and Salesforce responses are deterministic fixtures.",
+  "sha256": "60e364cfb86e6367889d0d1393c2c9b3c5d13b803bcbaf4e928b133dfdd6c64f"
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "inapp-ask",
+    "line": "Ask your coding agent to add the missing tool, right here beside the editor.",
+    "seconds": 4.580708,
+    "ms": 4581
+  },
+  {
+    "id": "inapp-work",
+    "line": "It updates the editor, checks the change, and reloads the plugin in place.",
+    "seconds": 4.809833,
+    "ms": 4810
+  },
+  {
+    "id": "inapp-ready",
+    "line": "The export tool appears in the toolbar. No reinstall.",
+    "seconds": 3.470417,
+    "ms": 3470
+  },
+  {
+    "id": "inapp-export",
+    "line": "Click it to export this agent's diagnostics, including its test results.",
+    "seconds": 4.685792,
+    "ms": 4686
+  },
+  {
+    "id": "inapp-finish",
+    "line": "Keep working in the same editor, with the new tool ready to use.",
+    "seconds": 4.128667,
+    "ms": 4129
+  }
+]
