@@ -186,6 +186,21 @@ function selectSection(label: string) {
 }
 
 describe("public Salesforce panels", () => {
+  it("lets the containing Salesforce page control tool navigation", async () => {
+    const onViewChange = vi.fn();
+    const page = mount(<SalesforceProjectTab pluginId="salesforce" projectId="p" view="data" onViewChange={onViewChange} />);
+    await screen.findByTestId('soql-editor');
+    expect(screen.getByRole('region', { name: 'Data' })).toBeTruthy();
+    selectSection('Apex & logs');
+    expect(onViewChange).toHaveBeenCalledWith('apex');
+    // A controlled page waits for its route change, including back/forward navigation.
+    expect(screen.getByRole('region', { name: 'Data' })).toBeTruthy();
+    page.rerender(<SalesforceUiProvider client={{ call }}><SalesforceProjectTab pluginId="salesforce" projectId="p" view="apex" onViewChange={onViewChange} /></SalesforceUiProvider>);
+    expect(screen.getByRole('region', { name: 'Apex & logs' })).toBeTruthy();
+    page.rerender(<SalesforceUiProvider client={{ call }}><SalesforceProjectTab pluginId="salesforce" projectId="p" view="data" onViewChange={onViewChange} /></SalesforceUiProvider>);
+    expect(screen.getByRole('region', { name: 'Data' })).toBeTruthy();
+  });
+
   it('filters activity to its tool, exposes all activity and keeps the selected detail separate', async () => {
     call.mockImplementation(async method => method === 'operations.list' ? { ok: true, operations: [operation, { ...operation, id: 'test', kind: 'apex.test', title: 'InvoiceTest', state: 'succeeded', jobId: undefined }] } : respond(method));
     mount(<ApexPanel {...props} />);

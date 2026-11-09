@@ -1,4 +1,5 @@
 /** @vitest-environment happy-dom */
+import { useState } from 'react';
 import { choosePicklistValue } from '../test/picklist.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -8,6 +9,8 @@ import { takeQueuedAgentScriptOpen } from './agent-script-open.js';
 import { readProjectView } from './project-view.js';
 import { recordRecentAgent } from './recent-agents.js';
 
+vi.mock('./SalesforceProjectTab.js', () => ({ SalesforceProjectTab: (props: { projectId: string; view: string; onViewChange(view: string): void }) => <div data-testid="workbench" data-project={props.projectId} data-view={props.view}><button onClick={() => props.onViewChange('deployments')}>Switch to Deployments</button><button onClick={() => recordRecentAgent(props.projectId, 'force-app/Support.agent')}>Open agent</button></div> }));
+
 vi.mock('./OrgPicker.js', () => ({ OrgPicker: () => <div data-testid="org-picker" /> }));
 
 const projects = [
@@ -16,23 +19,29 @@ const projects = [
   { id: 'notes', name: 'Notes', salesforce: false, dxProject: false, targetAlias: null },
 ];
 const call = vi.fn();
-let navigate: { toProject: ReturnType<typeof vi.fn>; openInWindow?: ReturnType<typeof vi.fn> };
+const client = { call };
+let navigate: { toPluginPanel: ReturnType<typeof vi.fn>; toProject: ReturnType<typeof vi.fn>; openInWindow?: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
   localStorage.clear();
   call.mockReset();
   call.mockImplementation(async (method: string) => method === 'hub.projects' ? { ok: true, projects } : { ok: true });
-  navigate = { toProject: vi.fn(), openInWindow: vi.fn(async () => true) };
+  navigate = { toPluginPanel: vi.fn(), toProject: vi.fn(), openInWindow: vi.fn(async () => true) };
   Object.assign(globalThis, { __ZCC_PLUGIN_RUNTIME__: { useZccNavigate: () => navigate } });
 });
 afterEach(() => {
   cleanup();
   delete (globalThis as any).__ZCC_PLUGIN_RUNTIME__;
 });
-const mount = () => render(<SalesforceUiProvider client={{ call }}><SalesforceOrgsPanel pluginId="salesforce" /></SalesforceUiProvider>);
+function Hub({ initialPath = '' }: { initialPath?: string }) {
+  const [subPath, setSubPath] = useState(initialPath);
+  navigate.toPluginPanel.mockImplementation((_path, options) => setSubPath(options?.subPath ?? ''));
+  return <SalesforceUiProvider client={client}><SalesforceOrgsPanel pluginId="salesforce" subPath={subPath} /></SalesforceUiProvider>;
+}
+const mount = (initialPath = '') => render(<Hub initialPath={initialPath} />);
 
 describe('Salesforce hub', () => {
-  it('opens the Studio in the chosen project and keeps the org manager', async () => {
+  it('opens tools within Salesforce and keeps their project context explicit', async () => {
     mount();
     const select = await screen.findByRole('button', { name: 'Project' }) as HTMLSelectElement;
     expect(select.textContent).toBe(projects[0].name);
@@ -42,14 +51,51 @@ describe('Salesforce hub', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Studio' }));
     expect(readProjectView('sf')).toBe('agentforce');
-    expect(navigate.toProject).toHaveBeenCalledWith('sf', { tabId: 'salesforce' });
+    expect(navigate.toPluginPanel).toHaveBeenCalledWith('orgs', { subPath: 'agentforce' });
+    expect(screen.getByTestId('workbench').dataset).toMatchObject({ project: 'sf', view: 'agentforce' });
+    expect(navigate.toProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Salesforce home' }));
 
-    choosePicklistValue(select, 'draft');
+    choosePicklistValue(screen.getByRole('button', { name: 'Project' }), 'draft');
     expect(screen.getByTestId('salesforce-hub-target').textContent).toBe('Uses the shared default org · drafts only, no DX project');
     expect(localStorage.getItem('salesforce:hub:project')).toBe('draft');
     fireEvent.click(screen.getByRole('button', { name: /Data/ }));
     expect(readProjectView('draft')).toBe('data');
-    expect(navigate.toProject).toHaveBeenLastCalledWith('draft', { tabId: 'salesforce' });
+    expect(navigate.toPluginPanel).toHaveBeenLastCalledWith('orgs', { subPath: 'data' });
+    expect(screen.getByTestId('workbench').dataset).toMatchObject({ project: 'draft', view: 'data' });
+  });
+
+  it.each(['overview', 'data', 'apex', 'deployments', 'agentforce'])('opens the %s route directly and switches projects without leaving Salesforce', async view => {
+    mount(view);
+    const picker = await screen.findByRole('button', { name: 'Project' });
+    expect(screen.getByTestId('workbench').dataset).toMatchObject({ project: 'sf', view });
+    choosePicklistValue(picker, 'draft');
+    expect(screen.getByTestId('workbench').dataset).toMatchObject({ project: 'draft', view });
+    expect(navigate.toProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Deployments' }));
+    expect(navigate.toPluginPanel).toHaveBeenCalledWith('orgs', { subPath: 'deployments' });
+    expect(screen.getByTestId('workbench').dataset.view).toBe('deployments');
+    fireEvent.click(screen.getByRole('button', { name: 'Salesforce home' }));
+    expect(screen.getByTestId('org-picker')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Project' }).textContent).toBe('Drafts');
+  });
+
+  it('keeps the hub available for invalid routes or missing project context', async () => {
+    mount('unknown');
+    await screen.findByRole('button', { name: 'Open Studio' });
+    expect(screen.queryByTestId('workbench')).toBeNull();
+    cleanup();
+    call.mockImplementation(async () => ({ ok: true, projects: [] }));
+    mount('data');
+    expect(await screen.findByText(/Add a local project folder/)).toBeTruthy();
+    expect(screen.queryByTestId('workbench')).toBeNull();
+  });
+
+  it('refreshes recent agents when returning from the embedded Studio', async () => {
+    mount('agentforce');
+    fireEvent.click(await screen.findByRole('button', { name: 'Open agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salesforce home' }));
+    expect(await screen.findByTitle('force-app/Support.agent')).toBeTruthy();
   });
 
   it('restores the remembered project and falls back when it is gone', async () => {
@@ -101,7 +147,9 @@ describe('Salesforce hub', () => {
     fireEvent.click(screen.getByTitle('bots/Day.agent'));
     expect(takeQueuedAgentScriptOpen('draft')).toBe('bots/Day.agent');
     expect(readProjectView('draft')).toBe('agentforce');
-    expect(navigate.toProject).toHaveBeenCalledWith('draft', { tabId: 'salesforce' });
+    expect(navigate.toPluginPanel).toHaveBeenCalledWith('orgs', { subPath: 'agentforce' });
+    expect(screen.getByTestId('workbench').dataset).toMatchObject({ project: 'draft', view: 'agentforce' });
+    expect(navigate.toProject).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Project' }).textContent).toBe(projects.find(row => row.id === 'draft')!.name);
     vi.restoreAllMocks();
   });
