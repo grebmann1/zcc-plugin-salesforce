@@ -57,17 +57,18 @@ const rpc = vi.fn(baseRpc);
 let realtime: ((p: unknown) => void) | undefined;
 const nodes: Array<() => void> = [];
 let sidePanel = true;
+let contextProjectId: string | null = 'proj-1';
 let resourceId: string | undefined;
 let panelScope: ReturnType<typeof vi.fn> | undefined;
 let sidePanelOpen: boolean | undefined;
 const navigate: { toCompose: ReturnType<typeof vi.fn>; openPanelTool: ReturnType<typeof vi.fn>; openPanelAgent?: ReturnType<typeof vi.fn> } = { toCompose: vi.fn(), openPanelTool: vi.fn(() => true) };
 
-async function mount(arg: string | { subPath?: string; params?: unknown; threadId?: string } = {}, extra: { params?: unknown } = {}) {
+async function mount(arg: string | { subPath?: string; params?: unknown; threadId?: string; projectId?: string } = {}, extra: { params?: unknown; projectId?: string } = {}) {
   const props = typeof arg === 'string' ? { subPath: arg, ...extra } : arg;
   const el = document.createElement('div'); document.body.appendChild(el);
   const root = createRoot(el);
   nodes.push(() => { root.unmount(); el.remove(); });
-  await act(async () => { root.render(createElement(AgentScriptPanel, { pluginId: 'salesforce', subPath: props.subPath ?? '', params: props.params, projectId: 'proj-1', orgPicker: false, ...('threadId' in props && props.threadId ? { threadId: props.threadId } : {}) })); });
+  await act(async () => { root.render(createElement(AgentScriptPanel, { pluginId: 'salesforce', subPath: props.subPath ?? '', params: props.params, projectId: props.projectId ?? 'proj-1', orgPicker: false, ...('threadId' in props && props.threadId ? { threadId: props.threadId } : {}) })); });
   await flush();
   return el;
 }
@@ -81,7 +82,7 @@ const exec = (command: string, input: Record<string, unknown> = {}) => control.o
 const sent = (el: HTMLElement) => (el.querySelector('iframe')!.contentWindow!.postMessage as any).mock.calls.map((c: any[]) => c[0]);
 
 beforeEach(() => {
-  localStorage.clear(); rpc.mockClear(); rpc.mockImplementation(baseRpc); observers.length = 0; width = 1000; realtime = undefined; sidePanel = true; sidePanelOpen = undefined; resetStudioToolBridge(); resourceId = undefined; panelScope = undefined;
+  localStorage.clear(); rpc.mockClear(); rpc.mockImplementation(baseRpc); observers.length = 0; width = 1000; realtime = undefined; sidePanel = true; sidePanelOpen = undefined; resetStudioToolBridge(); resourceId = undefined; panelScope = undefined; contextProjectId = 'proj-1';
   clearStudioRunWorkspaces();
   navigate.toCompose.mockClear();
   navigate.openPanelTool = vi.fn(() => true); delete navigate.openPanelAgent;
@@ -94,7 +95,7 @@ beforeEach(() => {
   (globalThis as any).__ZCC_PLUGIN_HOST__ = { callRpc: rpc, useZccNavigate: () => ({ toCompose: vi.fn() }), getSettings: async () => ({ values: { agentScriptDialect: 'agentforce' } }), setSettings: async () => undefined };
   (globalThis as any).__ZCC_PLUGIN_RUNTIME__ = {
     useZccNavigate: () => { if (panelScope) Object.assign(navigate, { setPanelScope: panelScope }); else delete (navigate as any).setPanelScope; return navigate; },
-    useZccContext: () => ({ projectId: 'proj-1', threadId: null, sidePanel, ...(resourceId ? { surface: 'plugin-view', resourceId } : {}), ...(sidePanelOpen === undefined ? {} : { sidePanelOpen }) }),
+    useZccContext: () => ({ projectId: contextProjectId, threadId: null, sidePanel, ...(resourceId ? { surface: 'plugin-view', resourceId } : {}), ...(sidePanelOpen === undefined ? {} : { sidePanelOpen }) }),
     useSettings: () => ({ values: { agentScriptDialect: 'agentforce', defaultOrg: 'dev' }, isLoading: false }),
     useRealtime: (_c: string, h: (p: unknown) => void) => { realtime = h; }
   };
@@ -122,8 +123,23 @@ const seedWorkspace = (tabs: ReturnType<typeof scriptTab>[], activeTab = scriptT
 };
 
 describe('AgentScriptPanel beside the host side panel', () => {
-  it('reuses the full testing editor view when the host cannot open Evals', async () => {
-    navigate.openPanelTool.mockReturnValue(false);
+  it.each([400, 1000])('uses only the host tool launcher at %s px, before and after opening an agent', async initialWidth => {
+    width = initialWidth;
+    const el = await mount();
+    await ready(el);
+    expect(el.querySelector('[aria-label="Add Studio tool"]')).toBeNull();
+    await act(async () => { await exec('file.open', { path: QC }); });
+    await flush();
+    expect(el.querySelector('[aria-label="Add Studio tool"]')).toBeNull();
+    expect(el.querySelector('.af-tools')).toBeNull();
+    await act(async () => { await exec('panel.open', { tool: 'files' }); });
+    expect(navigate.openPanelTool).not.toHaveBeenCalled();
+    expect(readStudioLayout(LAYOUT_KEY).tabs.map(tab => tab.kind)).toEqual(['agent']);
+    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
+  });
+
+  it('reuses the full testing editor view without a host side panel', async () => {
+    sidePanel = false;
     const el = await mount(QC); await ready(el);
     const choose = async (title: string) => {
       await act(async () => { el.querySelector<HTMLButtonElement>('[aria-label="Add Studio tool"]')!.click(); });
@@ -145,9 +161,7 @@ describe('AgentScriptPanel beside the host side panel', () => {
   it('shares the complete Evals workspace with the original Tests route, preserving subviews, drafts and agent owners', async () => {
     const el = await mount(QC); await ready(el);
     const editor = el.querySelector('iframe');
-    await act(async () => { el.querySelector<HTMLButtonElement>('[aria-label="Add Studio tool"]')!.click(); });
-    const catalog = el.querySelector<HTMLElement>('[aria-label="Studio tool catalog"]')!;
-    await act(async () => { [...catalog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.startsWith('Evals'))!.click(); });
+    await act(async () => { await exec('panel.open', { tool: 'evals' }); });
     expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: 'studio-evals' });
     const evals = await hostTab('evals', 'proj-1', 'evals');
     const pane = evals.el.querySelector<HTMLElement>(`[data-testid="studio-view-tests"][data-agent="${QC}"]`)!;
@@ -255,6 +269,24 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(panelScope).toHaveBeenLastCalledWith({ id: HELP, view: HELP });
   });
 
+  it('keeps equal agent paths in different hub projects in separate assistant scopes', async () => {
+    contextProjectId = null;
+    panelScope = vi.fn();
+    const first = await mount(QC); await ready(first);
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', QC]), view: QC });
+    const second = await mount({ subPath: QC, projectId: 'proj-2' }); await ready(second);
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', QC]), view: QC });
+  });
+
+  it('isolates no-file assistant drafts for different hub projects without attaching an agent view', async () => {
+    contextProjectId = null;
+    panelScope = vi.fn();
+    const first = await mount(); await ready(first);
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', null]) });
+    const second = await mount({ projectId: 'proj-2' }); await ready(second);
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', null]) });
+  });
+
   it('opens tools in the host panel and renders them there, keeping their state across tab switches', async () => {
     const el = await mount('force-app/bots/QC.agent');
     await ready(el);
@@ -327,26 +359,21 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(control.options.state()).toMatchObject({ panels: { active: null, open: false } });
   });
 
-  it('browses org agents in an editor tab, not the host panel', async () => {
+  it('browses org agents beside Script in the host panel', async () => {
     const el = await mount('force-app/bots/QC.agent');
     await ready(el);
     await act(async () => { await exec('panel.open', { tool: 'agents' }); });
     await flush();
-    expect(navigate.openPanelTool).not.toHaveBeenCalled();
-    const tab = [...el.querySelectorAll('.sf-etab')].find(row => row.textContent?.includes('Org agents'))!;
-    expect(tab.getAttribute('data-kind')).toBe('org');
-    expect(tab.querySelector('.sf-etab-kind')!.textContent).toBe('ORG');
-    expect(tab.querySelector('.sf-etab-ro')).toBeNull();
-    const view = el.querySelector<HTMLElement>('[data-testid="studio-org-agents-view"]')!;
-    expect(view.querySelector('[data-testid="stub-agents"]')).toBeTruthy();
-    expect(view.style.display).toBe('');
-    expect(el.querySelector('[data-testid="studio-target-view"]')).toBeNull();
-    expect(navigate.openPanelTool).not.toHaveBeenCalled();
-    // The tab is kept with the layout.
-    expect(readStudioLayout('salesforce:studio:proj-1').tabs).toEqual(expect.arrayContaining([{ id: 'org-agents', kind: 'org', label: 'Org agents', target: 'agents' }]));
-    // Closing the tab unmounts the list.
-    await act(async () => { fireEvent.click(el.querySelector('[aria-label="Close Org agents"]')!); });
+    expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: 'studio-agents' });
+    const agents = await hostTab('agents');
+    expect(agents.el.querySelector('[data-testid="stub-agents"]')).toBeTruthy();
     expect(el.querySelector('[data-testid="studio-org-agents-view"]')).toBeNull();
+    expect(readStudioLayout(LAYOUT_KEY).tabs.map(tab => tab.kind)).toEqual(['agent']);
+    expect(readStudioLayout(LAYOUT_KEY).rail).toBe('agents');
+    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
+    await act(async () => { fireEvent.click(agents.el.querySelector('[data-testid="stub-agents-open"]')!); });
+    await flush();
+    expect(control.options.state()).toMatchObject({ path: HELP, panels: { host: true, active: 'agents' } });
   });
 
   it('shows host tools on panel.show and leaves closing them to the host panel', async () => {
@@ -410,30 +437,34 @@ describe('AgentScriptPanel beside the host side panel', () => {
     await tab.unmount();
   });
 
-  it('keeps its own panel when the host does not take the tool', async () => {
+  it.each(['agents', 'actions', 'evals', 'graph', 'preview'] as const)('keeps Script visible when the host refuses %s before any panel attaches', async tool => {
     navigate.openPanelTool = vi.fn(() => false);
     const el = await mount('force-app/bots/QC.agent');
     await ready(el);
-    await act(async () => { await exec('panel.open', { tool: 'actions' }); });
+    await act(async () => { await exec('panel.open', { tool }); });
     await flush();
-    expect(navigate.openPanelTool).toHaveBeenCalled();
-    expect(el.querySelector('.af-actions-list')).toBeTruthy();
+    expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: `studio-${tool}` });
+    expect(el.querySelector('[role="alert"]')?.textContent).toContain('Could not open the tool in the side panel');
+    expect(el.querySelector('.af-tools')).toBeNull();
+    expect(readStudioLayout(LAYOUT_KEY).tabs.map(tab => tab.kind)).toEqual(['agent']);
+    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
   });
 
-  it('goes back to the host panel once the host takes a later tool', async () => {
+  it('recovers when the host takes a later tool without creating duplicate tool chrome', async () => {
     navigate.openPanelTool = vi.fn(() => false);
     const el = await mount('force-app/bots/QC.agent');
     await ready(el);
     await act(async () => { await exec('panel.open', { tool: 'actions' }); });
     await flush();
-    expect(el.querySelector('.af-tools')).toBeTruthy();
-    expect(control.options.state().panels).not.toHaveProperty('host');
+    expect(el.querySelector('.af-tools')).toBeNull();
+    expect(control.options.state().panels).toMatchObject({ host: true, open: false });
     // The host is ready now (its listener subscribed late): the next open asks it again.
     navigate.openPanelTool.mockReturnValue(true);
     await act(async () => { await exec('panel.open', { tool: 'comments' }); });
     await flush();
     expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: 'studio-comments' });
     expect(el.querySelector('.af-tools')).toBeNull();
+    expect(el.querySelector('[role="alert"]')).toBeNull();
     const comments = await hostTab('comments');
     expect(control.options.state()).toMatchObject({ panels: { host: true, tabs: ['comments'], active: 'comments' } });
     await comments.unmount();
@@ -558,7 +589,7 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(pinned.querySelector('[aria-label="Follow selected agent"]')).toBeTruthy();
   });
 
-  it('returns to a closed owner through Active runs and selects its role-play tool', async () => {
+  it.each([true, false])('returns to a closed run owner while keeping its role-play tool in the host panel (accepted: %s)', async accepted => {
     const el = await mount(QC);
     await ready(el);
     await act(async () => { updateStudioRun({ pluginId: 'salesforce', projectId: 'proj-1', path: QC, orgAlias: 'dev', view: 'roleplay' }, { runId: 'roleplay-1', engine: 'simulate', status: 'running', turn: 2 }); });
@@ -567,9 +598,17 @@ describe('AgentScriptPanel beside the host side panel', () => {
     await act(async () => { el.querySelector<HTMLButtonElement>('[aria-label="Active runs"]')!.click(); });
     const entry = Array.from(el.querySelectorAll<HTMLButtonElement>('.sf-studio-runs-list button')).find(button => button.textContent?.includes('QC.agent'))!;
     expect(entry.textContent).toContain('Role-play');
+    navigate.openPanelTool.mockReturnValue(accepted);
     await act(async () => { entry.click(); });
     await flush();
     expect(navigate.openPanelTool).toHaveBeenLastCalledWith({ actionId: 'studio-test' });
+    expect(readStudioLayout(LAYOUT_KEY).tabs.map(tab => tab.kind)).toEqual(['agent']);
+    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
+    if (!accepted) {
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('Could not open the run in the side panel');
+      expect(el.querySelector('[data-testid="studio-view-tests"]')).toBeNull();
+      return;
+    }
     const tests = await hostTab('test');
     expect(tests.el.querySelector<HTMLElement>(`[data-agent="${QC}"]`)?.style.display).toBe('');
     expect(tests.el.querySelector('[data-testid="stub-lab"]')).toBeTruthy();
@@ -625,6 +664,26 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(el.querySelector('.sf-etab[data-kind="view"]')).toBeNull();
   });
 
+  it('removes a restored Org agents tool tab while preserving its source documents and draft', async () => {
+    const script = scriptTab({ path: QC, label: 'QC.agent' });
+    const dependency = { id: 'apex:Foo', kind: 'apex' as const, label: 'Foo', target: 'apex://Foo' };
+    const agents = { id: 'org-agents', kind: 'org' as const, label: 'Org agents', target: 'agents' };
+    seedWorkspace([script, dependency, agents], agents.id);
+    const el = await mount(QC);
+    await ready(el);
+    await post(el, { type: 'snapshot', content: 'start_agent:\n  instructions: Keep this draft', issues: 0 });
+    await post(el, { type: 'dirty', dirty: true });
+    const saved = readStudioLayout(LAYOUT_KEY);
+    expect(saved.tabs).toEqual([script, dependency]);
+    expect(saved.activeTab).toBe(script.id);
+    expect(saved.workspaces[QC].rail).toBe('agents');
+    expect(el.querySelector('[aria-label="Close Org agents"]')).toBeNull();
+    const browser = await hostTab('agents');
+    expect(browser.el.querySelector('[data-testid="stub-agents"]')).toBeTruthy();
+    expect(control.options.state()).toMatchObject({ path: QC, dirty: true });
+    expect(sent(el).filter((message: any) => message.type === 'setFile')).toHaveLength(1);
+  });
+
   it.each(['graph', 'preview', 'test', 'evals', 'org-preview'] as const)('handles the host New Tab launcher for %s before an agent is open', async tool => {
     const el = await mount();
     await ready(el);
@@ -641,21 +700,21 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(el.querySelector('.sf-etab[data-kind="view"]')).toBeNull();
   });
 
-  it('falls back to an editor view when no host tool exists and recovers on the next accepted view', async () => {
+  it('retains Script when no host tool opens and recovers on the next accepted view', async () => {
     navigate.openPanelTool.mockReturnValue(false);
     const el = await mount(QC);
     await ready(el);
     await act(async () => { await exec('panel.open', { tool: 'preview' }); });
-    expect(el.querySelector('[data-testid="studio-view-preview"] [data-testid="stub-preview"]')).toBeTruthy();
-    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('none');
-    expect(readStudioLayout(LAYOUT_KEY).activeTab).toBe('view:preview');
+    expect(el.querySelector('[data-testid="studio-view-preview"]')).toBeNull();
+    expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
+    expect(readStudioLayout(LAYOUT_KEY).activeTab).toBe(scriptTabId(QC));
     navigate.openPanelTool.mockReturnValue(true);
     await act(async () => { await exec('panel.open', { tool: 'graph' }); });
     const graph = await hostTab('graph');
     expect(graph.el.querySelector('[data-testid="studio-view-graph"]')).toBeTruthy();
     expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
     expect(readStudioLayout(LAYOUT_KEY).tabs.map(tab => tab.kind)).toEqual(['agent']);
-    expect(readStudioLayout(LAYOUT_KEY).workspaces[QC].panelViews).toEqual(expect.arrayContaining(['preview', 'graph']));
+    expect(readStudioLayout(LAYOUT_KEY).workspaces[QC].panelViews).toEqual(['graph']);
   });
 
   it('recovers a refused view when the host New Tab launcher attaches directly', async () => {
@@ -663,13 +722,14 @@ describe('AgentScriptPanel beside the host side panel', () => {
     const el = await mount(QC);
     await ready(el);
     await act(async () => { await exec('panel.open', { tool: 'test' }); });
-    expect(el.querySelector('[data-testid="studio-view-tests"]')).toBeTruthy();
+    expect(el.querySelector('[data-testid="studio-view-tests"]')).toBeNull();
     const callsBeforeAttach = navigate.openPanelTool.mock.calls.length;
     const panel = await hostTab('test');
     expect(panel.el.textContent).not.toContain('needs Agent Script Studio');
     expect(panel.el.querySelector(`[data-testid="studio-view-tests"][data-agent="${QC}"]`)).toBeTruthy();
     expect(navigate.openPanelTool.mock.calls.length).toBe(callsBeforeAttach);
     expect(control.options.state().panels).toMatchObject({ host: true, active: 'test' });
+    expect(el.querySelector('[role="alert"]')).toBeNull();
     expect(el.querySelector<HTMLElement>('.sf-frame-stage')!.style.display).toBe('flex');
     expect(readStudioLayout(LAYOUT_KEY).tabs.map(tab => tab.kind)).toEqual(['agent']);
   });

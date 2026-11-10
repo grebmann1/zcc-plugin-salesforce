@@ -135,11 +135,12 @@ const TOOL_TITLE: Record<CompactTool, string> = {
 const COMPACT_TOOLS: readonly CompactTool[] = ['code', 'agents', 'graph', 'preview', 'test', 'actions', 'comments', 'org-preview'];
 /** Studio can open the host side panel's tabs but not close them; the user closes them there. */
 const HOST_PANEL_CLOSE = 'Studio tools are in the ZCC side panel; close or hide them from the panel.';
+const HOST_TOOL_OPEN_ERROR = 'Could not open the tool in the side panel. Try opening it from the panel’s New Tab menu.';
+const HOST_RUN_OPEN_ERROR = 'Could not open the run in the side panel. Try opening its tool from the panel’s New Tab menu.';
 /** The tools that open as an editor view tab; the rest live in the side column or the host panel. */
 const VIEW_FOR_TOOL: Partial<Record<AgentScriptTool, ViewTarget>> = { preview: 'preview', test: 'tests', evals: 'tests', graph: 'graph', 'org-preview': 'org-preview' };
 const TOOL_FOR_VIEW: Record<ViewTarget, AgentScriptTool> = { preview: 'preview', tests: 'test', graph: 'graph', 'org-preview': 'org-preview' };
 const HIDDEN_COMPACT: readonly AgentScriptTool[] = ['files'];
-const ORG_AGENTS_TAB: EditorTab = { id: 'org-agents', kind: 'org', label: 'Org agents', target: 'agents' };
 /** The org's Testing Center definitions and runs, full width beside the editor's other tabs. */
 const ORG_TESTS_TAB: EditorTab = { id: 'org-tests', kind: 'org', label: 'Tests', target: 'tests' };
 /** Fleet analytics from the org's Agentforce session tracing, full width. */
@@ -253,9 +254,12 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   const selectionScope = windowResource ? JSON.stringify([draftScope, windowResource, threadId ?? '']) : threadId ? JSON.stringify([draftScope, threadId]) : draftScope;
   const layoutScope = windowResource ? `${draftScope}|agent:${windowResource}` : context.surface === 'plugin-view' ? `${draftScope}|window` : draftScope;
   useLayoutEffect(() => {
-    navigateRef.current.setPanelScope?.(activePath ? { id: activePath, view: activePath } : null);
+    // The global Salesforce hub has no host project identity. Include the
+    // selected project so equal relative paths cannot share panel drafts.
+    const id = !context.projectId && projectId ? JSON.stringify([projectId, activePath]) : activePath;
+    navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}) } : null);
     return () => { navigateRef.current.setPanelScope?.(null); };
-  }, [activePath]);
+  }, [activePath, context.projectId, projectId]);
   const studioWindow = context.surface === 'plugin-view';
   const activeDraft = useRef('');
   const { frameRef, send, handlers: bridgeHandlers } = usePlaygroundBridge(activeDraft);
@@ -290,10 +294,8 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   const compact = layout === 'compact';
   const wide = layout === 'wide';
   // Beside the Salesforce tab the host side panel shows the tools (studio-tool-bridge); Studio still renders them.
-  // A host that turns a tool down (an older or partial host) leaves Studio on its own panel
-  // until the host takes the next one: each open asks the host again.
+  // A refused host request must leave tools beside the editor, without silently creating a document tab.
   // Not the width: a narrow window's panel covers Studio (0 px, 'legacy'), and its tabs still need Studio.
-  const [hostRefused, setHostRefused] = useState(false);
   const hostCapable = context.sidePanel === true && typeof navigate.openPanelTool === 'function';
   const studioId = windowResource ?? (studioWindow ? 'window' : undefined);
   const toolScope = studioToolScope(projectId, studioId);
@@ -302,8 +304,10 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   useStudioRegistration(toolScope, hostCapable);
   const hostSlots = useStudioToolSlots(hostCapable ? toolScope : null);
   const hostTool = hostSlots.find(slot => slot.attached)?.tool ?? null;
-  const hostPanel = hostCapable && (!hostRefused || hostTool !== null);
-  useEffect(() => { if (hostTool) setHostRefused(false); }, [hostTool]);
+  const hostPanel = hostCapable;
+  useEffect(() => {
+    if (hostTool) setError(current => current === HOST_TOOL_OPEN_ERROR || current === HOST_RUN_OPEN_ERROR ? null : current);
+  }, [hostTool]);
   // Opening the panel reopens the tool last shown there; the panel's New Tab lists the rest.
   const lastHostTool = useRef<PanelTool>('actions');
   if (hostTool) lastHostTool.current = hostTool;
@@ -570,19 +574,19 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
       const tool = launchTool ?? TOOL_FOR_VIEW[target] as PanelTool;
       if (navigateRef.current.openPanelTool?.({ actionId: panelToolActionId(tool), ...(panelParams ? { params: panelParams } : {}) })) {
         requestedHostTool.current = tool;
-        setHostRefused(false);
+        setError(null);
         // Explicit editor requests target its agent. Selecting an existing host tab keeps its pin.
         pinTool(target, null);
         openPanelView(target);
         return;
       }
-      if (hostSlots.length) { setError('Could not open the tool in the side panel. Try opening it from the panel’s New Tab menu.'); return; }
-      setHostRefused(true);
+      setError(HOST_TOOL_OPEN_ERROR);
+      return;
     }
     pinTool(target, null);
     openTab(viewTab(target));
     if (compact) patch({ tool: 'code' });
-  }, [compact, hostCapable, hostSlots.length, openPanelView, openTab, patch, studioId, pinTool]);
+  }, [compact, hostCapable, openPanelView, openTab, patch, studioId, pinTool]);
   const openTool = useCallback((id: AgentScriptTool) => {
     if (id === 'assistant') {
       const draft = { prompt: `Help me improve ${activePathRef.current ?? 'this AgentScript project'}.`, view: activePathRef.current ?? undefined, ...(projectId ? { projectId } : {}) };
@@ -596,21 +600,19 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
       else patch({ tool: 'code' });
       return;
     }
-    // Beside a host side panel, browsing org agents picks what to edit, so it opens as an editor tab.
-    if (id === 'agents' && hostCapable) { openTab(ORG_AGENTS_TAB); return; }
     if (hostCapable && isPanelTool(id)) {
       if (navigateRef.current.openPanelTool?.({ actionId: panelToolActionId(id), ...(panelParams ? { params: panelParams } : {}) })) {
         if (id !== hostTool) requestedHostTool.current = id;
-        setHostRefused(false);
+        setError(null);
         patch({ rail: id });
         return;
       }
-      if (hostSlots.length) { setError('Could not open the tool in the side panel. Try opening it from the panel’s New Tab menu.'); return; }
-      setHostRefused(true);
+      setError(HOST_TOOL_OPEN_ERROR);
+      return;
     }
     tools.openTool(id);
     patch({ tool: id });
-  }, [hostCapable, hostSlots.length, hostTool, layout, openTab, openView, patch, tools.openTool, studioId]);
+  }, [hostCapable, hostTool, layout, openView, patch, tools.openTool, studioId]);
   const restoredHostView = useRef(false);
   useEffect(() => {
     if (!hostPanel || restoredHostView.current) return;
@@ -1574,7 +1576,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   const documentBar = (
       <AgentScriptDocumentBar path={activePath} dirty={dirty} busy={busy} issues={issues}
         saveDisabled={saveDisabled} saveAsDisabled={!saveEnabled || busy || !playgroundReady || !activePath} panelOpen={panelVisible}
-        {...(stripOwnsWorkspace ? {} : { headerActions: <>{askAgentMenu}{props.headerActions}<StudioToolMenu onSelect={openTool} /></>, follow: followChip })}
+        {...(stripOwnsWorkspace ? {} : { headerActions: <>{askAgentMenu}{props.headerActions}{!hostCapable && <StudioToolMenu onSelect={openTool} />}</>, follow: followChip })}
         onBrowse={() => browseAgents()} onSave={() => void save()}
         onPreview={() => openTool('preview')}
         onSaveAs={() => { setError(null); setSaveAsOpen(true); }} onShowPanel={showPanel}
@@ -1590,7 +1592,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
     {followChip}
     {askAgentMenu}
     {props.headerActions}
-    <StudioToolMenu onSelect={openTool} />
+    {!hostCapable && <StudioToolMenu onSelect={openTool} />}
     <button type="button" className="icon-btn" title={`Go to file (${modShortcut('P')})`} aria-label="Go to file" onClick={() => setQuickOpen(true)}><Search size={15} aria-hidden="true" /></button>
     {!hostPanel && !panelVisible && !compact && <button type="button" className="icon-btn" title="Show side panel" aria-label="Show side panel" aria-expanded={false} onClick={showPanel}><PanelRight size={15} aria-hidden="true" /></button>}
   </> : undefined;
@@ -1687,12 +1689,12 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
       const tool = TOOL_FOR_VIEW[target] as PanelTool;
       if (navigateRef.current.openPanelTool?.({ actionId: panelToolActionId(tool), ...(panelParams ? { params: panelParams } : {}) })) {
         requestedHostTool.current = tool;
-        setHostRefused(false);
+        setError(null);
         restore();
         return;
       }
-      if (hostSlots.length) { setError('Could not open the run in the side panel. Try opening its tool from the panel’s New Tab menu.'); return; }
-      setHostRefused(true);
+      setError(HOST_RUN_OPEN_ERROR);
+      return;
     }
     restore();
     openTab(viewTab(target));

@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { BUILDER_TOOLS } from '../../../lib/studio-builder-contract.js';
 
-export const PANEL_TOOLS = ['graph', 'preview', 'test', 'org-preview', 'actions', 'comments', ...BUILDER_TOOLS] as const;
+export const PANEL_TOOLS = ['agents', 'graph', 'preview', 'test', 'org-preview', 'actions', 'comments', ...BUILDER_TOOLS] as const;
 export type PanelTool = typeof PANEL_TOOLS[number];
 export const isPanelTool = (value: unknown): value is PanelTool => PANEL_TOOLS.includes(value as PanelTool);
 export const panelToolActionId = (tool: PanelTool) => `studio-${tool}`;

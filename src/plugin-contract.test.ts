@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createFakePluginHost } from '@zana-ai/zcc-plugin-sdk/testing';
 import { collectTestPluginApp } from '@zana-ai/zcc-plugin-sdk/testing/app';
 import { derivePluginId, readPluginManifest } from '@zana-ai/zcc-plugin-sdk';
+import { threadPanelActionMatchesScope } from '@zana-ai/zcc-plugin-sdk/app';
 import plugin from '../server.ts';
 import app from '../app.tsx';
 import { createSalesforcePlugin } from '../lib/plugin.js';
@@ -128,6 +129,19 @@ describe('salesforce plugin contract', () => {
     expect(server).not.toContain('./src/');
   });
 
+  it('offers Studio tools on both Salesforce routes without exposing them on other pages', () => {
+    const actions = collectTestPluginApp(app, 'salesforce').threadPanelActions.filter(row => row.id.startsWith('studio-'));
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      for (const page of ['salesforce', 'orgs']) {
+        expect(threadPanelActionMatchesScope(action, 'plugin-page', { pluginId: 'salesforce', page })).toBe(true);
+        expect(threadPanelActionMatchesScope(action, 'plugin-page', { pluginId: 'another-plugin', page })).toBe(false);
+      }
+      expect(threadPanelActionMatchesScope(action, 'plugin-page', { pluginId: 'salesforce', page: 'unrelated' })).toBe(false);
+      expect(threadPanelActionMatchesScope(action, 'plugin-page')).toBe(false);
+    }
+  });
+
   it('registers settings, Salesforce tab, Agentforce side panels, guardrail, composer banner, and file opener', () => {
     const set = collectTestPluginApp(app, 'salesforce');
     expect(set.settingsSections).toMatchObject([
@@ -137,12 +151,12 @@ describe('salesforce plugin contract', () => {
     expect(set.projectTabs[0]).toMatchObject({ label: 'Salesforce', icon: 'Cloud', global: false, detachable: true });
     expect(typeof set.projectTabs[0]?.detachedPlaceholder).toBe('function');
     expect(set.threadPanelActions.map((row) => row.id)).toEqual(['sf-org', 'sf-soql', 'sf-object', 'sf-record', 'sf-logs', 'sf-deployments', 'sf-operations', 'agent', 'preview',
-      'studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments',
+      'studio-agents', 'studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments',
       'studio-evals', 'studio-sessions', 'studio-analytics', 'studio-issues', 'studio-scorers', 'studio-experiments', 'studio-compare', 'studio-artifacts', 'studio-settings', 'studio-import']);
     // Builder tools also work independently beside threads; legacy Studio portals stay page-owned.
     for (const row of set.threadPanelActions.filter(row => row.id.startsWith('studio-'))) {
-      expect(row).toMatchObject({ scopes: ['studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments'].includes(row.id)
-        ? ['plugin-page'] : ['plugin-page', 'thread', 'agent-session'], pages: ['salesforce'], layout: 'flush', category: 'Agent Script Studio' });
+      expect(row).toMatchObject({ scopes: ['studio-agents', 'studio-graph', 'studio-preview', 'studio-test', 'studio-actions', 'studio-org-preview', 'studio-comments'].includes(row.id)
+        ? ['plugin-page'] : ['plugin-page', 'thread', 'agent-session'], pages: ['salesforce', 'orgs'], layout: 'flush', category: 'Agent Script Studio' });
     }
     expect(set.threadPanelActions.find(row => row.id === 'agent')).toMatchObject({ title: 'Agent', layout: 'flush', scopes: ['thread', 'agent-session'] });
     expect(set.threadPanelActions.find(row => row.id === 'preview')).toMatchObject({ title: 'Preview', layout: 'flush' });
