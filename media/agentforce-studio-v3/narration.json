@@ -1,0 +1,26 @@
+[
+  {
+    "id": "healing-intro",
+    "line": "Here's a separate test run with a failing return policy. Ask the agent to improve it."
+  },
+  {
+    "id": "editor",
+    "line": "Your editor can evolve, too. Ask your coding agent to add a missing editor tool."
+  },
+  {
+    "id": "request",
+    "line": "For example: add a tool to export this agent's diagnostics."
+  },
+  {
+    "id": "reload",
+    "line": "With a local, source-linked plugin, the agent can update the code, run checks, rebuild, and reload the editor in place."
+  },
+  {
+    "id": "repair",
+    "line": "An editor issue follows the same loop: reproduce it, repair the code, verify the fix, and reload."
+  },
+  {
+    "id": "finish",
+    "line": "No uninstall. No reinstall. Keep working with your improved editor."
+  }
+]

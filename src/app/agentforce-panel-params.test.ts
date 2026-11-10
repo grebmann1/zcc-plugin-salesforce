@@ -42,6 +42,7 @@ describe('agentforce panel params', () => {
     expect(params).toEqual({ path: 'force-app/Bot.agent', view: 'preview', line: '7', runId: 'r1', turn: '2', node: 'main', projectId: 'p1', sub: 'simulations', batchId: 'b-1' });
     expect(parseAgentforceAgentParams(params)).toEqual({ path: 'force-app/Bot.agent', view: 'preview', line: 7, runId: 'r1', turn: 2, node: 'main', projectId: 'p1', sub: 'simulations', batchId: 'b-1' });
     expect(agentforceAgentParams({ path: 'a.agent' })).toEqual({ path: 'a.agent', view: 'file' });
+    expect(parseAgentforceAgentParams(agentforceAgentParams({ path: 'a.agent', view: 'types' }))).toEqual({ path: 'a.agent', view: 'types' });
     expect(agentforceAgentParams({ path: 'a.agent', view: 'nope' as never, line: 0, turn: 0, batchId: '../x', runId: ' ' })).toEqual({ path: 'a.agent', view: 'file' });
   });
   it('requires a safe agent path', () => {

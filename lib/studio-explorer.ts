@@ -12,7 +12,8 @@ import { runProjectScan, runProjectScanAsync } from './dx-project.js';
 import { parseActionTarget } from './agent-action-model.js';
 import { OrgAgentService } from './org-agent-service.js';
 import { lightningTypeBundlePath, readLightningType, readLwcBundle, referencedLightningTypes } from './lightning-types.js';
-import { STUDIO_RPC, type ExplorerNode, type ExplorerUse } from './studio-contract.js';
+import { parseLightningTypeRef } from './lightning-type-ref.js';
+import { STUDIO_RPC, type ExplorerNode, type ExplorerUse, type LightningTypeSummary } from './studio-contract.js';
 import { rpcFailure, rpcString, type StudioServerContext } from './studio-server-context.js';
 import type { SalesforceDeps } from './types.js';
 
@@ -203,6 +204,30 @@ export function registerStudioExplorer(studio: StudioServerContext): void {
     if (!ref || ref.length > 200) return rpcFailure('invalid_argument', 'ref is required.');
     try { return { ok: true, data: readLightningType(root, ref, studio.deps, await runProjectScanAsync(indexProjectActionsSteps(root, studio.deps))) }; }
     catch (error) { return rpcFailure('lightning_type_failed', error instanceof Error ? error.message : 'The Lightning Type could not be read.'); }
+  });
+  studio.registerRpc(STUDIO_RPC.agentTypes, async args => {
+    const root = studio.contexts.current()?.settings.projectRoot ?? '';
+    if (!root) return rpcFailure('not_configured', 'Open a project folder to read its Lightning Types.');
+    const refs = (args as { refs?: unknown } | null)?.refs;
+    if (!Array.isArray(refs) || refs.length > 120 || refs.some(ref => typeof ref !== 'string' || ref.length > 200 || !parseLightningTypeRef(ref))) {
+      return rpcFailure('invalid_argument', 'refs must contain at most 120 Lightning Type references.');
+    }
+    try {
+      const unique = [...new Set(refs as string[])];
+      if (!unique.length) return { ok: true, types: [], truncated: false };
+      // One confined project index serves the entire catalogue. Do not scan other agents or call the org.
+      const index = await runProjectScanAsync(indexProjectActionsSteps(root, studio.deps));
+      const types = await runProjectScanAsync((function* () {
+        const rows: LightningTypeSummary[] = [];
+        for (const ref of unique.slice(0, EXPLORER_LIMITS.componentTypes)) {
+          yield;
+          const { files: _files, properties: _properties, ...summary } = readLightningType(root, ref, studio.deps, index);
+          rows.push(summary);
+        }
+        return rows;
+      })());
+      return { ok: true, types, truncated: unique.length > types.length };
+    } catch (error) { return rpcFailure('lightning_types_failed', error instanceof Error ? error.message : 'The Lightning Types could not be read.'); }
   });
   studio.registerRpc(STUDIO_RPC.lwc, async args => {
     const root = studio.contexts.current()?.settings.projectRoot ?? '';

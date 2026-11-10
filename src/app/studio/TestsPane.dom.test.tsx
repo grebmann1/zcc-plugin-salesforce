@@ -130,10 +130,11 @@ it('describes expectations and the fix-loop prompt', () => {
 it('asks for a file, and keeps the role-play view without one', () => {
   const { call } = setup({ path: null });
   const views = within(screen.getByRole('group', { name: 'Tests view' })).getAllByRole('button');
-  expect(views.map(view => view.textContent)).toEqual(['Scenarios', 'Test cases', 'Batch simulations', 'Role-play']);
+  expect(views.map(view => view.textContent)).toEqual(['Scenarios', 'Test cases', 'Scorers', 'Batch simulations', 'Role-play']);
   expect(views.map(view => view.title)).toEqual([
     'Create reusable customer setups and starting variables.',
     'Replay saved scenarios and check expected outcomes for this agent.',
+    "See how the org's test scorers moved across runs for this agent.",
     'Run multiple AI customer conversations across scenarios and repeats.',
     'Explore one AI customer conversation with its setup, chat and traces.'
   ]);

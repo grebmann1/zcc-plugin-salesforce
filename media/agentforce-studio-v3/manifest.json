@@ -1,0 +1,71 @@
+{
+  "duration": 147.433333,
+  "chapters": [
+    [
+      0,
+      "Build an agent \u2014 V2"
+    ],
+    [
+      86.366667,
+      "Find the failing scenario"
+    ],
+    [
+      92.23333400000001,
+      "Self-healing in Studio"
+    ],
+    [
+      122.30000100000001,
+      "Ask for a new editor tool"
+    ],
+    [
+      133.59900100000002,
+      "New tool ready \u2014 no reinstall"
+    ],
+    [
+      137.425001,
+      "Use the new diagnostics export"
+    ]
+  ],
+  "revision": "continuous-app-edit",
+  "inAppAt": 122.30000100000001,
+  "newSections": "Self-healing and editor extension remain inside the app. All added editorial slides removed; narration carries the transitions.",
+  "sceneLeadSeconds": 1.2,
+  "sceneNarration": [
+    {
+      "id": "editor",
+      "line": "Your editor can evolve, too. Ask your coding agent to add a missing editor tool.",
+      "seconds": 5.603958,
+      "at": 0.1
+    },
+    {
+      "id": "inapp-work",
+      "line": "It updates the editor, checks the change, and reloads the plugin in place.",
+      "seconds": 4.809833,
+      "ms": 4810,
+      "at": 6.136
+    },
+    {
+      "id": "inapp-ready",
+      "line": "The export tool appears in the toolbar. No reinstall.",
+      "seconds": 3.470417,
+      "ms": 3470,
+      "at": 11.299
+    },
+    {
+      "id": "inapp-export",
+      "line": "Click it to export this agent's diagnostics, including its test results.",
+      "seconds": 4.685792,
+      "ms": 4686,
+      "at": 15.125
+    },
+    {
+      "id": "inapp-finish",
+      "line": "Keep working in the same editor, with the new tool ready to use.",
+      "seconds": 4.128667,
+      "ms": 4129,
+      "at": 20.164
+    }
+  ],
+  "provenance": "Requested scripted scene: real app and Monaco; injected demo assistant, toolbar button, export dialog and downloadable sample JSON in an isolated profile. No installed product changes.",
+  "sha256": "59707b238d1211d4ab8dda6c00bec173a2e946c35faac043c0e746d08fa715e5"
+}

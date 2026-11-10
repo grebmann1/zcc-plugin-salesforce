@@ -58,9 +58,10 @@ export function LightningTypeView({ pluginId, projectId, typeRef, usedBy, onOpen
     {data?.message && <p className={`sf-lt-note${data.status === 'ready' ? ' is-warn' : ''}`}>{data.message}</p>}
     {usedBy && usedBy.length > 0 && <dl className="sf-lt-rel"><UsedByAgents usedBy={usedBy} onOpenAgent={onOpenAgent} /></dl>}
     {data?.status === 'ready' && <div className="sf-lt-section">
+      {data.baseType && <><h3>Schema type</h3><p className="sf-lt-note"><code>{data.baseType}</code></p></>}
       <h3>Properties</h3>
       {data.properties.length === 0
-        ? <EmptyState compact art="code" title="No properties">The schema declares no top-level properties.</EmptyState>
+        ? <EmptyState compact art="code" title={data.baseType?.startsWith('@apexClassType/') ? 'Apex-backed schema' : 'No properties'}>{data.baseType?.startsWith('@apexClassType/') ? 'Fields are defined by the Apex class.' : 'The schema declares no top-level properties.'}</EmptyState>
         : <table className="sf-lt-table">
           <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
           <tbody>{data.properties.map(row => <tr key={row.name}>

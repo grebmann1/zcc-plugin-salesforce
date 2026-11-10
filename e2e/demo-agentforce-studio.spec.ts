@@ -1,3 +1,4 @@
+import { selectSalesforceSection } from './fixtures/salesforce-navigation.js';
 import { openThreadToolLauncher } from './fixtures/thread-tool-panel.js';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, realpathSync, cpSync } from 'node:fs';
@@ -339,7 +340,7 @@ test('demo: Agentforce Studio tour', async ({ app, home }) => {
     history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
   }, projectId);
   await page.getByRole('navigation', { name: 'acme-service navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
-  await page.getByTestId('salesforce-workbench').getByRole('tab', { name: 'Agentforce', exact: true }).click();
+  await selectSalesforceSection(page.getByTestId('salesforce-workbench'), 'agentforce');
   const studio = studioIn(page);
   const editor = page.frameLocator('iframe[title="Agentforce playground"]');
   await expect(editor.getByTestId('agent-script-ide')).toBeVisible();

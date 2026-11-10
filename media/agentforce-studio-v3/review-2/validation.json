@@ -1,0 +1,28 @@
+{
+  "durationSeconds": 157.8,
+  "bytes": 10249810,
+  "sizeMiB": 9.77,
+  "captionCues": 28,
+  "chapters": 6,
+  "video": {
+    "codec_name": "h264",
+    "width": 1440,
+    "height": 900,
+    "r_frame_rate": "30/1",
+    "pix_fmt": "yuv420p"
+  },
+  "captionTiming": "all cues ordered, nonoverlapping, within video duration",
+  "fullDecode": "passed, no FFmpeg errors",
+  "audioPeakDb": -3.0,
+  "stagedAppCapture": "built Electron, 1 passed; sample download verified",
+  "inAppFromSeconds": 133.866667,
+  "browserPlayback": {
+    "duration": 157.8,
+    "time": 148.090977,
+    "paused": false,
+    "ready": 4,
+    "captions": 28,
+    "chapters": 6,
+    "passed": true
+  }
+}

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOCK · Studio Analytics + Scorers</title>
+<style>
+:root{--sf-bg:#fff;--sf-surface:#f6f7f9;--sf-elevated:#fff;--sf-border:#d9dde3;--sf-text:#1b1f24;--sf-muted:#667085;--sf-soft:#eef1f5;--sf-accent:#0b5cab;--sf-on-accent:#fff;--sf-danger:#c23934;--sf-warn:#b7791f;--sf-success:#2e844a;--sf-mono:ui-monospace,Menlo,monospace}
+body.dark{--sf-bg:#16181d;--sf-surface:#1d2026;--sf-elevated:#22262d;--sf-border:#343a44;--sf-text:#e8eaee;--sf-muted:#9aa3b2;--sf-soft:#262b33;--sf-accent:#5aa2f0;--sf-on-accent:#0a1626}
+*{box-sizing:border-box}body{margin:0;font:13px/1.45 system-ui,sans-serif;background:var(--sf-bg);color:var(--sf-text)}
+button,select,input{font:inherit;color:inherit}
+.review{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#fff6d6;color:#3b3000;border-bottom:1px solid #e3d28a;flex-wrap:wrap}
+.review b{letter-spacing:.04em}.review .note{flex:1;min-width:240px;font-size:12px}
+.seg{display:inline-flex;border:1px solid #bda84a;border-radius:6px;overflow:hidden}.seg button{border:0;background:transparent;padding:4px 10px;cursor:pointer}.seg button[aria-pressed=true]{background:#3b3000;color:#fff6d6}
+.review label{font-size:12px;display:flex;gap:4px;align-items:center}
+/* simulated product */
+.app{display:grid;grid-template-columns:200px 1fr;height:calc(100vh - 46px);min-height:520px}
+.explorer{background:var(--sf-surface);border-right:1px solid var(--sf-border);padding:10px;overflow:auto}
+.explorer h4{margin:10px 6px 4px;font-size:11px;text-transform:uppercase;color:var(--sf-muted);letter-spacing:.05em}
+.explorer button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:5px 8px;border-radius:5px;cursor:pointer}
+.explorer button:hover{background:var(--sf-soft)}.explorer button[aria-current=true]{background:var(--sf-soft);font-weight:600;box-shadow:inset 2px 0 0 var(--sf-accent)}
+.main{display:flex;flex-direction:column;min-width:0}
+.editor{flex:1;min-height:80px;padding:12px;font-family:var(--sf-mono);font-size:12px;color:var(--sf-muted);overflow:auto;white-space:pre}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--sf-border);padding:0 8px;background:var(--sf-surface)}
+.tabs button{border:0;background:transparent;padding:7px 12px;cursor:pointer;color:var(--sf-muted);border-bottom:2px solid transparent}
+.tabs button[aria-selected=true]{color:var(--sf-text);border-bottom-color:var(--sf-accent)}
+.panel{display:flex;flex-direction:column;border-top:1px solid var(--sf-border);height:46%;min-height:240px}
+.pane{flex:1;overflow:auto;padding:12px 16px}
+.view{flex:1;overflow:auto;padding:16px 20px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.bar select,.bar input{background:var(--sf-elevated);border:1px solid var(--sf-border);border-radius:5px;padding:4px 8px}
+.chip{white-space:nowrap;border:1px solid var(--sf-border);border-radius:99px;padding:2px 9px;font-size:12px;background:var(--sf-soft);color:var(--sf-muted)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.kpi{border:1px solid var(--sf-border);border-radius:8px;padding:10px 12px;background:var(--sf-elevated)}
+.kpi .l{color:var(--sf-muted);font-size:12px}.kpi .v{font-size:22px;font-weight:600}.kpi .s{font-size:11px;color:var(--sf-muted)}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--sf-border);white-space:nowrap}
+th{font-size:11px;text-transform:uppercase;color:var(--sf-muted);letter-spacing:.04em}
+tr.sel td{background:var(--sf-soft)}td.num{text-align:right;font-variant-numeric:tabular-nums}
+.nr{color:var(--sf-muted);font-style:italic}
+.link{color:var(--sf-accent);background:none;border:0;cursor:pointer;padding:0;text-decoration:underline}
+.btn{border:1px solid var(--sf-border);background:var(--sf-elevated);border-radius:5px;padding:4px 10px;cursor:pointer}
+.btn.primary{background:var(--sf-accent);color:var(--sf-on-accent);border-color:var(--sf-accent)}
+.banner{border:1px solid var(--sf-border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--sf-soft);display:flex;gap:10px}
+.banner.warn{border-color:var(--sf-warn)}
+.empty{text-align:center;color:var(--sf-muted);padding:40px 10px}
+.pass{color:var(--sf-success)}.fail{color:var(--sf-danger)}
+.tbar{display:flex;height:8px;gap:2px;border-radius:4px;overflow:hidden;min-width:90px}.tbar i{display:block}
+svg{width:100%;height:90px;display:block}
+.drawer{border:1px solid var(--sf-border);border-radius:8px;margin-top:12px;padding:10px 12px;background:var(--sf-elevated)}
+h3{margin:0 0 8px;font-size:14px}
+[hidden]{display:none!important}
+.sr{position:absolute;left:-9999px}
+</style></head><body>
+<div class="review" role="toolbar" aria-label="Review controls (not part of product)">
+  <b>MOCK</b>
+  <span class="seg" role="group" aria-label="Layout"><button id="vA" aria-pressed="true">A · Own explorer view</button><button id="vB" aria-pressed="false">B · Bottom-panel tabs</button></span>
+  <span class="seg" role="group" aria-label="Data state"><button data-state="live" aria-pressed="true">Default state</button><button data-state="recorded" aria-pressed="false">Outcomes recorded</button><button data-state="unavail" aria-pressed="false">Data 360 unavailable</button></span>
+  <label><input type="checkbox" id="dark"> dark</label>
+  <span class="note">Try: change period/agent, click “sessions” to drill through, click an agent row, switch Analytics ⇄ Scorers. Numbers are sample values shaped like the STDM query; behavior is simulated.</span>
+</div>
+<div class="app">
+  <nav class="explorer" aria-label="Studio explorer">
+    <h4>Agents</h4>
+    <button>Hello_World</button><button>Btnet_Agent</button><button>Service_Agent</button>
+    <h4>Observe</h4>
+    <button id="navAnalytics" aria-current="false">Analytics</button>
+    <button id="navScorers" aria-current="false">Scorers</button>
+    <h4>Org</h4><button>Deployments</button><button>Metadata</button>
+  </nav>
+  <div class="main" id="main"></div>
+</div>
+
+<script>
+const AGENTS=[
+ {n:'Hello_World',v:'v3 Active',s:[3,3,2,4,3,0,6],tot:21,esc:0,int:3.0,lat:'1.2 s',err:0},
+ {n:'Btnet_Agent',v:'v2 Draft',s:[0,2,4,1,3,5,8],tot:23,esc:10,int:8.0,lat:'2.4 s',err:1},
+ {n:'Service_Agent',v:'v29 Active',s:[5,6,4,7,6,5,9],tot:42,esc:3,int:6.4,lat:'1.8 s',err:2},
+ {n:'EMEA_Concierge',v:'v5 Draft',s:null,tot:0,esc:null,int:null,lat:null,err:null}
+];
+const ESC={Service_Agent:[6,42]};
+const SC=[
+ {run:'Run 42',agent:'Service_Agent',ver:'v29',cases:12,pass:10,fail:2,m:{'Topic match':[11,12],'Action sequence':[10,12],'Response rating':[9,12]}},
+ {run:'Run 41',agent:'Service_Agent',ver:'v28',cases:12,pass:8,fail:4,m:{'Topic match':[10,12],'Action sequence':[8,12],'Response rating':[8,12]}},
+ {run:'Run 17',agent:'Hello_World',ver:'v3',cases:6,pass:6,fail:0,m:{'Topic match':[6,6],'Action sequence':[6,6],'Response rating':[6,6]}}
+];
+const st={layout:'A',data:'live',period:'7d',agent:'all',tab:'analytics',panelTab:'analytics',drill:null,sel:null,open:true};
+const $=s=>document.querySelector(s);
+const pct=(a,b)=>b?(100*a/b).toFixed(1)+'%':'—';
+function scaleSeries(p){return p==='24h'?1/7:p==='30d'?4:1}
+function spark(arr){const w=420,h=80,m=Math.max(...arr,1);const pts=arr.map((v,i)=>[10+i*(w-20)/(arr.length-1),h-6-(v/m)*(h-16)]);
+ return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Daily sessions trend"><polyline fill="none" stroke="var(--sf-accent)" stroke-width="2" points="${pts.map(p=>p.join(',')).join(' ')}"/>${pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--sf-accent)"/>`).join('')}</svg>`}
+function banner(){
+ if(st.data==='unavail')return `<div class="banner warn" role="status"><b>Data 360 unavailable</b><span>Session analytics need Data 360 with Agentforce session tracing. No numbers are shown; nothing is estimated. <button class="link">Why?</button></span></div>`;
+ return `<div class="banner" role="status"><span class="chip">Sample values</span><span>Window ${st.period==='24h'?'last 24 hours':st.period==='7d'?'last 7 days':'last 30 days'} · source <code>ssot__AiAgentSession__dlm</code> · sessions are per agent API name; <b>version and environment filters are unavailable</b>.</span></div>`}
+function rows(){let a=AGENTS.filter(x=>st.agent==='all'||x.n===st.agent);return a}
+function analytics(){
+ if(st.data==='unavail')return banner()+`<div class="empty">No data to display.</div>`;
+ const a=rows(),k=scaleSeries(st.period);
+ const tot=Math.round(a.reduce((s,x)=>s+x.tot,0)*k), withData=a.filter(x=>x.tot>0).length;
+ const interactions=Math.round(a.reduce((s,x)=>s+x.tot*(x.int||0),0)*k);
+ const series=[0,1,2,3,4,5,6].map(i=>a.reduce((s,x)=>s+(x.s?x.s[i]:0),0));
+ const rec=st.data==='recorded';const E=a.filter(x=>x.tot>0).reduce((s,x)=>s+Math.round(x.esc*k),0),T=a.filter(x=>x.tot>0).reduce((s,x)=>s+Math.round(x.tot*k),0);const avg=(()=>{const q=a.filter(x=>x.tot>0);return q.length?100*q.reduce((s,x)=>s+x.esc/x.tot,0)/q.length:0})();
+ let h=banner();
+ h+=`<div class="kpis">
+ <div class="kpi"><div class="l">Sessions</div><div class="v">${tot}</div><div class="s">${withData} of ${a.length} agents have data</div></div>
+ <div class="kpi"><div class="l">Interactions / session</div><div class="v">${tot?(interactions/tot).toFixed(1):'—'}</div><div class="s">session-weighted</div></div>
+ ${rec?`<div class="kpi"><div class="l">Escalation rate</div><div class="v">${pct(E,T)}</div><div class="s">${E} of ${T} sessions · session-weighted<br>not the ${avg.toFixed(1)}% average of agent rates</div></div>`:`<div class="kpi"><div class="l">Escalation rate</div><div class="v nr">Not recorded</div><div class="s">end type is NOT_SET for these sessions</div></div>`}
+ <div class="kpi"><div class="l">Trace errors</div><div class="v">${a.reduce((s,x)=>s+(x.err||0),0)}</div><div class="s">platform error traces</div></div></div>`;
+ h+=`<div class="drawer" style="margin:0 0 12px"><h3>Daily sessions</h3>${tot?spark(series):'<div class="empty">No sessions for this selection.</div>'}</div>`;
+ h+=`<table><thead><tr><th>Agent</th><th>Version</th><th class="num">Sessions</th><th class="num">Int./session</th><th>Avg latency</th><th>Outcomes</th><th></th></tr></thead><tbody>`;
+ a.forEach(x=>{const t=Math.round(x.tot*k);
+  h+=`<tr class="${st.sel===x.n?'sel':''}" data-agent="${x.n}"><td>${x.n}</td><td>${x.v}</td>
+  <td class="num">${t||'—'}</td><td class="num">${x.int?x.int.toFixed(1):'—'}</td><td>${x.lat||'—'}</td>
+  <td>${!x.tot?'<span class="nr">no data</span>':rec?`${Math.round(x.esc*k)} escalated (${pct(x.esc,x.tot)})`:'<span class="nr">not recorded</span>'}</td>
+  <td>${x.tot?`<button class="link" data-drill="${x.n}">${t} sessions</button>`:''}</td></tr>`});
+ h+=`</tbody></table>`;
+ if(!a.length)h=banner()+`<div class="empty">No agents match. <button class="link" id="clearF">Clear filters</button></div>`;
+ if(st.drill){const x=AGENTS.find(q=>q.n===st.drill);
+  h+=`<div class="drawer" role="region" aria-label="Contributing sessions"><h3>Sessions contributing to ${x.n} <button class="btn" id="closeDrill" style="float:right">Close</button></h3>
+  <table><thead><tr><th>Session</th><th>Started</th><th class="num">Interactions</th><th>End type</th></tr></thead><tbody>
+  ${[0,1,2].map(i=>`<tr><td><code>01a1bb${i}0-…</code></td><td>2026-11-08 ${15-i}:0${i+2}</td><td class="num">${Math.round(x.int)+i}</td><td class="${rec?'':'nr'}">${rec?(i===0?'Escalated':'Resolved'):'NOT_SET'}</td></tr>`).join('')}
+  </tbody></table><div class="s" style="color:var(--sf-muted);margin-top:6px">Showing 3 of ${Math.round(x.tot*k)} · opens in Sessions with the same filters</div></div>`}
+ return h}
+function scorers(){
+ let list=SC.filter(r=>st.agent==='all'||r.agent===st.agent);
+ let h=`<div class="banner"><span class="chip">From org test runs</span><span>Scores come from Agentforce test results (<code>bot_response_rating</code>, topic and action sequence). Counts are cases, not sessions.</span></div>`;
+ if(!list.length)return h+`<div class="empty">No scored runs for this agent. <button class="link" id="clearF">Clear filters</button></div>`;
+ h+=`<table><thead><tr><th>Run</th><th>Agent</th><th>Version</th><th>Result</th>${Object.keys(SC[0].m).map(m=>`<th class="num">${m}</th>`).join('')}<th></th></tr></thead><tbody>`;
+ list.forEach(r=>{h+=`<tr><td>${r.run}</td><td>${r.agent}</td><td>${r.ver}</td>
+  <td><div class="tbar" aria-label="${r.pass} passed, ${r.fail} failed"><i style="flex:${r.pass};background:var(--sf-success)"></i>${r.fail?`<i style="flex:${r.fail};background:var(--sf-danger)"></i>`:''}</div><span class="${r.fail?'fail':'pass'}">${r.pass}/${r.cases} passed</span></td>
+  ${Object.values(r.m).map(([a,b])=>`<td class="num">${a}/${b} <span style="color:var(--sf-muted)">(${pct(a,b)})</span></td>`).join('')}
+  <td><button class="link">Open in Tests</button></td></tr>`});
+ h+=`</tbody></table>`;
+ const s=list.filter(r=>r.agent==='Service_Agent');
+ if(s.length>1)h+=`<div class="drawer"><h3>Service_Agent: v28 → v29</h3>Topic match +1, Action sequence +2, Response rating +1 · passed 8 → 10 of 12 · <button class="link">Compare versions</button></div>`;
+ return h}
+function filters(){return `<div class="bar" role="group" aria-label="Filters">
+ <label>Period <select id="period"><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></label>
+ <label>Agent <select id="agent"><option value="all">All agents</option>${AGENTS.map(a=>`<option>${a.n}</option>`).join('')}</select></label>
+ <span class="chip" title="Not supported by session data">Version · environment: unavailable</span>
+ <button class="btn" id="refresh">Refresh</button></div>`}
+function body(which){return filters()+(which==='analytics'?analytics():scorers())}
+function render(){
+ const m=$('#main');
+ $('#navAnalytics').setAttribute('aria-current',st.layout==='A'&&st.tab==='analytics');
+ $('#navScorers').setAttribute('aria-current',st.layout==='A'&&st.tab==='scorers');
+ if(st.layout==='A'){
+  m.innerHTML=`<div class="tabs" role="tablist"><button role="tab" aria-selected="${st.tab==='analytics'}" data-t="analytics">Analytics</button><button role="tab" aria-selected="${st.tab==='scorers'}" data-t="scorers">Scorers</button></div><div class="view" role="tabpanel">${body(st.tab)}</div>`;
+ }else{
+  m.innerHTML=`<div class="editor">agent Service_Agent:\n  description: "Handles service requests"\n  topics:\n    - orders\n    - returns\n  # …editor stays visible; Analytics and Scorers live in the bottom panel with Problems, Trace, Output and Tests</div>
+  <div class="panel"><div class="tabs" role="tablist">${['problems:Problems','trace:Trace','output:Output','tests:Tests','analytics:Analytics'].map(s=>{const[i,t]=s.split(':');return `<button role="tab" aria-selected="${st.panelTab===i||(i==='tests'&&st.panelTab==='scorers')}" data-p="${i}">${t}</button>`}).join('')}</div>
+  <div class="pane" role="tabpanel">${st.panelTab==='analytics'?body('analytics'):st.panelTab==='tests'||st.panelTab==='scorers'?`<div class="bar"><span class="seg"><button data-sub="cases" aria-pressed="${st.panelTab==='tests'}">Cases</button><button data-sub="scorers" aria-pressed="${st.panelTab==='scorers'}">Scorers</button></span></div>`+(st.panelTab==='scorers'?scorers():'<div class="empty">Existing Tests workbench (unchanged)</div>'):'<div class="empty">Unchanged</div>'}</div></div>`;
+ }
+ const p=$('#period'),a=$('#agent');if(p)p.value=st.period;if(a)a.value=st.agent;
+}
+document.addEventListener('click',e=>{
+ const t=e.target.closest('button,tr[data-agent]');if(!t)return;
+ if(t.id==='vA'||t.id==='vB'){st.layout=t.id==='vA'?'A':'B';$('#vA').setAttribute('aria-pressed',st.layout==='A');$('#vB').setAttribute('aria-pressed',st.layout==='B');}
+ else if(t.dataset.state){st.data=t.dataset.state;document.querySelectorAll('[data-state]').forEach(b=>b.setAttribute('aria-pressed',b===t));}
+ else if(t.id==='navAnalytics'){st.layout='A';st.tab='analytics';$('#vA').setAttribute('aria-pressed',true);$('#vB').setAttribute('aria-pressed',false);}
+ else if(t.id==='navScorers'){st.layout='A';st.tab='scorers';$('#vA').setAttribute('aria-pressed',true);$('#vB').setAttribute('aria-pressed',false);}
+ else if(t.dataset.t){st.tab=t.dataset.t}
+ else if(t.dataset.p){st.panelTab=t.dataset.p}
+ else if(t.dataset.sub){st.panelTab=t.dataset.sub==='scorers'?'scorers':'tests'}
+ else if(t.dataset.drill){st.drill=t.dataset.drill}
+ else if(t.id==='closeDrill'){st.drill=null}
+ else if(t.id==='clearF'){st.agent='all';st.period='7d'}
+ else if(t.dataset.agent||t.closest?.('tr[data-agent]')){const r=t.closest('tr[data-agent]');if(r&&!t.dataset.drill){st.sel=r.dataset.agent}}
+ else return;
+ render()});
+document.addEventListener('change',e=>{if(e.target.id==='period')st.period=e.target.value;if(e.target.id==='agent')st.agent=e.target.value;if(e.target.id==='dark')document.body.classList.toggle('dark',e.target.checked);render()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&st.drill){st.drill=null;render()}});
+render();
+</script></body></html>

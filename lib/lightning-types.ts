@@ -3,6 +3,8 @@
  * `lightningTypes/<Name>/` bundles (schema.json plus per-channel renderer/editor config) that define custom ones, and the
  * `lwc/<name>/` components those renderer/editor configs override with. Read-only and bounded; bundle paths come from the confined project walk, never from renderer input.
  */
+import { parseLightningTypeRef } from './lightning-type-ref.js';
+export { parseLightningTypeRef, type LightningTypeRef } from './lightning-type-ref.js';
 import { basename, join, relative } from 'node:path';
 import { resolveUnderRoot } from './dx-project.js';
 import type { ProjectActionIndex } from './action-source.js';
@@ -12,21 +14,7 @@ import type { SalesforceDeps } from './types.js';
 export const LIGHTNING_TYPE_LIMITS = { refs: 120, files: 12, fileBytes: 256_000, properties: 200, components: 24, lwcFiles: 16 } as const;
 
 const REF_PATTERN = /\bcomplex_data_type_name\s*:\s*["']?([^"'\s#]{1,200})/g;
-const NAME = '[A-Za-z][A-Za-z0-9_]{0,79}';
-const TYPE_REF = new RegExp(`^(?:(${NAME})__)?(${NAME})$`);
 const COMPONENT_REF = /^([a-z][A-Za-z0-9_]{0,79})\/([a-z][A-Za-z0-9_]{0,79})$/;
-
-export interface LightningTypeRef { ref: string; standard: boolean; namespace?: string; bundle: string }
-
-/** `lightning__textType` is standard, `c__Order` a local bundle, `ns__Order` a namespaced one. Apex class types are not Lightning Types. */
-export function parseLightningTypeRef(ref: string): LightningTypeRef | null {
-  const match = TYPE_REF.exec(ref.trim());
-  if (!match || match[2].includes('__') || match[1]?.includes('__')) return null;
-  const [, namespace, bundle] = match;
-  if (namespace === 'lightning') return { ref, standard: true, namespace, bundle };
-  if (!namespace) return { ref, standard: false, bundle };
-  return { ref, standard: false, ...(namespace === 'c' ? {} : { namespace }), bundle };
-}
 
 /** Distinct Lightning Type references declared in one Agent Script source. */
 export function referencedLightningTypes(source: string): string[] {
@@ -56,7 +44,7 @@ function readBounded(deps: SalesforceDeps, path: string): { content: string; tru
 }
 
 /** Top-level schema properties: `lightning:type` wins over JSON Schema `type`, then `$ref`. */
-export function schemaProperties(schema: unknown): { title?: string; description?: string; properties: LightningTypeProperty[] } {
+export function schemaProperties(schema: unknown): { title?: string; description?: string; baseType?: string; properties: LightningTypeProperty[] } {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return { properties: [] };
   const root = schema as Record<string, unknown>;
   const required = new Set(Array.isArray(root.required) ? root.required.filter((name): name is string => typeof name === 'string') : []);
@@ -69,7 +57,8 @@ export function schemaProperties(schema: unknown): { title?: string; description
     return { name, required: required.has(name), ...(type ? { type } : {}), ...(title ? { title } : {}), ...(description ? { description } : {}) };
   });
   const title = text(root.title); const description = text(root.description);
-  return { ...(title ? { title } : {}), ...(description ? { description } : {}), properties };
+  const baseType = text(root['lightning:type']);
+  return { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(baseType ? { baseType } : {}), properties };
 }
 
 /** `c/offerCard` is a local component, `ns/offerCard` a namespaced one; anything else is not an LWC reference. */

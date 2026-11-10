@@ -363,11 +363,37 @@ describe('opening a version read-only', () => {
       ok: true,
       data: { apiName: 'MyBot', versionNumber: 1, active: true, fullName: 'MyBot_v1', content: 'version one' }
     });
-    expect(sf.at(-1)).toEqual(['project', 'retrieve', 'start', '--metadata', 'AiAuthoringBundle:MyBot_v2', '--metadata', 'AiAuthoringBundle:MyBot_v1',
+    expect(sf.at(-1)).toEqual(['project', 'retrieve', 'start', '--metadata', 'AiAuthoringBundle:MyBot_v1', '--metadata', 'AiAuthoringBundle:MyBot_v2',
       '--metadata', 'AiAuthoringBundle:MyBot', '--target-org', 'dev', '--json', '--wait', '2']);
     expect(existsSync(state.retrievedIn!)).toBe(false);
     expect(files).toEqual(before);
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 2 })).resolves.toMatchObject({ data: { active: false, fullName: 'MyBot_v2', content: 'version two' } });
+  });
+
+  it('binds a retrieved source to its metadata target while preserving its exact local path and revision', async () => {
+    const { call, state, files, dirs, queries } = await setup();
+    files[BOT.replace('.agent', '.bundle-meta.xml')] = '<AiAuthoringBundle><target> Parent_Agent.v1 </target></AiAuthoringBundle>';
+    dirs['/proj/force-app/main/default/agents']!.push('MyBot.bundle-meta.xml');
+    state.bundles = { Parent_Agent_42: { target: 'Parent_Agent.v1', content: 'exact parent version source' } };
+    const before = { ...files };
+    await expect(call(RELEASE_RPC.state)).resolves.toMatchObject({
+      ok: true, data: { agent: { apiName: 'Parent_Agent', path: PATH, revision: sha256Hex(SOURCE), versioned: true }, versions: [{ versionNumber: 2 }, { versionNumber: 1 }] },
+    });
+    expect(queries[0]).toBe(versionsSoql('Parent_Agent'));
+    await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toEqual({
+      ok: true, data: { apiName: 'Parent_Agent', versionNumber: 1, active: true, fullName: 'Parent_Agent_42', content: 'exact parent version source' },
+    });
+    expect(existsSync(state.retrievedIn!)).toBe(false);
+    expect(files).toEqual(before);
+    await expect(call(RELEASE_RPC.prepare, { action: 'agent.publish' })).resolves.toMatchObject({ ok: false, code: 'versioned_source' });
+  });
+
+  it.each(['<target>Bad target</target>', '<target/>', '<target>MyBot.v1</target><target>Other.v1</target>', '<target>MyBot.v1</target><target>invalid</target>'])('refuses invalid or ambiguous metadata before reading the org: %s', async metadata => {
+    const { call, files, dirs, queries } = await setup();
+    files[BOT.replace('.agent', '.bundle-meta.xml')] = `<AiAuthoringBundle>${metadata}</AiAuthoringBundle>`;
+    dirs['/proj/force-app/main/default/agents']!.push('MyBot.bundle-meta.xml');
+    await expect(call(RELEASE_RPC.state)).resolves.toMatchObject({ ok: false, code: 'invalid_input', error: expect.stringContaining('version target') });
+    expect(queries).toEqual([]);
   });
 
   it('says why a version cannot open', async () => {
@@ -382,7 +408,7 @@ describe('opening a version read-only', () => {
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ code: 'version_unavailable', error: expect.stringContaining('no authoring bundle on dev') });
     state.bundles = { MyBot: BUNDLES.MyBot!, MyBot_v2: BUNDLES.MyBot_v2! };
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({
-      code: 'version_unavailable', error: expect.stringContaining('None of the 2 newest MyBot authoring bundles on dev published v1.')
+      code: 'version_unavailable', error: expect.stringContaining('None of the 2 checked MyBot authoring bundles on dev published v1.')
     });
     state.queryStatus = 500;
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ code: 'api_error' });

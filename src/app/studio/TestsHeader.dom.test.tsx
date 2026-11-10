@@ -13,8 +13,8 @@ it('keeps the title, help and navigation mounted in every view, with exactly one
   const help = screen.getByRole('button', { name: 'How these tests work' });
   const nav = screen.getByRole('group', { name: 'Tests view' });
   const buttons = [...within(nav).getAllByRole('button'), screen.getByRole('button', { name: 'Browse tests' })];
-  expect(buttons.map(button => button.textContent)).toEqual(['Scenarios', 'Test cases', 'Batch simulations', 'Role-play', 'Browse tests']);
-  for (const [index, view] of (['scenarios', 'cases', 'simulations', 'roleplay', 'org'] as const).entries()) {
+  expect(buttons.map(button => button.textContent)).toEqual(['Scenarios', 'Test cases', 'Scorers', 'Batch simulations', 'Role-play', 'Browse tests']);
+  for (const [index, view] of (['scenarios', 'cases', 'scorers', 'simulations', 'roleplay', 'org'] as const).entries()) {
     fireEvent.click(buttons[index]);
     expect(onViewChange).toHaveBeenLastCalledWith(view);
     rerender(<TestsHeader {...props} view={view} />);
@@ -22,7 +22,7 @@ it('keeps the title, help and navigation mounted in every view, with exactly one
     expect(screen.getByRole('button', { name: 'How these tests work' })).toBe(help);
     expect(screen.getByRole('group', { name: 'Tests view' })).toBe(nav);
     expect(buttons.filter(button => button.getAttribute('aria-pressed') === 'true')).toEqual([buttons[index]]);
-    const label = view === 'cases' ? 'tests/MyBot.scenario.json · 2 saved test cases' : view === 'org' ? 'Local suites and org tests' : '27 shared scenarios · this agent';
+    const label = view === 'cases' ? 'tests/MyBot.scenario.json · 2 saved test cases' : view === 'org' ? 'Local suites and org tests' : view === 'scorers' ? 'Org test scorers · this agent' : '27 shared scenarios · this agent';
     expect(screen.getByText(label).title).toBe(label);
     if (view !== 'cases') expect(screen.queryByText(/MyBot.scenario.json/)).toBeNull();
   }

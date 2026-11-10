@@ -140,10 +140,55 @@ describe('org agent sources', () => {
       const { service, execSf, temporary } = reader({ ...bundles, Help_v13: { target: 'Help.v12' }, Other_v1: { target: 'Help.v12' } });
       await expect(service.readVersion(org, 'Help', 12)).resolves.toEqual({ fullName: 'Help_v13', content: 'Help_v13 source' });
       const retrieve = execSf.mock.calls[1]![0];
-      expect(retrieve.filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual(['13', '12', '11', '10', '9', '8', '7', '6', '5', '4'].map(n => `AiAuthoringBundle:Help_v${n}`));
+      expect(retrieve.filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual(['12', '13', '11', '10', '9', '8', '7', '6', '5', '4'].map(n => `AiAuthoringBundle:Help_v${n}`));
       expect(execSf.mock.calls[1]![1]).toMatchObject({ cwd: temporary(), timeoutMs: 120_000, signal: expect.any(AbortSignal) });
       expect(existsSync(temporary())).toBe(false);
-      await expect(service.readVersion(org, 'Help', 1)).rejects.toThrow('None of the 10 newest Help authoring bundles on sandbox published v1.');
+      await expect(service.readVersion(org, 'Help', 1)).resolves.toEqual({ fullName: 'Help_v1', content: 'Help_v1 source' });
+    });
+
+    it('includes an older suffix hint while bounding retrieval to ten bundles', async () => {
+      const bundles = Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`Help_${index + 1}`, { target: `Help.v${index + 1}` }]));
+      const { service, execSf, temporary } = reader(bundles);
+      await expect(service.readVersion(org, 'Help', 3)).resolves.toEqual({ fullName: 'Help_3', content: 'Help_3 source' });
+      expect(execSf.mock.calls[1]![0].filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual([
+        '3', '25', '24', '23', '22', '21', '20', '19', '18', '17',
+      ].map(n => `AiAuthoringBundle:Help_${n}`));
+      expect(execSf).toHaveBeenCalledTimes(2);
+      expect(existsSync(temporary())).toBe(false);
+    });
+
+    it('does not trust the older suffix hint and falls back to a verified newer target', async () => {
+      const bundles = Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`Help_${index + 1}`, { target: `Help.v${index + 1}` }]));
+      const { service, temporary } = reader({ ...bundles, Help_3: { target: 'Other.v3' }, Help_25: { target: 'Help.v3' } });
+      await expect(service.readVersion(org, 'Help', 3)).resolves.toEqual({ fullName: 'Help_25', content: 'Help_25 source' });
+      expect(existsSync(temporary())).toBe(false);
+      const missing = reader({ ...bundles, Help_3: { target: 'Help.v2' } });
+      await expect(missing.service.readVersion(org, 'Help', 3)).rejects.toThrow('None of the 10 checked Help authoring bundles on sandbox published v3.');
+      expect(existsSync(missing.temporary())).toBe(false);
+    });
+
+    it('reads real Name_number bundles by their metadata target, keeping numeric ordering and agent boundaries', async () => {
+      const { service, execSf, temporary } = reader({
+        Help_9: { target: 'Help.v9' },
+        Help_10: { target: 'Help.v9', content: 'latest source for version nine' },
+        Help_11: { target: 'Help.v8' },
+        Help_v12: { target: 'Help.v7' },
+        Help: { target: 'Help.v6' },
+        Help_Extra_99: { target: 'Help.v9' },
+        Other_99: { target: 'Help.v9' },
+      });
+      await expect(service.readVersion(org, 'Help', 9)).resolves.toEqual({ fullName: 'Help_10', content: 'latest source for version nine' });
+      expect(execSf.mock.calls[1]![0].filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual([
+        'AiAuthoringBundle:Help_9', 'AiAuthoringBundle:Help_v12', 'AiAuthoringBundle:Help_11', 'AiAuthoringBundle:Help_10', 'AiAuthoringBundle:Help',
+      ]);
+      expect(existsSync(temporary())).toBe(false);
+      await expect(service.readVersion(org, 'Help', 11)).rejects.toThrow('published v11');
+    });
+
+    it('preserves an agent whose own name ends in a number when finding its source candidates', async () => {
+      const { service, execSf } = reader({ Help_1: { target: 'Help_1.v3' }, Help_1_7: { target: 'Help_1.v3' }, Help_17: { target: 'Help_1.v3' } });
+      await expect(service.readVersion(org, 'Help_1', 3)).resolves.toEqual({ fullName: 'Help_1_7', content: 'Help_1_7 source' });
+      expect(execSf.mock.calls[1]![0].filter(arg => arg.startsWith('AiAuthoringBundle:'))).toEqual(['AiAuthoringBundle:Help_1_7', 'AiAuthoringBundle:Help_1']);
     });
 
     it.each([

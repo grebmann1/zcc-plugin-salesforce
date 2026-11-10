@@ -17,7 +17,7 @@ import {
   type PreviewMode,
   type PreviewTurn
 } from './agentforce-preview-logic.js';
-import { AGENTFORCE_PANEL_STYLES } from './AgentScriptPanel.js';
+import { AGENTFORCE_PANEL_STYLES } from './agentforce-panel-styles.js';
 import { OrgPicker } from './OrgPicker.js';
 import { fetchConnectedOrg } from './org-rpc.js';
 import { orgSessionLabel } from '../../lib/org-session.js';

@@ -24,6 +24,7 @@ import { evalCaseOutcomes } from './eval-spec.js';
 import { registerStudioExplorer } from './studio-explorer.js';
 import { registerAgentScriptDocuments } from './agent-script-document.js';
 import { registerOrgTests } from './org-tests.js';
+import { registerOrgAnalytics } from './org-analytics.js';
 import { registerSimulations } from './simulation-batches.js';
 import { registerSelfHealing } from './self-healing.js';
 import { createAgentDraft, draftDestination, DRAFT_PROJECT } from './agent-drafts.js';
@@ -733,11 +734,17 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
       if (!('projectRoot' in loaded)) return loaded as ToolFailure;
       if (!loaded.bundle) return fail('not_found', `Agentforce bundle not found: ${path}`) as ToolFailure;
       const metadata = readConfinedFile(loaded.projectRoot, loaded.bundle.path.replace(/\.agent$/, '.bundle-meta.xml'), deps);
+      const targetCount = (metadata?.match(/<target(?:\s|\/?>)/g) ?? []).length;
+      const versioned = targetCount > 0;
+      const targets = [...(metadata ?? '').matchAll(/<target>\s*([A-Za-z][A-Za-z0-9_]{0,79})\.v[1-9][0-9]*\s*<\/target>/g)];
+      if (versioned && (targetCount !== 1 || targets.length !== 1)) return fail('invalid_input', 'This agent bundle has an invalid or ambiguous version target. Open a source with one valid AgentName.vNumber target.') as ToolFailure;
       return {
-        apiName: loaded.bundle.apiName,
+        // A retrieved bundle's basename counts authoring source versions. Its
+        // target identifies the BotDefinition whose saved history belongs here.
+        apiName: versioned ? targets[0]![1]! : loaded.bundle.apiName,
         path,
         revision: sha256Hex(deps.readFile(loaded.bundle.path) ?? ''),
-        versioned: Boolean(metadata && /<target(?:\s|>)/.test(metadata))
+        versioned
       };
     },
     consume: (token, binding) => zcc.ui.experimental_consumeApproval({ token, binding }),
@@ -902,6 +909,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   registerAgentScriptDocuments(studio);
   // Org tests read the org through the Studio read grants, like Release "Load versions"; a Studio click approves the read.
   registerOrgTests(studio, { sdkFor: args => clickedSdk(readGrants.wrap(sdk, releaseScope()), args) });
+  registerOrgAnalytics(studio, { sdkFor: args => clickedSdk(readGrants.wrap(sdk, releaseScope()), args) });
   // A batch is approved once, like one lab run; its lanes then start without asking again.
   const simulationOptions = {
     agent: agentAt,

@@ -179,8 +179,41 @@ describe('studio.explorer RPC', () => {
       deps
     } as unknown as StudioServerContext;
     registerStudioExplorer(studio);
-    return { call: (args: unknown = {}) => handlers.get('studio.explorer')!(args) as Promise<any>, dispose, deps };
+    return { call: (args: unknown = {}) => handlers.get('studio.explorer')!(args) as Promise<any>, types: (args: unknown = {}) => handlers.get('studio.agentTypes')!(args) as Promise<any>, dispose, deps };
   }
+  it('reads only the requested type summaries with one index and no org access', async () => {
+    const root = project({
+      'force-app/main/default/lightningTypes/Order/schema.json': JSON.stringify({ title: 'Order', 'lightning:type': '@apexClassType/c__Order$Request' }),
+      'force-app/main/default/lightningTypes/Order/lightningDesktopGenAi/renderer.json': JSON.stringify({ renderer: { componentOverrides: { $: { definition: 'c/orderCard' } } } }),
+      'force-app/main/default/lwc/orderCard/orderCard.html': '<template>Hello</template>',
+      'force-app/main/default/lightningTypes/Unrelated/schema.json': '{}'
+    });
+    const execSf = vi.fn();
+    const { types, deps } = setup({ root, org: 'dev', execSf });
+    const read = vi.spyOn(deps, 'readFileBounded');
+    const result = await types({ refs: ['c__Order', 'c__Order', 'c__Missing', 'lightning__textType'] });
+    expect(result).toMatchObject({ ok: true, truncated: false, types: [
+      { ref: 'c__Order', baseType: '@apexClassType/c__Order$Request', components: [{ ref: 'c/orderCard' }] },
+      { ref: 'c__Missing', status: 'missing' }, { ref: 'lightning__textType', status: 'standard' }
+    ] });
+    expect(result.types[0]).not.toHaveProperty('files');
+    expect(read.mock.calls.some(([path]) => path.includes('/Unrelated/'))).toBe(false);
+    expect(execSf).not.toHaveBeenCalled();
+    expect(await types({ refs: [] })).toEqual({ ok: true, types: [], truncated: false });
+  });
+  it('bounds and validates type summary requests and reports unreadable projects', async () => {
+    expect(await setup({}).types({ refs: [] })).toMatchObject({ ok: false, code: 'not_configured' });
+    const { types, deps } = setup({ root: project() });
+    for (const args of [null, {}, { refs: 'bad' }, { refs: ['../escape'] }, { refs: [7] }, { refs: ['x'.repeat(201)] }, { refs: Array(121).fill('c__A') }]) {
+      expect(await types(args)).toMatchObject({ ok: false, code: 'invalid_argument' });
+    }
+    const result = await types({ refs: Array.from({ length: 70 }, (_, i) => `c__A${i}`) });
+    expect(result.types).toHaveLength(60);
+    expect(result.truncated).toBe(true);
+    vi.spyOn(deps, 'readFile').mockImplementation(() => { throw Error('unreadable project'); });
+    vi.spyOn(deps, 'readFileBounded').mockImplementation(() => { throw Error('unreadable project'); });
+    expect(await types({ refs: ['c__A'] })).toMatchObject({ ok: false, code: 'lightning_types_failed' });
+  });
   it('refuses without a project folder', async () => {
     expect(await setup({}).call()).toMatchObject({ ok: false, code: 'not_configured' });
   });

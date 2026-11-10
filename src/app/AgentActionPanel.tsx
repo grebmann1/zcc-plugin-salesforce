@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Info, PanelRight } from 'lucide-react';
+import { Braces, ExternalLink, Info, PanelRight, Shapes, Workflow } from 'lucide-react';
 import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import { parseActionTarget, type AgentAction, type ActionParameter } from '../../lib/agent-action-model.js';
 import type { ActionSource } from '../../lib/action-source.js';
@@ -8,16 +8,32 @@ import { ActionCodePreview } from './ActionCodePreview.js';
 import { FlowVisualization } from './FlowVisualization.js';
 import { flowFromXml, flowModel, flowRunModeLabel, flowSignature, flowTouches, flowTypeLabel, type FlowTouches } from './action-flow.js';
 import { LoadingState } from './components/SalesforceState.js';
+import { AgentReferenceRow, AgentReferenceSearch } from './AgentReferenceList.js';
 
 export function AgentActionExplorer({ actions, selected, onOpen }: { actions: AgentAction[]; selected?: string; onOpen(action: AgentAction): void }) {
-  const groups = [...new Set(actions.map(action => action.owner))];
+  const [query, setQuery] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const search = query.trim().toLowerCase();
+  const visible = actions.filter(action => [action.name, action.label, action.owner, action.target, action.description].join(' ').toLowerCase().includes(search));
+  const groups = [...new Set(visible.map(action => action.owner))];
   return <section className="sf-as-section af-action-explorer" aria-label="Agent actions">
-    <div className="sf-as-section-label">Actions <span>{actions.length}</span></div>
+    <div className="sf-reference-head"><h2>Actions <span className="sf-reference-count">{search ? `${visible.length} / ${actions.length}` : actions.length}</span></h2></div>
+    <p className="sf-reference-note">Declared in this agent’s current draft</p>
+    <AgentReferenceSearch label="Search actions" placeholder="Search actions or targets…" value={query} onChange={setQuery} />
     {!actions.length && <p className="sf-as-empty">Actions declared in this script appear here.</p>}
-    {groups.map(owner => <details key={owner} open><summary title={owner}>{owner.replace(/^(start_agent|subagent|topic)\./, '')}</summary>{actions.filter(a => a.owner === owner).map(action => {
-      const type = parseActionTarget(action.target)?.kind;
-      return <button className={`sf-as-tree-btn${selected === action.id ? ' is-active' : ''}`} key={action.id} title={`${action.owner} · ${action.target || 'No target'}`} aria-label={`Inspect ${action.name} in ${action.owner}`} onClick={() => onOpen(action)}><span className={`af-action-icon ${type ?? ''}`} aria-hidden="true">{type === 'apex' ? '{ }' : type === 'flow' ? '⑂' : '↗'}</span><span className="sf-as-tree-name">{action.name}</span><span className="sf-as-tree-meta">{type ?? 'Action'}</span></button>;
-    })}</details>)}
+    {Boolean(actions.length && !visible.length) && <p className="sf-as-empty" role="status">No matching actions.</p>}
+    {groups.map(owner => {
+      const rows = visible.filter(a => a.owner === owner);
+      return <details key={`${owner}:${Boolean(search)}`} open={Boolean(search) || !collapsed.has(owner)} onToggle={e => {
+        if (search) return;
+        const open = e.currentTarget.open;
+        setCollapsed(prev => { const next = new Set(prev); if (open) next.delete(owner); else next.add(owner); return next; });
+      }}><summary className="sf-reference-group-label" title={owner}>{owner.replace(/^(start_agent|subagent|topic)\./, '')}<span>{rows.length}</span></summary>{rows.map(action => {
+        const kind = parseActionTarget(action.target)?.kind ?? 'action';
+        const label = action.label && action.label !== action.name ? `${action.label} (${action.name})` : action.name;
+        return <AgentReferenceRow key={action.id} kind={kind} icon={kind === 'apex' ? <Braces size={16} /> : kind === 'flow' ? <Workflow size={16} /> : <ExternalLink size={16} />} name={action.label || action.name} reference={action.target || action.name} meta={kind === 'apex' ? 'Apex' : kind === 'flow' ? 'Flow' : 'Action'} active={selected === action.id} title={`${action.owner} · ${action.name} · ${action.target || 'No target'}`} aria-label={`Inspect ${label} in ${action.owner}`} onClick={() => onOpen(action)} />;
+      })}</details>;
+    })}
   </section>;
 }
 
@@ -35,12 +51,12 @@ export function contractRows(declared: ActionParameter[], actual?: ActionParamet
 }
 const isMismatch = (row: ContractRow) => row.status === 'not-declared' || row.status === 'missing';
 
-function Parameters({ title, rows, verified, contractLabel, compare = true }: { title: string; rows: ContractRow[]; verified: boolean; contractLabel: string; compare?: boolean }) {
+function Parameters({ title, rows, verified, contractLabel, compare = true, onOpenType }: { title: string; rows: ContractRow[]; verified: boolean; contractLabel: string; compare?: boolean; onOpenType?(ref: string): void }) {
   // Without an agent declaration (a dependency tab) there is nothing to compare: list what the implementation exposes.
   if (!compare) return <section className="af-action-parameters"><h3>{title}</h3>{!rows.length ? <p className="af-action-note">{verified ? 'No parameters.' : 'Unverified.'}</p> : <table><thead><tr><th>Parameter</th><th>{contractLabel}</th></tr></thead><tbody>{rows.map(({ name, actual }) =>
     <tr key={name}><th scope="row"><code>{name}</code><small>{actual?.description}</small></th><td><code>{actual?.type}</code>{actual?.required && <small>Required</small>}</td></tr>)}</tbody></table>}</section>;
   return <section className="af-action-parameters"><h3>{title}</h3>{!rows.length ? <p className="af-action-note">{verified ? 'No parameters.' : 'No parameters declared in this action.'}</p> : <table><thead><tr><th>Parameter</th><th>Agent definition</th><th>{contractLabel}</th></tr></thead><tbody>{rows.map(({ name, declared: script, actual: target, status }) => {
-    return <tr key={name}><th scope="row"><code>{name}</code><small>{script?.description || target?.description}</small></th><td>{script ? <><code>{script.type}</code>{script.required && <small>Required</small>}</> : <span className="af-action-warning">Not declared</span>}</td><td>{status === 'unverified' ? <span className="af-action-note">Unverified</span> : target ? <><code>{target.type}</code><small>{target.required ? 'Required · ' : ''}{script ? 'Name matched' : 'Not mapped in agent'}</small></> : <span className="af-action-warning">Missing in target</span>}</td></tr>;
+    return <tr key={name}><th scope="row"><code>{name}</code><small>{script?.description || target?.description}</small></th><td>{script ? <><code>{script.type}</code>{script.lightningType && <div className="af-action-type">{onOpenType ? <button type="button" className="af-text-button" onClick={() => onOpenType(script.lightningType!)}><Shapes size={12} aria-hidden="true" />{script.lightningType} ↗</button> : <code>{script.lightningType}</code>}</div>}{script.required && <small>Required</small>}</> : <span className="af-action-warning">Not declared</span>}</td><td>{status === 'unverified' ? <span className="af-action-note">Unverified</span> : target ? <><code>{target.type}</code><small>{target.required ? 'Required · ' : ''}{script ? 'Name matched' : 'Not mapped in agent'}</small></> : <span className="af-action-warning">Missing in target</span>}</td></tr>;
   })}</tbody></table>}</section>;
 }
 
@@ -96,9 +112,9 @@ export function sourceDrift(kind: 'apex' | 'flow', project?: ActionSource, orgSo
 /** The agent a dependency tab was reached from; the header links back to it. */
 export interface ActionContext { label: string; title?: string; onOpen(): void }
 
-export function AgentActionPanel({ pluginId, projectId, action, org, context, onReveal, onOpenTarget, onOriginChange, initialOrigin = 'project' }: {
+export function AgentActionPanel({ pluginId, projectId, action, org, context, onReveal, onOpenTarget, onOpenType, onOriginChange, initialOrigin = 'project' }: {
   pluginId: string; projectId?: string; action: AgentAction; org: PublicOrgView | null; context?: ActionContext;
-  initialOrigin?: 'project' | 'org'; onOriginChange?(origin: 'project' | 'org'): void; onReveal(line: number): void; onOpenTarget(target: string, origin: 'project' | 'org'): void;
+  initialOrigin?: 'project' | 'org'; onOriginChange?(origin: 'project' | 'org'): void; onReveal(line: number): void; onOpenTarget(target: string, origin: 'project' | 'org'): void; onOpenType?(ref: string): void;
 }) {
   const [origin, setOrigin] = useState(initialOrigin);
   useEffect(() => setOrigin(initialOrigin), [initialOrigin]);
@@ -204,7 +220,7 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
     <div className={`af-action-content${tab === 'implementation' || tab === 'source' ? ' is-implementation' : ''}`}>
       {tab === 'implementation' && loadState(parsed?.kind === 'flow' ? flowMap : code)}
       {tab === 'source' && loadState(code)}
-      {tab === 'parameters' && <><p className="af-action-note">{dependency ? `Inputs and outputs ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'} exposes. Open an action in the agent to compare them with its declarations.` : `Compare action declarations with ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'}. Name matches do not verify type compatibility or runtime behavior.`}</p>{data?.contractMessage && <p className="af-action-note">{data.contractMessage}</p>}{current?.error && <p role="alert" className="af-action-note">{current.error}</p>}<Parameters title="Inputs" rows={inputRows} verified={actualInputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /><Parameters title="Outputs" rows={outputRows} verified={actualOutputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /></>}
+      {tab === 'parameters' && <><p className="af-action-note">{dependency ? `Inputs and outputs ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'} exposes. Open an action in the agent to compare them with its declarations.` : `Compare action declarations with ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'}. Name matches do not verify type compatibility or runtime behavior.`}</p>{data?.contractMessage && <p className="af-action-note">{data.contractMessage}</p>}{current?.error && <p role="alert" className="af-action-note">{current.error}</p>}<Parameters onOpenType={onOpenType} title="Inputs" rows={inputRows} verified={actualInputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /><Parameters onOpenType={onOpenType} title="Outputs" rows={outputRows} verified={actualOutputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /></>}
       {tab === 'usage' && <><p className="af-action-note">Static references in the current editor draft. Availability does not mean the action executed.</p><button className="af-target-link" onClick={() => onReveal(action.line)}>Go to action definition · line {action.line} ↗</button>{action.uses.length ? action.uses.map((use, i) => <article className="af-action-use" key={i}><button onClick={() => onReveal(use.line)}>{use.kind === 'run' ? 'Explicit run' : 'Available to the model'} <span>Line {use.line} ↗</span></button><pre>{use.code}</pre></article>) : <p className="af-action-note">No direct calls or model bindings found in this scope.</p>}</>}
     </div>
   </section>;

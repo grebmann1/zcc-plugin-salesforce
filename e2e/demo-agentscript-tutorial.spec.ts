@@ -306,9 +306,10 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
   }, projectId);
   const studio = page.getByTestId('salesforce-agent-script-panel');
-  const pane = (target: string) => studio.locator(`[data-testid="studio-view-${target}"]:visible`);
-  const editor = page.frameLocator('iframe[title="Agentforce playground"]');
   const side = page.getByTestId('plugin-panel-host-layout').getByTestId('thread-secondary-panel');
+  // Studio tools render in the host side panel beside the Salesforce tab.
+  const pane = (target: string) => side.locator(`[data-testid="studio-view-${target}"]:visible`);
+  const editor = page.frameLocator('iframe[title="Agentforce playground"]');
   const hold = (ms = 1500) => page.waitForTimeout(ms);
   const action = (name: string, input: Record<string, unknown> = {}) => page.evaluate(async ({ name, input, projectId }) => {
     const response = await fetch('/api/v1/plugins/salesforce/cli', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId, argv: ['action', name, '--input', JSON.stringify(input), '--json'] }) });
@@ -344,13 +345,25 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
   await page.evaluate(() => document.getElementById('tutorial-sync')!.remove());
   const start = Date.now();
   const mark = async (id: string) => { events.push({ id, time: (Date.now()-start)/1000 }); await page.screenshot({ path: join(demoDir!, `${id}.png`) }); };
-  const open = async (name: string) => tap(studio.getByRole('button', { name: `Open ${name} view`, exact: true }));
+  const TOOL_IDS: Record<string, string> = { Preview: 'preview', Tests: 'test', 'Graph view': 'graph', Actions: 'actions' };
+  const open = async (name: string) => {
+    if (!(await side.isVisible())) await tap(page.getByTestId('plugin-panel-host-layout').getByTestId('plugin-panel-secondary-show'));
+    const tab = side.locator('.thread-secondary-tabs').getByRole('button', { name, exact: true });
+    if (await tab.count()) return tap(tab);
+    if (name === 'Preview') return tap(studio.locator('.af-document-bar').getByRole('button', { name: 'Preview', exact: true }));
+    await tap(side.getByTestId('thread-secondary-new-tab').first());
+    const more = page.getByRole('menuitem', { name: 'More tools…' });
+    if (await more.isVisible().catch(() => false)) await tap(more);
+    await tap(side.getByTestId(`thread-new-tab-plugin-salesforce-studio-${TOOL_IDS[name]}`));
+  };
   const script = async () => tap(studio.getByRole('tablist', { name: 'Open files' }).getByRole('tab', { name: /^Script/ }));
   const hideSide = async () => { if (await side.isVisible()) await tap(side.getByTestId('thread-secondary-hide')); };
   try {
     await mark('01-open');
     await tap(page.getByRole('navigation', { name: 'acme-service navigation' }).getByRole('button', { name: 'Salesforce', exact: true }));
-    await tap(page.getByTestId('salesforce-workbench').getByRole('tab', { name: 'Agentforce', exact: true }));
+    const workbench = page.getByTestId('salesforce-workbench');
+    await tap(workbench.getByRole('button', { name: 'Open Salesforce tools', exact: true }));
+    await tap(workbench.getByRole('dialog', { name: 'Salesforce tools', exact: true }).locator('[data-section="agentforce"]'));
     await expect(studio).toBeVisible();
     await tap(page.getByRole('button', { name: 'Collapse sidebar', exact: true }).first());
     await hideSide();
@@ -379,21 +392,26 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     const preview = pane('preview').getByTestId('preview-workbench');
     await tap(preview.getByRole('group',{name:'Preview engine'}).getByRole('button',{name:'Simulate',exact:true}));
     await tap(preview.getByTestId('pw-start'));
-    await expect(preview.getByRole('button',{name:'End',exact:true})).toBeVisible();
+    await expect(preview.getByRole('button',{name:'End conversation',exact:true})).toBeVisible();
     await preview.getByLabel('Preview message',{exact:true}).pressSequentially('Can I return an item after 21 days?',{delay:35});
     await tap(preview.getByRole('button',{name:'Send preview message'}));
     await expect(preview.getByText(/Our return window is 14 days/)).toBeVisible(); await hold(2500);
     await mark('05-scenarios');
     await open('Tests');
     const tests = pane('tests').getByTestId('studio-tests-pane');
-    await tap(tests.getByRole('button',{name:'Simulations',exact:true}));
+    await tap(tests.getByRole('button',{name:'Batch simulations',exact:true}));
     const sims = tests.getByTestId('studio-simulations');
+    const defaults = ['Happy path','Missing details','Stay in scope'];
     for (let i=0;i<3;i++) {
-      await tap(sims.locator('.sf-sim-scenario').nth(i).getByRole('button'));
+      const back = sims.getByRole('button',{name:'← All scenarios',exact:true});
+      if (await back.isVisible()) await tap(back);
+      await tap(sims.getByRole('button',{name:`Edit ${defaults[i]}`,exact:true}));
       for (const key of ['name','persona','goal','opening','criteria'] as const) await sims.getByLabel(`Scenario ${i+1} ${key}`,{exact:true}).fill(scenarios[i][key]);
       await sims.getByLabel(`Scenario ${i+1} maximum turns`,{exact:true}).fill('1');
     }
-    await tap(sims.locator('.sf-sim-scenario').first().getByRole('button'));
+    const backToScenarios = sims.getByRole('button',{name:'← All scenarios',exact:true});
+    if (await backToScenarios.isVisible()) await tap(backToScenarios);
+    await tap(sims.getByRole('button',{name:`Edit ${scenarios[0].name}`,exact:true}));
     await sims.getByLabel('Scenario 1 criteria',{exact:true}).scrollIntoViewIfNeeded(); await hold(2200);
     await tap(sims.locator('summary').filter({hasText:'Run settings'}));
     await selectPicklistValue(sims.getByLabel('Parallel conversations',{exact:true}), '3'); await page.keyboard.press('Escape'); await hold(1000);
@@ -408,9 +426,9 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     await sims.getByRole('region',{name:'Conversation Return policy',exact:true}).scrollIntoViewIfNeeded();
     await hold(2500);
     await mark('08-handoff');
-    const healing=sims.getByRole('region',{name:'Self-healing',exact:true});
-    await selectPicklistValue(healing.getByLabel('Candidate attempts',{exact:true}), '3');
-    await tap(healing.getByRole('button',{name:'Start self-healing',exact:true}));
+    const healing=sims.getByRole('region',{name:'Improve with assistant',exact:true});
+    await expect(healing.locator('summary')).toContainText('up to 3 attempts');
+    await tap(healing.getByRole('button',{name:'Ask assistant to improve',exact:true}));
     await page.getByTestId('thread-command-input').evaluate(el => { el.scrollTop = 0; });
     await hold(1800);
     await page.screenshot({path:join(demoDir!,'agent-handoff.png')});
@@ -420,13 +438,14 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     const expand = page.getByRole('button',{name:'Expand sidebar',exact:true}).first();
     if (await expand.isVisible()) await tap(expand);
     await tap(page.getByRole('navigation',{name:'acme-service navigation'}).getByRole('button',{name:'Salesforce',exact:true}));
-    await tap(page.getByTestId('salesforce-workbench').getByRole('tab',{name:'Agentforce',exact:true}));
+    await tap(page.getByTestId('salesforce-workbench').getByRole('button',{name:'Open Salesforce tools',exact:true}));
+    await tap(page.getByTestId('salesforce-workbench').getByRole('dialog',{name:'Salesforce tools',exact:true}).locator('[data-section="agentforce"]'));
     const collapse = page.getByRole('button',{name:'Collapse sidebar',exact:true}).first();
     if (await collapse.isVisible()) await tap(collapse);
     await hideSide();
     await tap(studio.getByTestId(`salesforce-agent-script-file:${agentPath}`));
     await open('Tests');
-    await tap(tests.getByRole('button',{name:'Simulations',exact:true}));
+    await tap(tests.getByRole('button',{name:'Batch simulations',exact:true}));
     // These are the public CLI actions an authoring agent calls. No computer-use
     // capability is required by the end user or the self-healing controller.
     await mark('09-heal');
@@ -436,7 +455,7 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     await action('source.parse',{path:agentPath,source:candidate});
     writeFileSync(join(home,'simulation-hold'),'hold candidate for the recording');
     await action('selfHealing.evaluate',{runId,source:candidate});
-    await expect(healing.getByRole('status')).toContainText('Testing candidate',{timeout:15000});
+    await expect(healing.getByRole('status')).toContainText('Testing changes',{timeout:15000});
     await hold(1000);
     rmSync(join(home,'simulation-hold'));
     await expect.poll(async()=> (await action('selfHealing.status',{runId,waitMs:100})).run.status,{timeout:30000}).toBe('passed');
@@ -459,16 +478,16 @@ test('tutorial: build test and self-heal in the development app', async ({ app, 
     await expect.poll(()=>readFileSync(join(home,'acme-service',agentPath),'utf8')).toBe(candidate);
     await mark('11-confirm');
     await open('Preview');
-    const endPreview=preview.getByRole('button',{name:'End',exact:true});
+    const endPreview=preview.getByRole('button',{name:'End conversation',exact:true});
     if (await endPreview.isVisible()) await tap(endPreview);
     await tap(preview.getByTestId('pw-start'));
-    await expect(preview.getByRole('button',{name:'End',exact:true})).toBeVisible();
+    await expect(preview.getByRole('button',{name:'End conversation',exact:true})).toBeVisible();
     await preview.getByLabel('Preview message',{exact:true}).pressSequentially('Can I return an item after 21 days?',{delay:25});
     await tap(preview.getByRole('button',{name:'Send preview message'}));
     await expect(preview.getByText(/Our return window is 30 days/)).toBeVisible(); await hold(2500);
     await mark('12-finish');
     await open('Tests');
-    await tap(tests.getByRole('button',{name:'Simulations',exact:true}));
+    await tap(tests.getByRole('button',{name:'Batch simulations',exact:true}));
     await expect(sims.getByLabel('3 of 3 pass',{exact:true})).toBeVisible();
     await hold(3500);
     await mark('end');

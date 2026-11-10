@@ -1,0 +1,22 @@
+[
+  {
+    "id": "inapp-ask",
+    "line": "Ask your coding agent to add the missing tool, right here beside the editor."
+  },
+  {
+    "id": "inapp-work",
+    "line": "It updates the editor, checks the change, and reloads the plugin in place."
+  },
+  {
+    "id": "inapp-ready",
+    "line": "The export tool appears in the toolbar. No reinstall."
+  },
+  {
+    "id": "inapp-export",
+    "line": "Click it to export this agent's diagnostics, including its test results."
+  },
+  {
+    "id": "inapp-finish",
+    "line": "Keep working in the same editor, with the new tool ready to use."
+  }
+]
