@@ -3,7 +3,7 @@ import {
   QUERY_SQL_PATH, aggregateAnalytics, classifyFailure, interactionsSql, registerOrgAnalytics, sessionsSql, sqlRows, sqlTimestamp, windowStart,
 } from '../lib/org-analytics.js';
 import {
-  ANALYTICS_LIMITS, ORG_ANALYTICS_RPC, analyticsPeriodHours, isEscalatedEndType, isRecordedEndType, parseAnalyticsPeriod, summarizeAnalytics, summarizeEscalation,
+  ANALYTICS_LIMITS, ORG_ANALYTICS_RPC, mergeInventory, analyticsPeriodHours, isEscalatedEndType, isRecordedEndType, parseAnalyticsPeriod, summarizeAnalytics, summarizeEscalation,
   type AnalyticsAgentRow, type AnalyticsOverviewReady,
 } from '../lib/org-analytics-contract.js';
 
@@ -44,6 +44,14 @@ describe('contract', () => {
   });
 });
 
+describe('inventory', () => {
+  it('adds no-session rows for inventory agents only, case-insensitively', () => {
+    const merged = mergeInventory([row('Alpha', 3, 0, null)], ['alpha', 'Zed', 'Beta', 'Zed', '']);
+    expect(merged.map(r => r.agent)).toEqual(['Alpha', 'Beta', 'Zed']);
+    expect(merged[1]).toMatchObject({ sessions: 0, interactions: 0, interactionsPerSession: null, escalated: null });
+  });
+});
+
 describe('sql and parsing', () => {
   it('builds timestamps from the clock only', () => {
     const now = Date.parse('2026-11-10T12:00:00Z');
@@ -67,6 +75,7 @@ describe('sql and parsing', () => {
       { agent: '', day: '2026-01-02', end_type: 'Completed', sessions: 5 },
       { agent: 'b', day: 'x', end_type: null, sessions: -3 },
     ], [{ agent: 'a', interactions: 20 }, { agent: '', interactions: 1 }]);
+    expect(aggregateAnalytics([{ agent: 'q', day: '2026-01-01', end_type: 'X', sessions: 2 }], []).agents[0]!.interactionsPerSession).toBeNull();
     const a = out.agents.find(r => r.agent === 'a')!;
     expect(a).toMatchObject({ sessions: 10, recorded: 6, escalated: 1, interactions: 20, interactionsPerSession: 2 });
     expect(out.agents.find(r => r.agent === 'b')).toMatchObject({ sessions: 0, escalated: null, interactionsPerSession: null });

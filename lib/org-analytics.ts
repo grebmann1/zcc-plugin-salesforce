@@ -95,7 +95,7 @@ export function aggregateAnalytics(sessionRows: Array<Record<string, unknown>>, 
       agent,
       sessions: entry.sessions,
       interactions: total,
-      interactionsPerSession: entry.sessions > 0 ? total / entry.sessions : null,
+      interactionsPerSession: entry.sessions > 0 && total > 0 ? total / entry.sessions : null,
       recorded: entry.recorded,
       escalated: entry.recorded > 0 ? entry.escalated : null,
     };
