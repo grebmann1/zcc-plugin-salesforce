@@ -19,7 +19,8 @@ describe('ScorersView', () => {
     );
     render(<ScorersView pluginId="salesforce" path={PATH} visible call={call as never} />);
     expect(await screen.findByText('-100 pts')).toBeTruthy();
-    expect(screen.getAllByText('Not scored')).toHaveLength(2);
+    expect(screen.getByText('Not scored')).toBeTruthy();
+    expect(screen.getByText('Score only')).toBeTruthy();
     expect(screen.getByText('3.00')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Topic' }));
     expect(screen.getByLabelText('Topic failures').textContent).toContain('refund please');

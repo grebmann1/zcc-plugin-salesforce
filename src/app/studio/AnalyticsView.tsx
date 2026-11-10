@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import {
-  ANALYTICS_PERIODS, DEFAULT_ANALYTICS_PERIOD, ORG_ANALYTICS_RPC, summarizeAnalytics,
+  ANALYTICS_PERIODS, DEFAULT_ANALYTICS_PERIOD, ORG_ANALYTICS_RPC, mergeInventory, summarizeAnalytics,
   type AnalyticsPeriod, type OrgAnalyticsOverview,
 } from '../../../lib/org-analytics-contract.js';
 
@@ -23,7 +23,7 @@ const STYLES = `
 .sf-analytics th { color:var(--sf-muted); font-weight:500; }
 .sf-analytics .sf-analytics-muted { color:var(--sf-muted); margin:0; overflow-wrap:anywhere; }
 .sf-analytics-trend { display:flex; align-items:flex-end; gap:2px; height:48px; }
-.sf-analytics-trend i { flex:1; min-width:2px; background:var(--sf-accent); border-radius:2px 2px 0 0; }
+.sf-analytics-trend i { flex:1; min-width:2px; max-width:24px; background:var(--sf-accent); border-radius:2px 2px 0 0; }
 `;
 
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
@@ -36,11 +36,20 @@ export function AnalyticsView({ pluginId, projectId, visible, call = callPluginR
   const [period, setPeriod] = useState<AnalyticsPeriod>(DEFAULT_ANALYTICS_PERIOD);
   const [agent, setAgent] = useState('all');
   const [state, setState] = useState<{ status: 'loading' } | { status: 'error'; text: string } | { status: 'done'; overview: OrgAnalyticsOverview }>({ status: 'loading' });
+  /** Agent names of the org inventory; undefined while unread, null when it could not be read. */
+  const [inventory, setInventory] = useState<string[] | null | undefined>(undefined);
   const seq = useRef(0);
 
   const load = useCallback(async (refresh = false) => {
     const mine = ++seq.current;
     setState({ status: 'loading' });
+    void (async () => {
+      try {
+        const inv = await call(pluginId, 'agents.list', projectId ? { projectId } : {}) as { ok?: boolean; data?: { agents?: Array<{ name?: unknown }> } } | null;
+        const names = inv && inv.ok !== false && Array.isArray(inv.data?.agents) ? inv.data!.agents!.map(row => row.name).filter((n): n is string => typeof n === 'string') : null;
+        if (mine === seq.current) setInventory(names);
+      } catch { if (mine === seq.current) setInventory(null); }
+    })();
     try {
       const reply = await call(pluginId, ORG_ANALYTICS_RPC.overview, { ...(projectId ? { projectId } : {}), period, ...(refresh ? { refresh: true } : {}) }) as
         (OrgAnalyticsOverview | { ok: false; error?: string }) | null;
@@ -58,7 +67,7 @@ export function AnalyticsView({ pluginId, projectId, visible, call = callPluginR
   else if (state.status === 'error') body = <p className="sf-analytics-muted" role="alert">Analytics could not be read: {state.text}</p>;
   else if (state.overview.state === 'unavailable') body = <p className="sf-analytics-muted" role="status" data-reason={state.overview.reason}>{state.overview.message}</p>;
   else {
-    const overview = state.overview;
+    const overview = inventory ? { ...state.overview, agents: mergeInventory(state.overview.agents, inventory) } : state.overview;
     const known = overview.agents.some(row => row.agent === agent);
     const summary = summarizeAnalytics(overview, known ? agent : 'all');
     const peak = Math.max(1, ...summary.daily.map(day => day.sessions));
@@ -75,11 +84,12 @@ export function AnalyticsView({ pluginId, projectId, visible, call = callPluginR
         : <p className="sf-analytics-muted">No sessions started in this window.</p>}
       <table><thead><tr><th>Agent</th><th>Sessions</th><th>Interactions</th><th>Per session</th><th>Escalated</th></tr></thead><tbody>
         {summary.agents.map(row => <tr key={row.agent}><td>{row.agent}</td>
-          <td>{row.sessions > 0 ? row.sessions : 'No sessions'}</td><td>{row.sessions > 0 ? row.interactions : '—'}</td>
+          <td>{row.sessions > 0 ? row.sessions : 'No sessions'}</td><td>{row.sessions === 0 ? '—' : row.interactions > 0 ? row.interactions : 'None recorded'}</td>
           <td>{row.interactionsPerSession === null ? '—' : row.interactionsPerSession.toFixed(1)}</td>
-          <td>{row.escalated === null ? NOT_RECORDED : `${row.escalated} of ${row.recorded}`}</td></tr>)}</tbody></table>
+          <td>{row.sessions === 0 ? '—' : row.escalated === null ? NOT_RECORDED : `${row.escalated} of ${row.recorded}`}</td></tr>)}</tbody></table>
       {summary.agents.length === 0 && <p className="sf-analytics-muted">No agent matches this filter.</p>}
       {overview.truncated && <p className="sf-analytics-muted" role="status">The answer was cut at its size bound; figures cover only what was read.</p>}
+      {inventory === null && <p className="sf-analytics-muted">Agents without sessions are not listed: the org agent list could not be read.</p>}
       <p className="sf-analytics-muted">Window from {new Date(overview.since).toLocaleString()} · read {new Date(overview.at).toLocaleString()}</p>
     </>;
   }

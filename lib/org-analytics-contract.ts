@@ -36,7 +36,7 @@ export interface AnalyticsAgentRow {
   agent: string;
   sessions: number;
   interactions: number;
-  /** interactions / sessions, null with no sessions. */
+  /** interactions / sessions, null with no sessions or no interaction records. */
   interactionsPerSession: number | null;
   /** Sessions with a recorded end type (anything but NOT_SET). */
   recorded: number;
@@ -139,4 +139,20 @@ export function summarizeAnalytics(overview: AnalyticsOverviewReady, agent: stri
     },
     escalation: summarizeEscalation(agents),
   };
+}
+
+/**
+ * Adds a no-session row for every inventory agent the sessions did not mention, so an agent without data is stated rather
+ * than omitted. Names match case-insensitively; sessions of agents outside the inventory stay listed.
+ */
+export function mergeInventory(agents: readonly AnalyticsAgentRow[], names: readonly string[]): AnalyticsAgentRow[] {
+  const seen = new Set(agents.map(row => row.agent.toLowerCase()));
+  const missing: AnalyticsAgentRow[] = [];
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    missing.push({ agent: name, sessions: 0, interactions: 0, interactionsPerSession: null, recorded: 0, escalated: null });
+  }
+  return [...agents, ...missing.sort((a, b) => a.agent.localeCompare(b.agent))];
 }

@@ -27,6 +27,20 @@ describe('AnalyticsView', () => {
     expect(screen.getAllByText('Not recorded').length).toBeGreaterThan(0);
     expect(screen.getByText('No sessions started in this window.')).toBeTruthy();
   });
+  it('lists inventory agents without sessions, and says when the inventory is unreadable', async () => {
+    const call = vi.fn(async (_p: string, method: string) => method === 'agents.list' ? { ok: true, data: { agents: [{ name: 'a' }, { name: 'Zed_Agent' }, { name: 7 }] } } : ready());
+    render(<AnalyticsView pluginId="salesforce" visible call={call as never} />);
+    expect(await screen.findByRole('cell', { name: 'Zed_Agent' })).toBeTruthy();
+    expect(screen.queryByText(/could not be read/)).toBeNull();
+    cleanup();
+    render(<AnalyticsView pluginId="salesforce" visible call={(async (_p: string, method: string) => { if (method === 'agents.list') throw new Error('x'); return ready(); }) as never} />);
+    expect(await screen.findByText(/org agent list could not be read/)).toBeTruthy();
+  });
+  it('says none recorded when sessions have no interaction records', async () => {
+    const call = vi.fn(async () => ready({ agents: [{ agent: 'A', sessions: 5, interactions: 0, interactionsPerSession: null, recorded: 0, escalated: null }] }));
+    render(<AnalyticsView pluginId="salesforce" visible call={call as never} />);
+    expect(await screen.findByText('None recorded')).toBeTruthy();
+  });
   it('reports not recorded instead of zero, and truncation', async () => {
     const call = vi.fn(async () => ready({ truncated: true, agents: [{ agent: 'A', sessions: 5, interactions: 5, interactionsPerSession: 1, recorded: 0, escalated: null }] }));
     render(<AnalyticsView pluginId="salesforce" visible call={call as never} />);

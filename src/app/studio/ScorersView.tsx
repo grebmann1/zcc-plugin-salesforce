@@ -69,7 +69,7 @@ export function ScorersView({ pluginId, projectId, path, visible, call = callPlu
           const failing = open === row.name ? failingCases(latest, row.name) : [];
           return <tr key={row.name}><td>{row.fail > 0 ? <button type="button" aria-expanded={open === row.name} onClick={() => setOpen(open === row.name ? null : row.name)}>{row.label}</button> : row.label}
             {failing.length > 0 && <ul aria-label={`${row.label} failures`}>{failing.map(item => <li key={item.number}>#{item.number} {item.utterance}</li>)}</ul>}</td>
-            <td>{percent(row.rate)}</td><td>{row.pass}</td><td>{row.fail}</td><td>{row.errors}</td>
+            <td>{row.rate === null ? (row.averageScore !== null ? 'Score only' : 'Not scored') : percent(row.rate)}</td><td>{row.pass}</td><td>{row.fail}</td><td>{row.errors}</td>
             <td>{row.averageScore === null ? 'Not scored' : row.averageScore.toFixed(2)}</td>
             <td className={delta === null ? undefined : delta >= 0 ? 'sf-scorers-up' : 'sf-scorers-down'}>{delta === null ? 'No earlier run' : `${delta >= 0 ? '+' : ''}${Math.round(delta * 100)} pts`}</td></tr>;
         })}</tbody></table> : <p className="sf-scorers-note">This run reported no scorer results.</p>}
