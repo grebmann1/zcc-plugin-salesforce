@@ -171,7 +171,8 @@ export default definePluginApp((app) => {
       icon: STUDIO_TOOL_ICONS[tool.id],
       layout: 'flush',
       scopes: isBuilderTool(tool.id) ? ['plugin-page', 'thread', 'agent-session'] : ['plugin-page'],
-      pages: ['salesforce'],
+      // Studio also runs inside Salesforce home's `orgs` nav page.
+      pages: ['salesforce', 'orgs'],
       component: studioPanelTool(tool.id, tool.title)
     });
   }

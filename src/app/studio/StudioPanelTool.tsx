@@ -5,6 +5,7 @@ import { STUDIO_TOKENS } from './studio-tokens.js';
 import { attachStudioTool, useStudioMounted, useStudioToolScope, type PanelTool } from './studio-tool-bridge.js';
 import { isBuilderTool } from '../../../lib/studio-builder-contract.js';
 import { ThreadBuilderTool } from './ThreadBuilderTool.js';
+import { useHubStudioProject } from './studio-hub-context.js';
 
 const HOST_STYLES = `${STUDIO_TOKENS}
 .sf-panel-tool-host { display:flex; flex-direction:column; height:100%; min-height:0; background:var(--sf-surface); color:var(--sf-text); }
@@ -13,11 +14,13 @@ const HOST_STYLES = `${STUDIO_TOKENS}
 `;
 
 /** The host side-panel tab for one Studio tool; Studio renders the content (studio-tool-bridge). */
-export function StudioPanelTool({ tool, title, projectId, tabId, studioId }: { tool: PanelTool; title: string; projectId?: string; tabId?: string; studioId?: string }) {
+export function StudioPanelTool({ tool, title, projectId, tabId, studioId, surface }: { tool: PanelTool; title: string; projectId?: string; tabId?: string; studioId?: string; surface?: PluginThreadPanelProps['surface'] }) {
   const context = useZccContext();
+  const hubProject = useHubStudioProject();
+  const toolProject = projectId ?? context.projectId ?? (surface === 'plugin-page' && context.surface !== 'plugin-view' ? hubProject : undefined);
   // Restored host tabs follow the runtime in this window, not their previous window.
   const owner = context.sidePanel === true ? context.surface === 'plugin-view' ? context.resourceId ?? 'window' : undefined : studioId;
-  const key = useStudioToolScope(projectId, owner);
+  const key = useStudioToolScope(toolProject, owner);
   const mounted = useStudioMounted(key);
   const slot = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -36,7 +39,7 @@ export function studioPanelTool(tool: PanelTool, title: string): ComponentType<P
   const Tool = (props: PluginThreadPanelProps) => {
     if (props.surface !== 'plugin-page' && isBuilderTool(tool)) return <ThreadBuilderTool {...props} tool={tool} />;
     const studioId = props.params && typeof props.params === 'object' && !Array.isArray(props.params) && typeof props.params.studioId === 'string' ? props.params.studioId : undefined;
-    return <StudioPanelTool tool={tool} title={title} projectId={props.projectId} tabId={props.tabId} studioId={studioId} />;
+    return <StudioPanelTool tool={tool} title={title} projectId={props.projectId} tabId={props.tabId} studioId={studioId} surface={props.surface} />;
   };
   Tool.displayName = `StudioPanelTool(${tool})`;
   return Tool;

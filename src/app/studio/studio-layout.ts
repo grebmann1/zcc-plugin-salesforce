@@ -7,10 +7,10 @@ export type CompactTool = 'code' | AgentScriptTool;
 export const VIEW_TARGETS = ['preview', 'tests', 'graph', 'org-preview'] as const;
 export type ViewTarget = typeof VIEW_TARGETS[number];
 export const isViewTarget = (value: unknown): value is ViewTarget => VIEW_TARGETS.includes(value as ViewTarget);
-export type RailTab = 'assistant' | 'actions' | 'comments' | 'preview' | 'test' | 'graph' | 'org-preview' | BuilderTool;
+export type RailTab = 'assistant' | 'agents' | 'actions' | 'comments' | 'preview' | 'test' | 'graph' | 'org-preview' | BuilderTool;
 /**
  * `agent` is an agent's Script tab, `view` one of its Preview / Tests / Graph / Org preview views (one per kind),
- * `org` the Org agents browser: beside a host side panel it opens here instead of as a panel tool.
+ * `org` project-level org workspaces, including the legacy Org agents browser.
  */
 export interface EditorTab { id: string; kind: 'agent' | 'apex' | 'flow' | 'type' | 'lwc' | 'org' | 'view'; label: string; path?: string; target?: string }
 export interface AgentRef { path: string; label: string }
@@ -97,7 +97,7 @@ function parseTabs(value: unknown): EditorTab[] {
   }
   return tabs;
 }
-const parseRail = (value: unknown): RailTab | null => value === 'assistant' || value === 'actions' || value === 'comments' || value === 'preview' || value === 'test' || value === 'graph' || value === 'org-preview' || isBuilderTool(value) ? value : null;
+const parseRail = (value: unknown): RailTab | null => value === 'assistant' || value === 'agents' || value === 'actions' || value === 'comments' || value === 'preview' || value === 'test' || value === 'graph' || value === 'org-preview' || isBuilderTool(value) ? value : null;
 export const viewRail = (target: ViewTarget): RailTab => target === 'tests' ? 'test' : target;
 
 function parseWorkspace(value: unknown): Workspace {
@@ -247,6 +247,17 @@ export function dockStudioViews(state: StudioLayoutState): StudioLayoutState {
       activeTab: selected ? scriptTabId(agent.path) : current.activeTab,
       rail: selected ? viewRail(selected.target as ViewTarget) : current.rail,
     }));
+  }
+  // Older Studio builds opened the agent browser as a project document. Remove
+  // only that tool tab; org tests, analytics, and all source documents survive.
+  const agentTabs = next.orgTabs.filter(tab => tab.target === 'agents');
+  if (agentTabs.length) {
+    const closing = new Set(agentTabs.map(tab => tab.id));
+    const orgTabs = next.orgTabs.filter(tab => !closing.has(tab.id));
+    const workspaces = Object.fromEntries(Object.entries(next.workspaces).map(([path, ws]) => [path, closing.has(ws.activeTab ?? '')
+      ? { ...ws, activeTab: ws.tabs.find(tab => tab.id === scriptTabId(path))?.id ?? ws.tabs[0]?.id ?? null, rail: 'agents' as const }
+      : ws]));
+    next = derive({ ...next, orgTabs, workspaces });
   }
   return next;
 }

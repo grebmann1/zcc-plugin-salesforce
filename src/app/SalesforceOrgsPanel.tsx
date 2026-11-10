@@ -13,6 +13,7 @@ import { HUB_STYLES } from './components/hub-styles.js';
 import { SalesforcePanelFrame } from './components/ui.js';
 import { useResource } from './components/use-resource.js';
 import { readRecentAgents, type RecentAgent } from './recent-agents.js';
+import { registerHubStudioProject } from './studio/studio-hub-context.js';
 
 const PROJECT_KEY = 'salesforce:hub:project';
 const TAB_ID = 'salesforce';
@@ -60,6 +61,7 @@ export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string 
 
   // A remembered project that is gone falls back to the first Salesforce project.
   const project = projects.find(row => row.id === chosen) ?? projects[0] ?? null;
+  useEffect(() => activeView === 'agentforce' && project ? registerHubStudioProject(project.id) : undefined, [activeView, project?.id]);
   useEffect(() => { setWindowError(null); }, [project?.id]);
   const names = useMemo(() => new Map(projects.map(row => [row.id, row.name])), [projects]);
   const recentRows = recent.filter(row => names.has(row.projectId));

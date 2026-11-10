@@ -25,7 +25,7 @@ afterEach(() => { cleanup(); resetStudioToolBridge(); });
 
 describe('studio-tool-bridge', () => {
   it('names the panel tools and their actions', () => {
-    expect(PANEL_TOOLS).toEqual(['graph', 'preview', 'test', 'org-preview', 'actions', 'comments', ...BUILDER_TOOLS]);
+    expect(PANEL_TOOLS).toEqual(['agents', 'graph', 'preview', 'test', 'org-preview', 'actions', 'comments', ...BUILDER_TOOLS]);
     for (const tool of PANEL_TOOLS) {
       expect(isPanelTool(tool)).toBe(true);
       expect(panelToolActionId(tool)).toBe(`studio-${tool}`);

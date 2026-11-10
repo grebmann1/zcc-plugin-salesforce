@@ -227,6 +227,41 @@ it('migrates saved editor views into each agent’s panel while keeping document
   expect(dockStudioViews(DEFAULT_LAYOUT)).toBe(DEFAULT_LAYOUT);
 });
 
+it('docks legacy agent browsers without removing org workspaces or source documents', () => {
+  const { result } = renderHook(() => useStudioLayout('agent-browser-migration'));
+  const browser = { id: 'org-agents', kind: 'org' as const, label: 'Org agents', target: 'agents' };
+  const orgTests = { id: 'org-tests', kind: 'org' as const, label: 'Tests', target: 'tests' };
+  const analytics = { id: 'org-analytics', kind: 'org' as const, label: 'Analytics', target: 'analytics' };
+  const dependency = { id: 'apex:Foo', kind: 'apex' as const, label: 'Foo', target: 'apex://Foo' };
+  act(() => {
+    result.current.openAgent('a.agent', 'A');
+    result.current.openTab(dependency);
+    result.current.openTab(orgTests);
+    result.current.openTab(analytics);
+    result.current.openTab(browser);
+    result.current.openAgent('b.agent', 'B');
+    result.current.openTab(dependency);
+  });
+  act(() => result.current.dockViews());
+  expect(result.current.state.tabs.map(tab => tab.id)).toEqual(['agent:b.agent', dependency.id, orgTests.id, analytics.id]);
+  expect(result.current.state.activeTab).toBe(dependency.id);
+  act(() => result.current.selectAgent('a.agent'));
+  expect(result.current.state.activeTab).toBe('agent:a.agent');
+  expect(result.current.state.rail).toBe('agents');
+  expect(result.current.state.tabs.map(tab => tab.id)).toEqual(['agent:a.agent', dependency.id, orgTests.id, analytics.id]);
+  expect(dockStudioViews(result.current.state)).toBe(result.current.state);
+  expect(readStudioLayout('salesforce:studio:agent-browser-migration').rail).toBe('agents');
+});
+
+it('removes the legacy agent browser before any agent is open', () => {
+  const { result } = renderHook(() => useStudioLayout('empty-agent-browser-migration'));
+  act(() => result.current.openTab({ id: 'org-agents', kind: 'org', label: 'Org agents', target: 'agents' }));
+  act(() => result.current.dockViews());
+  expect(result.current.state.tabs).toEqual([]);
+  expect(result.current.state.activeTab).toBeNull();
+  expect(result.current.state.rail).toBe('agents');
+});
+
 it.each([0, MAX_EDITOR_TABS - 1])('repairs a full workspace missing Script without dropping its active tab at index %s', activeIndex => {
   const tabs = Array.from({ length: MAX_EDITOR_TABS }, (_, index) => ({ id: `apex:Dependency${index}`, kind: 'apex' as const, label: `Dependency${index}`, target: `apex://Dependency${index}` }));
   const activeTab = tabs[activeIndex].id;

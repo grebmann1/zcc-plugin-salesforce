@@ -8,6 +8,7 @@ import { SalesforceOrgsPanel } from './SalesforceOrgsPanel.js';
 import { takeQueuedAgentScriptOpen } from './agent-script-open.js';
 import { readProjectView } from './project-view.js';
 import { recordRecentAgent } from './recent-agents.js';
+import { useHubStudioProject } from './studio/studio-hub-context.js';
 
 vi.mock('./SalesforceProjectTab.js', () => ({ SalesforceProjectTab: (props: { projectId: string; view: string; onViewChange(view: string): void }) => <div data-testid="workbench" data-project={props.projectId} data-view={props.view}><button onClick={() => props.onViewChange('deployments')}>Switch to Deployments</button><button onClick={() => recordRecentAgent(props.projectId, 'force-app/Support.agent')}>Open agent</button></div> }));
 
@@ -39,8 +40,28 @@ function Hub({ initialPath = '' }: { initialPath?: string }) {
   return <SalesforceUiProvider client={client}><SalesforceOrgsPanel pluginId="salesforce" subPath={subPath} /></SalesforceUiProvider>;
 }
 const mount = (initialPath = '') => render(<Hub initialPath={initialPath} />);
+function HubProjectProbe() {
+  return <output data-testid="hub-studio-project">{useHubStudioProject() ?? 'unbound'}</output>;
+}
 
 describe('Salesforce hub', () => {
+  it('binds side-panel tools only to the active Studio project and clears the binding on return or unmount', async () => {
+    const probe = render(<HubProjectProbe />);
+    const hub = mount('agentforce');
+    await screen.findByTestId('workbench');
+    expect(screen.getByTestId('hub-studio-project').textContent).toBe('sf');
+    choosePicklistValue(screen.getByRole('button', { name: 'Project' }), 'draft');
+    expect(screen.getByTestId('hub-studio-project').textContent).toBe('draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Deployments' }));
+    expect(screen.getByTestId('hub-studio-project').textContent).toBe('unbound');
+    fireEvent.click(screen.getByRole('button', { name: 'Salesforce home' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Studio', exact: true }));
+    expect(screen.getByTestId('hub-studio-project').textContent).toBe('draft');
+    hub.unmount();
+    expect(screen.getByTestId('hub-studio-project').textContent).toBe('unbound');
+    probe.unmount();
+  });
+
   it('opens tools within Salesforce and keeps their project context explicit', async () => {
     mount();
     const select = await screen.findByRole('button', { name: 'Project' }) as HTMLSelectElement;
