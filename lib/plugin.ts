@@ -24,6 +24,7 @@ import { evalCaseOutcomes } from './eval-spec.js';
 import { registerStudioExplorer } from './studio-explorer.js';
 import { registerAgentScriptDocuments } from './agent-script-document.js';
 import { registerOrgTests } from './org-tests.js';
+import { registerOrgAnalytics } from './org-analytics.js';
 import { registerSimulations } from './simulation-batches.js';
 import { registerSelfHealing } from './self-healing.js';
 import { createAgentDraft, draftDestination, DRAFT_PROJECT } from './agent-drafts.js';
@@ -908,6 +909,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   registerAgentScriptDocuments(studio);
   // Org tests read the org through the Studio read grants, like Release "Load versions"; a Studio click approves the read.
   registerOrgTests(studio, { sdkFor: args => clickedSdk(readGrants.wrap(sdk, releaseScope()), args) });
+  registerOrgAnalytics(studio, { sdkFor: args => clickedSdk(readGrants.wrap(sdk, releaseScope()), args) });
   // A batch is approved once, like one lab run; its lanes then start without asking again.
   const simulationOptions = {
     agent: agentAt,

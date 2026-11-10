@@ -11,6 +11,7 @@ import { RELEASE_RPC, type ReleasePrepared } from '../../../lib/release-contract
 import { FIX_LOOP_LIMITS, type FixLoop } from '../../../lib/fix-loop.js';
 import { declined, type Message } from './approval-notice.js';
 import { OrgTestsView } from './OrgTestsView.js';
+import { ScorersView } from './ScorersView.js';
 import { LocalSuiteDetail } from './LocalSuiteDetail.js';
 import { runSuiteJob, SuiteStoppedError } from './suite-job-rpc.js';
 import { SuiteRunProgress } from './SuiteRunProgress.js';
@@ -249,6 +250,7 @@ export function TestsPane(props: TestsPaneProps) {
   const [roleplayShown, setRoleplayShown] = useState(view === 'roleplay');
   const [simulationsShown, setSimulationsShown] = useState(view === 'simulations');
   const [orgShown, setOrgShown] = useState(view === 'org');
+  const [scorersShown, setScorersShown] = useState(view === 'scorers');
   const [scenariosShown, setScenariosShown] = useState(view === 'scenarios');
   const library = useScenarioLibrary({ pluginId, projectId, path, call, enabled: !props.casesOnly });
   const [roleplayScenario, setRoleplayScenario] = useState<ScenarioSelection>();
@@ -485,6 +487,7 @@ export function TestsPane(props: TestsPaneProps) {
     if (next === 'roleplay') setRoleplayShown(true);
     if (next === 'simulations') setSimulationsShown(true);
     if (next === 'org') setOrgShown(true);
+    if (next === 'scorers') setScorersShown(true);
     if (next === 'scenarios') setScenariosShown(true);
   };
   useEffect(() => { if (props.simulationsFocus && !props.casesOnly) { setView('simulations'); setSimulationsShown(true); } }, [props.simulationsFocus, props.casesOnly]);
@@ -498,6 +501,7 @@ export function TestsPane(props: TestsPaneProps) {
   const simulationsView = simulationsShown && <div className="sf-tp-subview" hidden={view !== 'simulations'}><SimulationsView pluginId={pluginId} projectId={projectId} threadId={threadId} path={path} source={source} dirty={dirty}
     visible={visible && view === 'simulations'} onAskAgent={onAskAgent} onShowCases={() => showView('cases')} focus={props.simulationsFocus ?? null} onFocusHandled={props.onSimulationsFocusHandled} scenarioLibrary={{ ...controls, selection: batchScenario }} call={props.call} /></div>;
   const renderLocalSuite = (suite: ScenarioSuite) => <LocalSuiteDetail key={`${projectId}:${suite.path}`} suite={suite} editor={{ ...props, visible: visible && view === 'org' }} Cases={TestsPane} />;
+  const scorersView = scorersShown && <div className="sf-tp-subview" hidden={view !== 'scorers'}><ScorersView pluginId={pluginId} projectId={projectId} path={path} visible={visible && view === 'scorers'} call={props.call} /></div>;
   const orgView = orgShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'org'}><OrgTestsView key={`${pluginId}:${projectId}:${path}`} pluginId={pluginId} projectId={projectId} threadId={threadId} path={path} visible={visible && view === 'org'} onAskAgent={onAskAgent} call={props.call} requestApproval={props.requestApproval} renderLocalSuite={renderLocalSuite} /></div>;
 
   if (!path) {
@@ -506,6 +510,7 @@ export function TestsPane(props: TestsPaneProps) {
       {view === 'cases' && <div className="sf-tp-empty">Open an agent file to test it.</div>}
       {scenariosView}
       {orgView}
+      {scorersView}
       {simulationsView}
       {roleplayView}
     </section>;
@@ -633,6 +638,7 @@ export function TestsPane(props: TestsPaneProps) {
       </div>
       {scenariosView}
       {orgView}
+      {scorersView}
       {simulationsView}
       {roleplayView}
     </section>

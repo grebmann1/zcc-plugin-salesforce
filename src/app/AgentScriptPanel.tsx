@@ -2,7 +2,7 @@ import type { ContextPreset, ContextPresetList } from '../../lib/preview-context
 import { closeSalesforceControls, resumeSalesforceControls, useSalesforceControl } from './useSalesforceControl.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Cloud, Code, FlaskConical, Files, MessageSquare, Network, PanelRight, Pin, Play, Search, Zap } from 'lucide-react';
+import { Bot, Cloud, Code, BarChart3, FlaskConical, Files, MessageSquare, Network, PanelRight, Pin, Play, Search, Zap } from 'lucide-react';
 import { callPluginRpc, useRealtime, useSettings, useZccContext, useZccNavigate, useWindowCloseHandler } from '@zana-ai/zcc-plugin-sdk/app';
 import { type AgentScriptDialect, type PublicOrgView } from '../../lib/types.js';
 import { applyProposalText } from '../../lib/agent-doc-apply.js';
@@ -45,6 +45,7 @@ import { compilerDiagnostic, parseCompileReply, type CompileState } from './stud
 import { TESTS_PANE_STYLES, TestsPane } from './studio/TestsPane.js';
 import type { SimulationsFocus } from './studio/SimulationsView.js';
 import { OrgTestsView, type OrgTestsFocus } from './studio/OrgTestsView.js';
+import { AnalyticsView } from './studio/AnalyticsView.js';
 import { LocalSuiteDetail } from './studio/LocalSuiteDetail.js';
 import { createStudioCommandExecutor } from './studio/studio-commands.js';
 import { commandAuthor, holdCommand, holdReason, REVEAL_COMMANDS, type HeldReveal } from './studio/follow-gate.js';
@@ -141,6 +142,8 @@ const HIDDEN_COMPACT: readonly AgentScriptTool[] = ['files'];
 const ORG_AGENTS_TAB: EditorTab = { id: 'org-agents', kind: 'org', label: 'Org agents', target: 'agents' };
 /** The org's Testing Center definitions and runs, full width beside the editor's other tabs. */
 const ORG_TESTS_TAB: EditorTab = { id: 'org-tests', kind: 'org', label: 'Tests', target: 'tests' };
+/** Fleet analytics from the org's Agentforce session tracing, full width. */
+const ANALYTICS_TAB: EditorTab = { id: 'org-analytics', kind: 'org', label: 'Analytics', target: 'analytics' };
 const HIDDEN_WIDE: readonly AgentScriptTool[] = ['files'];
 const NO_HIDDEN: readonly AgentScriptTool[] = [];
 const stripItem = (id: CompactTool, badge?: number): StripItem => ({ id, title: TOOL_TITLE[id], icon: TOOL_ICON[id], ...(badge ? { badge } : {}) });
@@ -1597,9 +1600,10 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   const openAgentTab = (path: string) => { if (path === activePath) selectTab(`agent:${path}`); else void openFile(path); };
   // The Org agents tab stays mounted while open, so its search and retrieve status survive opening an agent.
   const orgTabActive = activeEditorTab?.kind === 'org';
-  const orgAgentsActive = orgTabActive && activeEditorTab?.target !== 'tests';
+  const orgAgentsActive = orgTabActive && activeEditorTab?.target !== 'tests' && activeEditorTab?.target !== 'analytics';
+  const analyticsActive = orgTabActive && activeEditorTab?.target === 'analytics';
   const orgTestsActive = orgTabActive && activeEditorTab?.target === 'tests';
-  const orgAgentsView = studio.tabs.some(tab => tab.kind === 'org' && tab.target !== 'tests') ? (
+  const orgAgentsView = studio.tabs.some(tab => tab.kind === 'org' && tab.target !== 'tests' && tab.target !== 'analytics') ? (
     <div className="sf-etab-view" data-testid="studio-org-agents-view" style={orgAgentsActive ? undefined : { display: 'none' }}>{orgAgentsPanel(orgAgentsActive)}</div>
   ) : false;
   // Like Org agents, the Org tests tab stays mounted while open so a followed run keeps its place.
@@ -1612,6 +1616,11 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
             editor={{ pluginId, projectId, threadId, path: activePath, source, dirty, proposalSource, visible: orgTestsActive, roleplay: null, onAskAgent: composeFor,
               onShowPath: caseId => { setGraphFocus(current => ({ node: null, seq: current.seq + 1, caseId })); openTool('graph'); } }} />} />
       </section>
+    </div>
+  ) : false;
+  const analyticsView = studio.tabs.some(tab => tab.id === ANALYTICS_TAB.id) ? (
+    <div className="sf-etab-view" data-testid="studio-analytics-view" style={analyticsActive ? undefined : { display: 'none' }}>
+      <AnalyticsView pluginId={pluginId} projectId={projectId} visible={analyticsActive} />
     </div>
   ) : false;
   const targetTabView = showTargetTab && activeEditorTab && !orgTabActive && activeEditorTab.kind !== 'view' ? (
@@ -1805,8 +1814,8 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   ) : false;
   const activity = wide ? (
     <ToolStrip orientation="vertical" label="Studio activity" active={studio.explorerOpen ? 'files' : null}
-      items={[stripItem('files'), { id: 'org-tests', title: 'Tests', icon: <FlaskConical size={16} aria-hidden="true" /> }, { id: 'search', title: 'Go to file', icon: <Search size={16} aria-hidden="true" /> }]}
-      onSelect={id => { if (id === 'files') patch({ explorerOpen: !studio.explorerOpen }); else if (id === 'org-tests') openOrgTests(); else setQuickOpen(true); }} />
+      items={[stripItem('files'), { id: 'org-tests', title: 'Tests', icon: <FlaskConical size={16} aria-hidden="true" /> }, { id: 'analytics', title: 'Analytics', icon: <BarChart3 size={16} aria-hidden="true" /> }, { id: 'search', title: 'Go to file', icon: <Search size={16} aria-hidden="true" /> }]}
+      onSelect={id => { if (id === 'files') patch({ explorerOpen: !studio.explorerOpen }); else if (id === 'org-tests') openOrgTests(); else if (id === 'analytics') openTab(ANALYTICS_TAB); else setQuickOpen(true); }} />
   ) : false;
 
   const splitMode = hostPanel ? 'editor' : swapCompact ? (compactTool === 'code' ? 'editor' : 'panel') : 'split';
@@ -1915,6 +1924,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
           {targetTabView}
           {orgAgentsView}
           {orgTestsView}
+          {analyticsView}
           {renderViews()}
           {playgroundFailed ? (
           <div data-testid="salesforce-agent-script-playground-error"><SalesforceState kind="error" art="code" title="Editor unavailable">{PLAYGROUND_LOAD_ERROR}</SalesforceState></div>

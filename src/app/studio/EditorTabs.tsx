@@ -124,7 +124,7 @@ export function EditorTabs({ tabs, active, dirtyId, problems, problemsId, traili
             event.preventDefault(); onSelect(tabs[next].id);
             event.currentTarget.closest('.sf-etabs')?.querySelectorAll<HTMLButtonElement>('.sf-etab-label')[next]?.focus();
           }}>
-          {KIND_MARK[tab.kind] && <span className="sf-etab-kind">{tab.kind === 'org' && tab.target === 'tests' ? 'TESTS' : KIND_MARK[tab.kind]}</span>}
+          {KIND_MARK[tab.kind] && <span className="sf-etab-kind">{tab.kind === 'org' && tab.target === 'tests' ? 'TESTS' : tab.kind === 'org' && tab.target === 'analytics' ? 'OBSERVE' : KIND_MARK[tab.kind]}</span>}
           <span className="sf-etab-name">{tab.kind === 'agent' ? 'Script' : tab.label}</span>
           {tab.kind !== 'agent' && tab.kind !== 'org' && tab.kind !== 'view' && <span className="sf-etab-ro">read-only</span>}
           {dirtyId === tab.id && <span className="sf-etab-dirty" role="img" aria-label="Unsaved changes">●</span>}

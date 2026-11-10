@@ -125,7 +125,7 @@ describe('AgentScriptPanel studio layout', () => {
     const iframe = el.querySelector('iframe');
     await ready(el);
     expect(el.querySelector('[data-testid="salesforce-agent-script-explorer"]')).toBeTruthy();
-    expect([...el.querySelectorAll('[aria-label="Studio activity"] button')].map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'Tests', 'Go to file']);
+    expect([...el.querySelectorAll('[aria-label="Studio activity"] button')].map(button => button.getAttribute('aria-label'))).toEqual(['Files', 'Tests', 'Analytics', 'Go to file']);
     expect(el.querySelector('[data-testid="stub-ask-agent"]')).toBeTruthy();
     expect(el.querySelector('[role="tablist"][aria-label]')).toBeTruthy();
     expect(el.textContent).toContain('Problems');

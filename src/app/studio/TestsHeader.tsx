@@ -1,9 +1,10 @@
 import { TestsHelp } from './TestsHelp.js';
 
-export type TestsView = 'scenarios' | 'cases' | 'org' | 'simulations' | 'roleplay';
+export type TestsView = 'scenarios' | 'cases' | 'org' | 'simulations' | 'roleplay' | 'scorers';
 const VIEWS = [
   ['scenarios', 'Scenarios', 'Create reusable customer setups and starting variables.'],
   ['cases', 'Test cases', 'Replay saved scenarios and check expected outcomes for this agent.'],
+  ['scorers', 'Scorers', 'See how the org\'s test scorers moved across runs for this agent.'],
   ['simulations', 'Batch simulations', 'Run multiple AI customer conversations across scenarios and repeats.'],
   ['roleplay', 'Role-play', 'Explore one AI customer conversation with its setup, chat and traces.']
 ] as const;
@@ -15,7 +16,7 @@ export function TestsHeader({ view, onViewChange, dirty, suite, scenarioCount = 
 }) {
   const label = view === 'cases' || casesOnly
     ? suite ? `${suite.path} · ${suite.cases.length} saved test case${suite.cases.length === 1 ? '' : 's'}` : 'Saved test cases'
-    : view === 'org' ? 'Local suites and org tests' : `${scenarioCount} shared scenario${scenarioCount === 1 ? '' : 's'} · this agent`;
+    : view === 'scorers' ? 'Org test scorers · this agent' : view === 'org' ? 'Local suites and org tests' : `${scenarioCount} shared scenario${scenarioCount === 1 ? '' : 's'} · this agent`;
   return <header className="sf-tests-header" data-testid="tests-header">
     <style>{`
 .sf-tests-header { display:flex; flex-direction:column; gap:8px; flex:none; min-width:0; }
