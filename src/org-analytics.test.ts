@@ -51,6 +51,7 @@ describe('sql and parsing', () => {
     const sql = sessionsSql('2026-11-03 12:00:00');
     expect(sql).toContain("TIMESTAMP '2026-11-03 12:00:00'");
     expect(sql).toContain(`LIMIT ${ANALYTICS_LIMITS.groups + 1}`);
+    expect(interactionsSql('2026-11-03 12:00:00')).toContain('COUNT(DISTINCT i.ssot__Id__c)');
     expect(interactionsSql('2026-11-03 12:00:00')).toContain(`LIMIT ${ANALYTICS_LIMITS.agents + 1}`);
   });
   it('reads rows by column name', () => {

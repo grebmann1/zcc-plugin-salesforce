@@ -45,7 +45,7 @@ export function sessionsSql(since: string): string {
 }
 /** Interactions per agent over the same sessions. */
 export function interactionsSql(since: string): string {
-  return `SELECT p.ssot__AiAgentApiName__c AS agent, COUNT(i.ssot__Id__c) AS interactions FROM ${SESSION} s JOIN ${PARTICIPANT} p ON p.ssot__AiAgentSessionId__c = s.ssot__Id__c JOIN ${INTERACTION} i ON i.ssot__AiAgentSessionId__c = s.ssot__Id__c WHERE ${WHERE(since)} GROUP BY p.ssot__AiAgentApiName__c ORDER BY interactions DESC LIMIT ${ANALYTICS_LIMITS.agents + 1}`;
+  return `SELECT p.ssot__AiAgentApiName__c AS agent, COUNT(DISTINCT i.ssot__Id__c) AS interactions FROM ${SESSION} s JOIN ${PARTICIPANT} p ON p.ssot__AiAgentSessionId__c = s.ssot__Id__c JOIN ${INTERACTION} i ON i.ssot__AiAgentSessionId__c = s.ssot__Id__c WHERE ${WHERE(since)} GROUP BY p.ssot__AiAgentApiName__c ORDER BY interactions DESC LIMIT ${ANALYTICS_LIMITS.agents + 1}`;
 }
 
 /** Rows of a query-sql answer as objects keyed by column name. Unknown shapes yield no rows. */
