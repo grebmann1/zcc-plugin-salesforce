@@ -269,22 +269,22 @@ describe('AgentScriptPanel beside the host side panel', () => {
     expect(panelScope).toHaveBeenLastCalledWith({ id: HELP, view: HELP });
   });
 
-  it('keeps equal agent paths in different hub projects in separate assistant scopes', async () => {
+  it('keeps equal agent paths in different hub projects in separate assistant scopes and names each project', async () => {
     contextProjectId = null;
     panelScope = vi.fn();
     const first = await mount(QC); await ready(first);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', QC]), view: QC });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', QC]), view: QC, projectId: 'proj-1' });
     const second = await mount({ subPath: QC, projectId: 'proj-2' }); await ready(second);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', QC]), view: QC });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', QC]), view: QC, projectId: 'proj-2' });
   });
 
   it('isolates no-file assistant drafts for different hub projects without attaching an agent view', async () => {
     contextProjectId = null;
     panelScope = vi.fn();
     const first = await mount(); await ready(first);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', null]) });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', null]), projectId: 'proj-1' });
     const second = await mount({ projectId: 'proj-2' }); await ready(second);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', null]) });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', null]), projectId: 'proj-2' });
   });
 
   it('opens tools in the host panel and renders them there, keeping their state across tab switches', async () => {

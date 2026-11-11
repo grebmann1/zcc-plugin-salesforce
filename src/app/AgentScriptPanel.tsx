@@ -255,9 +255,12 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   const layoutScope = windowResource ? `${draftScope}|agent:${windowResource}` : context.surface === 'plugin-view' ? `${draftScope}|window` : draftScope;
   useLayoutEffect(() => {
     // The global Salesforce hub has no host project identity. Include the
-    // selected project so equal relative paths cannot share panel drafts.
-    const id = !context.projectId && projectId ? JSON.stringify([projectId, activePath]) : activePath;
-    navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}) } : null);
+    // selected project so equal relative paths cannot share panel drafts, and
+    // name it so the panel's conversations run there, not in the default
+    // project (hosts without project scopes ignore the field).
+    const hub = !context.projectId && projectId ? projectId : undefined;
+    const id = hub ? JSON.stringify([hub, activePath]) : activePath;
+    navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}), ...(hub ? { projectId: hub } : {}) } : null);
     return () => { navigateRef.current.setPanelScope?.(null); };
   }, [activePath, context.projectId, projectId]);
   const studioWindow = context.surface === 'plugin-view';
