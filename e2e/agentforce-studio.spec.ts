@@ -4223,6 +4223,60 @@ test('Agentforce Studio: copied code pastes as a selection reference in the assi
   await expect(timeline).toContainText('force-app/Support.agent:1–3');
 });
 
+test('AgentScript Studio sidepanel regression: a hub conversation runs in the selected project and reads its agent', async ({ app, home }, testInfo) => {
+  test.setTimeout(240_000);
+  const page = app.window;
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1700, height: 1050 });
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(plugin => plugin.id === 'salesforce')?.status), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+  // Reproduce the report: a non-DX "Default Project" is registered first, so the
+  // host would otherwise start a hub side-panel conversation there.
+  mkdirSync(join(home, 'scratch'), { recursive: true });
+  const ids = await page.evaluate(async ({ scratch, dx }) => {
+    const first = await window.cc.projects.add(scratch); if (!first.ok) throw Error(first.message);
+    const second = await window.cc.projects.add(dx); if (!second.ok) throw Error(second.message);
+    return { scratchId: first.value.id, dxId: second.value.id };
+  }, { scratch: join(home, 'scratch'), dx: join(home, 'dx') });
+  await page.evaluate(() => window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' }));
+  await page.getByTestId('nav-salesforce/orgs').click();
+  const hub = page.getByTestId('salesforce-orgs-panel');
+  // The hub preselects the Salesforce (DX) project, as it did for the user.
+  expect(await readPicklistValue(hub.getByRole('button', { name: 'Project', exact: true }))).toBe(ids.dxId);
+  await hub.getByRole('button', { name: 'Open Studio', exact: true }).click();
+  await expect(page).toHaveURL(/\/plugins\/salesforce\/orgs\/agentforce$/);
+  const studio = studioPanel(page);
+  await studio.getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  await expect(studio.locator('.af-document-name')).toHaveText('Support.agent');
+
+  await page.getByTestId('plugin-panel-agent-show').click();
+  const composer = page.getByTestId('panel-agent-tab-composer');
+  const input = composer.getByTestId('thread-command-input');
+  await input.fill('HUB_PROJECT_SCOPE simplify my instructions');
+  await expect(composer.getByTestId('thread-command-send')).toBeEnabled({ timeout: 30_000 });
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('hub-panel-composer.png'));
+  await composer.getByTestId('thread-command-send').click();
+  await expect(page.getByTestId('panel-agent-tab-chat').getByTestId('thread-timeline')).toContainText('HUB_PROJECT_SCOPE', { timeout: 30_000 });
+
+  const thread = await page.evaluate(async () => {
+    // Panel conversations are hidden from the main list; the plugin's panel-thread index owns them.
+    const listed = await (await fetch('/api/v1/plugins/salesforce/panel-threads?panel=orgs&limit=20')).json() as { threads?: Array<{ id: string; projectId: string; title?: string }> };
+    return (listed.threads ?? []).find((row) => (row.title ?? '').includes('HUB_PROJECT_SCOPE'));
+  });
+  expect(thread, 'hub side-panel conversation is indexed under the orgs panel').toBeTruthy();
+  expect(thread!.projectId, 'hub side-panel conversation runs in the hub project, not the default one').toBe(ids.dxId);
+  expect(thread!.projectId).not.toBe(ids.scratchId);
+  // The thread's own tool call: sf_workbench files.read in that thread's project.
+  const read = await page.evaluate(async ({ projectId, threadId }) => {
+    const response = await fetch('/api/v1/plugins/salesforce/cli', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ argv: ['action', 'files.read', '--input', JSON.stringify({ path: 'force-app/Support.agent' }), '--json'], projectId, threadId }) });
+    return JSON.parse((await response.json()).stdout);
+  }, { projectId: thread!.projectId, threadId: thread!.id });
+  expect(read).toMatchObject({ ok: true, file: { path: 'force-app/Support.agent' } });
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('hub-panel-thread.png'));
+  expect(errors).toEqual([]);
+});
+
 test('AgentScript Studio sidepanel regression: hub, project tab and detached window keep every tool beside Script', async ({ app, home }, testInfo) => {
   test.setTimeout(300_000);
   const main = app.window;
