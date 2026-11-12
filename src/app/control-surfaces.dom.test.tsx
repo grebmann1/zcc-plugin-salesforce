@@ -11,6 +11,7 @@ import { DeploymentsPanel } from './panels/DeploymentsPanel.js';
 import { OperationsPanel } from './panels/OperationsPanel.js';
 import { DebugLogsPanel } from './panels/DebugLogsPanel.js';
 import { PLAYGROUND_BRIDGE_SOURCE } from './playground-bridge.js';
+import { queueAgentScriptOpen, takeQueuedAgentScriptOpen } from './agent-script-open.js';
 const controls = vi.hoisted(() => new Map<string, Parameters<typeof useSalesforceControl>[0]>());
 vi.mock('./useSalesforceControl.js', async original => ({ ...await original<object>(), useSalesforceControl: (options: Parameters<typeof useSalesforceControl>[0]) => { controls.set(options.surface, options); } }));
 const rpc = vi.fn();
@@ -19,6 +20,7 @@ const props = { pluginId: 'salesforce', projectId: 'p', threadId: 'thread' };
 const operation = { id: 'op', kind: 'apex.test', title: 'Test', state: 'succeeded', org, at: Date.now(), projectId: 'p' };
 beforeEach(() => {
   controls.clear(); localStorage.clear(); rpc.mockReset();
+  for (const projectId of ['p', 'other']) takeQueuedAgentScriptOpen(projectId);
   rpc.mockImplementation(async (_id, method, input) => {
     if (method === 'status') return { ok: true, dxProject: true, defaultOrg: 'dev', orgs: [], projectRoot: '/proj' };
     if (method === 'org') return { ok: true, org };
@@ -90,6 +92,54 @@ it('opens an agent sent from a card in another window, and only for the person\'
   await execute('workbench', 'view.open', { view: 'agentforce' });
   await waitFor(() => expect(controls.has('agentforce')).toBe(true));
   expect(controls.get('agentforce')!.state().path).toBe('Help.agent');
+});
+it.each([false, true])('opens the card file in Studio from Overview (tab already mounted: %s)', async mountedFirst => {
+  if (!mountedFirst) queueAgentScriptOpen('p', 'Help.agent');
+  render(<SalesforceProjectTab {...props} />);
+  if (mountedFirst) {
+    expect(controls.get('workbench')!.state().view).toBe('overview');
+    await act(async () => queueAgentScriptOpen('p', 'Help.agent'));
+  }
+  await waitFor(() => expect(controls.get('workbench')!.state().view).toBe('agentforce'));
+  await waitFor(() => expect(controls.get('agentforce')?.state().path).toBe('Help.agent'));
+  expect(localStorage.getItem('salesforce:project-tab:p')).toBe('agentforce');
+  expect(takeQueuedAgentScriptOpen('p')).toBeNull();
+});
+it('preserves another project card until navigation reaches its owning project', async () => {
+  const mounted = render(<SalesforceProjectTab {...props} />);
+  await act(async () => queueAgentScriptOpen('other', 'Other.agent'));
+  expect(controls.get('workbench')!.state().view).toBe('overview');
+  expect(controls.has('agentforce')).toBe(false);
+  mounted.rerender(<SalesforceProjectTab {...props} projectId="other" />);
+  await waitFor(() => expect(controls.get('workbench')!.state().view).toBe('agentforce'));
+  await waitFor(() => expect(controls.get('agentforce')?.state().path).toBe('Other.agent'));
+  expect(controls.get('agentforce')?.projectId).toBe('other');
+  expect(rpc).toHaveBeenCalledWith('salesforce', 'agentDoc.open', expect.objectContaining({ projectId: 'other', path: 'Other.agent' }));
+  expect(takeQueuedAgentScriptOpen('other')).toBeNull();
+});
+it('notifies a containing route and withdraws the queued-open listener on unmount', async () => {
+  const onViewChange = vi.fn();
+  const mounted = render(<SalesforceProjectTab {...props} view="overview" onViewChange={onViewChange} />);
+  await act(async () => queueAgentScriptOpen('p', 'Help.agent'));
+  expect(onViewChange).toHaveBeenCalledWith('agentforce');
+  mounted.rerender(<SalesforceProjectTab {...props} view="agentforce" onViewChange={onViewChange} />);
+  await waitFor(() => expect(controls.get('agentforce')?.state().path).toBe('Help.agent'));
+  mounted.unmount(); onViewChange.mockClear();
+  queueAgentScriptOpen('p', 'After.agent');
+  expect(onViewChange).not.toHaveBeenCalled();
+  expect(takeQueuedAgentScriptOpen('p')).toBe('After.agent');
+});
+it.each(['window', 'detached'])('does not consume card requests owned by the main project tab in a %s host', async host => {
+  if (host === 'window') (globalThis as any).__ZCC_PLUGIN_RUNTIME__.useZccContext = () => ({ projectId: 'p', surface: 'plugin-view', resourceId: 'Owned.agent' });
+  const mounted = render(<SalesforceProjectTab {...props} {...(host === 'detached' ? { detached: { notice: null, focusWindow: vi.fn() } } : {})} />);
+  await act(async () => queueAgentScriptOpen('p', 'Other.agent'));
+  expect(takeQueuedAgentScriptOpen('p')).toBe('Other.agent');
+  if (host === 'window') {
+    await waitFor(() => expect(controls.get('agentforce')?.state().path).toBe('Owned.agent'));
+  } else {
+    expect(controls.get('workbench')!.state().view).toBe('overview');
+    expect(mounted.container.querySelector('iframe')).toBeNull();
+  }
 });
 it.each([false, true])('opens a cross-window card in an already mounted empty Studio (editor ready: %s)', async ready => {
   (globalThis as any).__ZCC_PLUGIN_RUNTIME__.useZccContext = () => ({ projectId: 'p', surface: 'plugin-view' });
