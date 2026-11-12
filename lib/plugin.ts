@@ -205,10 +205,22 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
     fs: deps
   });
   const rpcHandlers = new Map<string, (args: unknown) => unknown>();
+  /** A thread panel without a project resolves the thread's own project, never the shared default. */
+  const threadProjectArgs = async (args: unknown, strict: boolean): Promise<unknown> => {
+    const input = args && typeof args === 'object' ? args as Record<string, unknown> : null;
+    if (!input || input.projectId || typeof input.threadId !== 'string' || !input.threadId) return args;
+    const thread = await zcc.sdk.threads.get({ threadId: input.threadId }).catch(() => null);
+    // Composer status names the thread it serves, so an unknown thread is an error there; other callers keep the shared context.
+    if (!thread?.projectId) {
+      if (strict) throw new ProjectContextError('The thread project is unavailable.');
+      return args;
+    }
+    return { ...input, projectId: thread.projectId };
+  };
   const registerRpc = (name: string, handler: (args: unknown) => unknown) => {
     rpcHandlers.set(name, handler);
     zcc.rpc.method(name, async (args) => {
-      try { return await contexts.run(args, () => handler(args)); }
+      try { const scoped = await threadProjectArgs(args, name === 'status'); return await contexts.run(scoped, () => handler(scoped)); }
       catch (error) {
         return { ok: false, code: error instanceof ProjectContextError ? error.code : 'failed', error: error instanceof Error ? error.message : String(error) };
       }
@@ -392,11 +404,6 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   registerRpc('status', async (args) => {
     const input = args && typeof args === 'object' ? args as Record<string, unknown> : {};
     if (input.refresh === true) connections.refreshOrgs();
-    if (!input.projectId && typeof input.threadId === 'string' && input.threadId) {
-      const thread = await zcc.sdk.threads.get({ threadId: input.threadId });
-      if (!thread?.projectId) throw new ProjectContextError('The thread project is unavailable.');
-      return contexts.run({ ...input, projectId: thread.projectId }, readStatus);
-    }
     return readStatus();
   });
   registerRpc('orgs', async (args) => {
@@ -537,6 +544,8 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   });
   const orgAgents = new OrgAgentService({ execSf: deps.execSf, connect: () => sdk.connect() });
   zcc.onDispose(() => orgAgents.dispose());
+  const publishAgentFileChanged = (args: unknown, path: string) =>
+    zcc.realtime.publish(STUDIO_CHANGED_CHANNEL, { projectId: rpcString(args, 'projectId') || contexts.current()?.projectId, path, kind: 'files' });
   registerRpc('agents.list', async () => ({ ok: true, data: await orgAgents.list() }));
   // The global Salesforce page picks the project to open the Studio in.
   registerRpc('hub.projects', async () => ({ ok: true, projects: await listHubProjects(await zcc.sdk.projects.list(), zcc.storage.kv, deps) }));
@@ -548,12 +557,14 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   registerRpc('agents.draft.create', async args => {
     const { root } = await resolveAgentFilesRoot(args);
     const file = createAgentDraft(root, args as AgentDraftInput);
-    zcc.realtime.publish('files.changed', { projectId: contexts.current()?.projectId });
+    // The open Studio lists the new agent without a refresh, whoever created it.
+    publishAgentFileChanged(args, file.path);
     return { ok: true, file };
   });
   registerRpc('agents.retrieve.start', async args => {
     const { root } = await resolveAgentFilesRoot(args);
-    return { ok: true, ...await orgAgents.start(root, args) };
+    // A retrieve an agent starts still refreshes the open Studio's files and editor.
+    return { ok: true, ...await orgAgents.start(root, args, file => publishAgentFileChanged(args, file.path)) };
   });
   registerRpc('agents.retrieve.status', async args => {
     const { root } = await resolveAgentFilesRoot(args);
@@ -654,8 +665,6 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
     delete data.presetId;
     data.contextVariables = preset.values;
   };
-  const publishAgentFileChanged = (args: unknown, path: string) =>
-    zcc.realtime.publish(STUDIO_CHANGED_CHANNEL, { projectId: rpcString(args, 'projectId') || contexts.current()?.projectId, path, kind: 'files' });
   registerRpc('agentFiles.create', async (args) => {
     const path = rpcString(args, 'path');
     const content = args && typeof args === 'object' ? (args as { content?: unknown }).content : undefined;

@@ -24,11 +24,12 @@ export function AgentActionExplorer({ actions, selected, onOpen }: { actions: Ag
     {Boolean(actions.length && !visible.length) && <p className="sf-as-empty" role="status">No matching actions.</p>}
     {groups.map(owner => {
       const rows = visible.filter(a => a.owner === owner);
-      return <details key={`${owner}:${Boolean(search)}`} open={Boolean(search) || !collapsed.has(owner)} onToggle={e => {
+      // The click records the choice synchronously: a search can remount the group before an async toggle event lands.
+      return <details key={`${owner}:${Boolean(search)}`} open={Boolean(search) || !collapsed.has(owner)}><summary className="sf-reference-group-label" title={owner} onClick={e => {
         if (search) return;
-        const open = e.currentTarget.open;
-        setCollapsed(prev => { const next = new Set(prev); if (open) next.delete(owner); else next.add(owner); return next; });
-      }}><summary className="sf-reference-group-label" title={owner}>{owner.replace(/^(start_agent|subagent|topic)\./, '')}<span>{rows.length}</span></summary>{rows.map(action => {
+        e.preventDefault();
+        setCollapsed(prev => { const next = new Set(prev); if (next.has(owner)) next.delete(owner); else next.add(owner); return next; });
+      }}>{owner.replace(/^(start_agent|subagent|topic)\./, '')}<span>{rows.length}</span></summary>{rows.map(action => {
         const kind = parseActionTarget(action.target)?.kind ?? 'action';
         const label = action.label && action.label !== action.name ? `${action.label} (${action.name})` : action.name;
         return <AgentReferenceRow key={action.id} kind={kind} icon={kind === 'apex' ? <Braces size={16} /> : kind === 'flow' ? <Workflow size={16} /> : <ExternalLink size={16} />} name={action.label || action.name} reference={action.target || action.name} meta={kind === 'apex' ? 'Apex' : kind === 'flow' ? 'Flow' : 'Action'} active={selected === action.id} title={`${action.owner} · ${action.name} · ${action.target || 'No target'}`} aria-label={`Inspect ${label} in ${action.owner}`} onClick={() => onOpen(action)} />;
