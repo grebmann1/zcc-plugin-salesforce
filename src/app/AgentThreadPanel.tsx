@@ -4,7 +4,7 @@ import type { AgentDocProposal, AgentDocSnapshot } from '../../lib/agent-doc-con
 import { applyProposalText } from '../../lib/agent-doc-apply.js';
 import { lineDiff, type DiffLine } from '../../lib/line-diff.js';
 import type { AgentAction } from '../../lib/agent-action-model.js';
-import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, countProblems, type StudioComment } from '../../lib/studio-contract.js';
+import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, countProblems, type ScenarioSuite, type StudioComment } from '../../lib/studio-contract.js';
 import type { PublicOrgView } from '../../lib/types.js';
 import { orgSessionLabel } from '../../lib/org-session.js';
 import { useAgentScriptDoc } from './agent-doc/useAgentScriptDoc.js';
@@ -13,10 +13,14 @@ import { AgentActionExplorer, AgentActionPanel } from './AgentActionPanel.js';
 import { AgentTypesView, AGENT_TYPES_STYLES, type OpenAgentType } from './AgentTypesView.js';
 import { AGENT_ACTION_STYLES } from './agent-action-styles.js';
 import { AgentScriptGraphPanel } from './AgentScriptGraphPanel.js';
-import { AgentforcePreviewPanel } from './AgentforcePreviewPanel.js';
+import { AgentforcePreviewPanel, type AgentPreviewControl, type AgentPreviewState } from './AgentforcePreviewPanel.js';
+import { useSalesforceControl, controlText } from './useSalesforceControl.js';
+import { useStudioView } from './studio/useStudioView.js';
+import type { ControlState, UiCommand } from '../../lib/workbench-control.js';
+import { parsePreviewContext } from '../../lib/preview-context.js';
 import { CommentsPane } from './studio/CommentsPane.js';
 import { runSummary } from './studio/TestsPane.js';
-import { useSuites } from './studio/useSuites.js';
+import { useSuiteList } from './studio/useSuites.js';
 import { fetchConnectedOrg } from './org-rpc.js';
 import { agentSuitePath } from '../../lib/graph-coverage.js';
 import { queueAgentScriptOpen } from './agent-script-open.js';
@@ -213,9 +217,7 @@ function FileView({ doc, loading, error, leasedBy, line, resolve }: FileViewProp
   </>;
 }
 
-function TestsView({ pluginId, projectId, path, onOpenStudio }: { pluginId: string; projectId?: string; path: string; onOpenStudio(): void }) {
-  const suitePath = agentSuitePath(path);
-  const suites = useSuites(pluginId, projectId).filter(suite => suitePath !== null && suite.path === suitePath);
+function TestsView({ suites, onOpenStudio }: { suites: ScenarioSuite[]; onOpenStudio(): void }) {
   return <div className="sf-atp-section" data-testid="atp-tests">
     {!suites.length && <div className="sf-atp-empty">No saved test suites for this agent.</div>}
     {suites.map(suite => {
@@ -292,12 +294,13 @@ interface AgentThreadPanelProps { pluginId: string; threadId?: string; tabId?: s
 
 /** The thread side panel for one agent: read-only File, Preview, Tests, Graph, Actions, Types and Comments over the shared document. */
 export function AgentThreadPanel(props: AgentThreadPanelProps) {
+  const context = useZccContext();
   const parsed = parseAgentThreadParams(props.params);
   if (!parsed) {
     return <div className="sf-atp sf-as" data-testid="atp-empty"><style>{STYLES}</style>
       <div className="sf-atp-empty" role="alert">This panel needs an Agent Script path (a .agent file). Open an agent from a chat card.</div></div>;
   }
-  return <AgentThreadWorkspace key={parsed.path} {...props} parsed={parsed} />;
+  return <AgentThreadWorkspace key={JSON.stringify([props.pluginId, props.projectId ?? parsed.projectId ?? context.projectId, props.threadId ?? context.threadId, props.orgAlias, parsed.path])} {...props} parsed={parsed} />;
 }
 
 function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThreadParams }) {
@@ -306,10 +309,11 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
   const ctx = useZccContext();
   const navigate = useZccNavigate();
   const projectId = props.projectId ?? parsed.projectId ?? ctx.projectId ?? undefined;
+  const threadId = props.threadId ?? ctx.threadId ?? undefined;
   const { path } = parsed;
   // Another card can retarget an open panel (same agent, other view/line/run); follow it.
   const key = JSON.stringify([parsed.view, parsed.line, parsed.node, parsed.runId, parsed.turn]);
-  const scope = props.tabId ?? props.threadId;
+  const scope = props.tabId ?? threadId;
   const [view, setView] = useState<AgentThreadView>(() => recallAgentThreadView(scope, path, key) ?? parsed.view);
   const [visited, setVisited] = useState<ReadonlySet<AgentThreadView>>(() => new Set([view]));
   useEffect(() => { rememberAgentThreadView(scope, path, key, view); }, [scope, path, key, view]);
@@ -336,6 +340,19 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
   const currentTypes = typeActions?.source === source ? typeActions : null;
 
   const show = useCallback((next: AgentThreadView) => { setView(next); setVisited(prev => prev.has(next) ? prev : new Set([...prev, next])); }, []);
+  const previewControl = useRef<AgentPreviewControl | null>(null);
+  const previewWaiters = useRef<Array<{ resolve(control: AgentPreviewControl): void; reject(error: Error): void }>>([]);
+  const receiveControl = useCallback((control: AgentPreviewControl | null) => {
+    previewControl.current = control;
+    if (control) previewWaiters.current.splice(0).forEach(waiter => waiter.resolve(control));
+  }, []);
+  const [previewState, setPreviewState] = useState<AgentPreviewState | null>(null);
+  useEffect(() => () => { previewControl.current = null; previewWaiters.current.splice(0).forEach(waiter => waiter.reject(Error('The Agent panel closed.'))); }, []);
+  const ensurePreview = () => {
+    show('preview');
+    if (previewControl.current) return Promise.resolve(previewControl.current);
+    return new Promise<AgentPreviewControl>((resolve, reject) => previewWaiters.current.push({ resolve, reject }));
+  };
   useEffect(() => {
     if (followedKey.current === key) return;
     followedKey.current = key;
@@ -350,6 +367,52 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
 
   const name = path.split(/[\\/]/).pop()!;
   const revealLine = useCallback((line: number) => { setJump(prev => ({ ...prev, line, seq: prev.seq + 1 })); show('file'); }, [show]);
+  const suiteList = useSuiteList(pluginId, projectId);
+  const savedSuites = suiteList.suites.filter(suite => suite.path === agentSuitePath(path));
+  const state = (): ControlState => ({ path, threadId, view, tool: view === 'file' ? 'code' : view, ready: Boolean(doc), dirty: doc?.dirty ?? false, sha256: doc?.baseSha256,
+    preview: previewState, tests: savedSuites.slice(0, 20).map(suite => ({ id: suite.id, ...runSummary(suite.cases, suite.lastResults), ...(suite.progress ? { progress: { mode: suite.progress.mode, completed: suite.progress.completed, stage: suite.progress.stage } } : {}) })) });
+  const execute = async ({ command, input }: UiCommand): Promise<ControlState> => {
+    if (command === 'state') {
+      if (input.includeSource === true && doc?.text == null) throw Error('The agent source is unavailable.');
+      return input.includeSource === true ? { source: doc!.text } : {};
+    }
+    if (command === 'file.open') {
+      if (controlText(input, 'path', 500) !== path) throw Error('This panel is bound to one agent. Open another agent from its chat card.');
+      show('file'); return {};
+    }
+    if (command === 'view.open' || command === 'panel.open') {
+      const requested = controlText(input, command === 'view.open' ? 'view' : 'tool', 30);
+      const selected = requested === 'code' ? 'file' : requested === 'test' ? 'tests' : requested;
+      if (!AGENT_THREAD_VIEWS.includes(selected as AgentThreadView)) throw Error('This Agent panel does not support that view.');
+      show(selected as AgentThreadView);
+      if (selected === 'tests' && !await suiteList.refresh()) throw Error('Could not refresh saved test results.');
+      return {};
+    }
+    if (command === 'editor.reveal') {
+      if (!Number.isInteger(input.line) || Number(input.line) < 1 || Number(input.line) > 9_999_999) throw Error('Provide a positive line number.');
+      revealLine(Number(input.line)); return {};
+    }
+    if (command === 'preview.start' || command === 'preview.send' || command === 'preview.end') {
+      if (input.engine !== undefined && input.engine !== 'simulate') throw Error('Thread Agent controls support only engine simulate.');
+      if (input.presetId !== undefined) throw Error('Use contextVariables for thread preview controls; presets must be selected in the Preview UI.');
+      const control = await ensurePreview();
+      const action = command === 'preview.start' ? 'start' : command === 'preview.send' ? 'send' : 'end';
+      control.assertReady(action);
+      const text = action === 'send' ? controlText(input, 'text', 4000) : '';
+      if (action === 'send' && !text.trim()) throw Error('Provide preview text.');
+      const values = action === 'start' ? parsePreviewContext(input.contextVariables) : undefined;
+      // A renderer commit acknowledges dispatch. The actual session/response is
+      // reported separately; remote preview calls can exceed the 20s UI lease.
+      void (action === 'start' ? control.start(values) : action === 'send' ? control.send(text) : control.end()).catch(() => {});
+      return { preview: { ...previewState, status: action === 'start' ? 'starting' : action === 'send' ? 'sending' : 'ending', pending: true } };
+    }
+    throw Error(`${command} is not supported in this Agent panel.`);
+  };
+  useSalesforceControl({ pluginId, projectId, threadId, orgAlias: props.orgAlias ?? org?.alias, surface: 'agentforce',
+    commands: ['state', 'file.open', 'view.open', 'panel.open', 'editor.reveal', 'preview.start', 'preview.send', 'preview.end'], state, execute });
+  const { share, setShare } = useStudioView({ pluginId, projectId, threadId, input: { surface: 'sidepanel', path, sha256: doc?.baseSha256, dirty: doc?.dirty ?? false,
+    tool: view === 'file' ? 'code' : view, diagnostics: doc?.diagnostics ?? [], orgAlias: props.orgAlias ?? org?.alias,
+    ...(previewState?.sessionId ? { lastRun: { runId: previewState.sessionId, engine: previewState.engine, turn: previewState.turns } } : {}) } });
   const openStudio = async () => {
     if (!projectId) return;
     if (await openInStudioWindow({ pluginId, projectId, path, ...(jump.line ? { line: jump.line } : {}), navigate })) return;
@@ -375,6 +438,7 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
     <div className="sf-atp-head">
       <div className="sf-atp-title"><div className="sf-atp-name">{name.replace(/\.(agent|afscript)$/i, '')}</div><div className="sf-atp-path" title={path}>{path}</div></div>
       {orgLabel && <span className="sf-atp-pill" data-testid="atp-org">{orgLabel}</span>}
+      <button type="button" className="sf-atp-btn" aria-pressed={share} onClick={() => setShare(!share)}>Share context</button>
       <button type="button" className="sf-atp-btn is-primary" disabled={!projectId} onClick={() => void openStudio()}>Open in Studio ↗</button>
     </div>
     <div className="sf-atp-tabs" role="tablist" aria-label="Agent views" onKeyDown={onKeyDown}>
@@ -382,9 +446,10 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
     </div>
     <div className="sf-atp-body">
       {lazy('file', () => <FileView doc={doc} loading={api.loading} error={api.error} leasedBy={doc?.lease ? doc.lease.label || 'Studio' : null} line={jump.line} resolve={resolve} />)}
-      {lazy('preview', () => <AgentforcePreviewPanel pluginId={pluginId} threadId={props.threadId} tabId={props.tabId} projectId={projectId} orgAlias={props.orgAlias} pinnedPath={path}
+      {lazy('preview', () => <AgentforcePreviewPanel pluginId={pluginId} threadId={threadId} tabId={props.tabId} projectId={projectId} orgAlias={props.orgAlias} pinnedPath={path}
+        controlledThreadId={threadId} onControl={receiveControl} onState={setPreviewState}
         params={{ path, ...(parsed.runId ? { runId: parsed.runId } : {}), ...(parsed.turn ? { turn: String(parsed.turn) } : {}) }} />)}
-      {lazy('tests', () => <TestsView pluginId={pluginId} projectId={projectId} path={path} onOpenStudio={() => void openStudio()} />)}
+      {lazy('tests', () => <TestsView suites={savedSuites} onOpenStudio={() => void openStudio()} />)}
       {lazy('graph', () => doc?.text != null
         ? <AgentScriptGraphPanel source={doc.text} visible={view === 'graph'} compact focusNode={jump.node ?? null} focusSeq={jump.seq} onOpenAction={() => show('actions')} />
         : <div className="sf-atp-empty">{api.loading ? 'Loading agent…' : 'The graph needs the agent text.'}</div>)}

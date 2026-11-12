@@ -16,6 +16,7 @@ import { queueAgentScriptOpen } from './agent-script-open.js';
 import { parseAgentScriptSource } from '../../lib/agent-script-parse.js';
 import { ACTION_AGENT } from '../action-fixtures.js';
 import { starterScenarios } from '../../lib/scenario-library-contract.js';
+import type { StudioViewState } from '../../lib/studio-contract.js';
 
 const rpc = vi.fn(async (_pluginId: string, method: string, args?: { path?: string; projectId?: string }) => {
   if (method === 'agentPreview.context') return { ok: true, fields: [] };
@@ -406,6 +407,34 @@ describe('AgentScriptPanel', () => {
     expect(el.querySelector('[data-testid="agent-action-panel"]')).toBeNull();
     expect(el.querySelector('iframe')).toBe(frame);
     expect(el.querySelector('.af-related-tabs')).toBeNull();
+  });
+
+  it('shares the foreground read-only Flow and source while retaining the owner agent path', async () => {
+    const apiName = 'BT_Modsol_AF_Billing_Journey';
+    const flowPath = `force-app/main/default/flows/${apiName}.flow-meta.xml`;
+    rpc.mockImplementation(async (id, method, args) => method === 'studio.explorer'
+      ? { ok: true, nodes: [{ kind: 'flow', apiName, path: flowPath, usedBy: ['force-app/bots/QC.agent'] }] }
+      : baseRpc(id, method, args));
+    const el = await mount('force-app/bots/QC.agent');
+    await message(el, { type: 'ready' });
+    await message(el, { type: 'cursor', line: 45, column: 3, selection: { startLine: 45, endLine: 46, text: 'owner script selection' } });
+    const shared = () => (rpc.mock.calls.filter(call => call[1] === 'studio.view.publish' && (call[2] as { state?: StudioViewState })?.state?.share).at(-1)?.[2] as { state: StudioViewState } | undefined)?.state;
+    await waitFor(() => expect(shared()?.cursor?.line).toBe(45));
+    await act(async () => { fireEvent.keyDown(el.querySelector('.sf-studio')!, { key: 'p', metaKey: true }); });
+    await act(async () => { within(el).getByRole('option', { name: new RegExp(apiName) }).click(); });
+    await waitFor(() => expect(shared()?.reference).toEqual({ kind: 'flow', apiName, path: flowPath, source: 'project' }));
+    expect(shared()?.path).toBe('force-app/bots/QC.agent');
+    expect(shared()).not.toHaveProperty('cursor');
+    expect(shared()?.selection).toBeUndefined();
+    // Hidden iframe cursor events must not turn into coordinates of the Flow.
+    await message(el, { type: 'cursor', line: 99, column: 1 });
+    expect(shared()).not.toHaveProperty('cursor');
+    await act(async () => { within(el.querySelector('[data-testid="studio-target-view"]')!).getByRole('button', { name: /^Org/ }).click(); });
+    await waitFor(() => expect(shared()?.reference).toEqual({ kind: 'flow', apiName, source: 'org' }));
+    expect(shared()?.path).toBe('force-app/bots/QC.agent');
+    await act(async () => { within(within(el).getByRole('tablist', { name: 'Open files' })).getByRole('tab', { name: /^Script/ }).click(); });
+    await waitFor(() => expect(shared()?.cursor?.line).toBe(99));
+    expect(shared()).not.toHaveProperty('reference');
   });
 
   it('B: Inspect <action> in the Graph view opens it over an open dependency tab', async () => {

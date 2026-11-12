@@ -3,6 +3,8 @@ import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import { STUDIO_LIMITS, STUDIO_RPC, type StudioViewState } from '../../../lib/studio-contract.js';
 
 export const VIEW_PUBLISH_DEBOUNCE_MS = 400;
+// Renew well before the server's 60s TTL, even when the editor is idle.
+export const VIEW_KEEPALIVE_MS = 20_000;
 export const SHARE_STORAGE_KEY = 'salesforce:studio:share';
 
 export type StudioViewInput = Omit<StudioViewState, 'share' | 'at'>;
@@ -22,8 +24,8 @@ function readShare(fallback: boolean): boolean {
 }
 
 /**
- * Tracks the share preference and publishes the current view (debounced) so the
- * agent can see it. Returns the state the ContextStrip/AssistantRail display.
+ * Shares editor changes (debounced) and renews idle views while mounted. Closing
+ * the view or turning sharing off withdraws it without the editor debounce.
  */
 export function useStudioView(options: { pluginId: string; projectId?: string | null; threadId?: string | null; input: StudioViewInput; defaultShare?: boolean; debounceMs?: number }) {
   const { pluginId, projectId, threadId, input, defaultShare = true, debounceMs = VIEW_PUBLISH_DEBOUNCE_MS } = options;
@@ -34,19 +36,62 @@ export function useStudioView(options: { pluginId: string; projectId?: string | 
   }, []);
   const signature = JSON.stringify(input);
   const view = useMemo<StudioViewState>(() => buildViewState(JSON.parse(signature) as StudioViewInput, share, Date.now()), [signature, share]);
-  const last = useRef('');
+  const latestView = useRef(view);
+  latestView.current = view;
+  const schedulePublish = useRef<(() => void) | null>(null);
+  const publisherId = useRef<string | null>(null);
+  if (publisherId.current === null) publisherId.current = crypto.randomUUID();
+  const sequence = useRef(0);
 
   useEffect(() => {
     if (!projectId) return undefined;
-    const key = `${projectId}|${threadId ?? ''}|${signature}|${share}`;
-    if (key === last.current) return undefined;
-    const timer = setTimeout(() => {
-      last.current = key;
-      // Fire-and-forget: a failed publish only means the agent sees a staler view.
-      void Promise.resolve(callPluginRpc(pluginId, STUDIO_RPC.viewPublish, { projectId, ...(threadId ? { threadId } : {}), state: { ...view, at: Date.now() } })).catch(() => undefined);
-    }, debounceMs);
-    return () => clearTimeout(timer);
-  }, [pluginId, projectId, threadId, signature, share, view, debounceMs]);
+    let stopped = false;
+    let pending: { at: number; view: StudioViewState } | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const path = view.path;
+    const scope = { projectId, ...(threadId ? { threadId } : {}) };
+    const send = async (state: StudioViewState) => {
+      try {
+        await callPluginRpc(pluginId, STUDIO_RPC.viewPublish, {
+          ...scope, state, publisher: { id: publisherId.current!, sequence: ++sequence.current }
+        });
+      } catch { /* a later keepalive retries without requiring an editor change */ }
+    };
+    // A withdrawal needs only the identity of the view, never its selected text.
+    const withdraw = () => {
+      void send({ surface: view.surface, path, dirty: false, tool: null, diagnostics: [], share: false, at: Date.now() });
+    };
+    const publish = () => {
+      if (stopped || pending && Date.now() - pending.at < VIEW_KEEPALIVE_MS) return;
+      clearTimeout(timer);
+      const request = { at: Date.now(), view: latestView.current };
+      pending = request;
+      // A stalled host call must not block withdrawal or later keepalives. Its
+      // lower sequence cannot overwrite a newer snapshot after it arrives late.
+      void send({ ...request.view, at: request.at }).then(() => {
+        if (pending !== request) return;
+        pending = null;
+        if (!stopped && request.view !== latestView.current) schedule();
+      });
+    };
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(publish, debounceMs);
+    };
+    schedulePublish.current = share ? schedule : null;
+    if (share) schedule();
+    else withdraw();
+    const keepalive = share ? setInterval(publish, VIEW_KEEPALIVE_MS) : undefined;
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      clearInterval(keepalive);
+      schedulePublish.current = null;
+      withdraw();
+    };
+  }, [pluginId, projectId, threadId, share, view.path, view.surface, debounceMs]);
+
+  useEffect(() => { schedulePublish.current?.(); }, [signature]);
 
   return { view, share, setShare };
 }

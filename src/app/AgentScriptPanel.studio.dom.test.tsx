@@ -369,6 +369,47 @@ describe('AgentScriptPanel studio layout', () => {
     expect(control.options.state().layout).toBeDefined();
   });
 
+  it('carries trace run, reply and step targets into the wide pane and compact retained replay', async () => {
+    rpc.mockImplementation(async (plugin, method, args) => {
+      if (method === 'agentLab.get') return { ok: true, data: { id: args.id, path: 'force-app/bots/QC.agent', engine: 'preview', orgAlias: 'dev',
+        turns: [{ role: 'agent', text: 'First reply', planId: 'plan-1' }, { role: 'user', text: 'Again' }, { role: 'agent', text: 'Second reply', planId: 'plan-2' }] } };
+      if (method === 'agentLab.trace') return { ok: true, data: { runId: args.id, planId: args.planId, turn: args.turn, available: true,
+        steps: [{ kind: 'input', label: 'Input' }, { kind: 'response', label: `Focused ${args.planId}`, outputPreview: 'reply' }] } };
+      return baseRpc(plugin, method, args);
+    });
+    try {
+      const el = await mount('force-app/bots/QC.agent');
+      await ready(el);
+      let ack: unknown;
+      await act(async () => { ack = await exec('trace.focus', { runId: 'older-run', turn: 1, step: 1 }); });
+      expect(ack).toEqual({ trace: { runId: 'older-run', turn: 1, step: 1, status: 'loading' } });
+      await waitFor(() => expect(el.querySelector('[aria-current="step"]')?.textContent).toContain('Focused plan-1'));
+      expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.get', { projectId: 'proj-1', id: 'older-run' });
+      expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.trace', expect.objectContaining({ projectId: 'proj-1', id: 'older-run', planId: 'plan-1', turn: 1, path: 'force-app/bots/QC.agent' }));
+      await resize(500);
+      await act(async () => { await exec('trace.focus', { runId: 'older-run', turn: 2, step: 0 }); });
+      await waitFor(() => expect(el.querySelector('[data-testid="salesforce-preview-run"] [aria-current="step"]')?.textContent).toContain('Input'));
+      const replay = el.querySelector<HTMLElement>('[data-testid="salesforce-preview-run"]')!;
+      expect(within(replay).getByRole('button', { name: 'Turn 2' }).getAttribute('aria-pressed')).toBe('true');
+      const getCount = rpc.mock.calls.filter(([, method]) => method === 'agentLab.get').length;
+      await act(async () => { await exec('trace.focus', { runId: 'older-run', turn: 2, step: 0 }); });
+      await waitFor(() => expect(rpc.mock.calls.filter(([, method]) => method === 'agentLab.get').length).toBeGreaterThan(getCount));
+    } finally { rpc.mockImplementation(baseRpc); }
+  });
+
+  it('requires an open agent and retained run for explicit trace reply/step targets', async () => {
+    const el = await mount();
+    await ready(el);
+    await expect(exec('trace.focus', { runId: 'r', turn: 1 })).rejects.toThrow('Open an agent');
+    const agent = await mount('force-app/bots/QC.agent');
+    await ready(agent);
+    await expect(exec('trace.focus', { step: 0 })).rejects.toThrow('No retained run');
+    await act(async () => { await exec('preview.start', { engine: 'simulate' }); });
+    await act(async () => { fireEvent.click(agent.querySelector('[data-testid="stub-run"]')!); });
+    await act(async () => { await exec('trace.focus', { turn: 1, step: 0 }); });
+    expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.get', { projectId: 'proj-1', id: 'r1' });
+  });
+
   it('opens Org tests from the activity rail and from orgTests.open, as a kept-mounted editor tab', async () => {
     const el = await mount('force-app/bots/QC.agent');
     await ready(el);

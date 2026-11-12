@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TraceStep, TurnTrace } from '../../../lib/studio-contract.js';
 import { REHEARSE_LABEL, traceSummary } from '../agentforce-preview-logic.js';
 
@@ -8,6 +8,9 @@ export interface TracePanelProps {
   loading?: boolean;
   /** Rehearse runs have no planner; shows the approximation label instead of a trace. */
   approximation?: boolean;
+  /** Zero-based trace step to reveal; repeated commands can increment focusSeq. */
+  focusStep?: number;
+  focusSeq?: number;
   onRevealSource?(path: string, line: number): void;
 }
 
@@ -19,6 +22,7 @@ export const TRACE_PANEL_STYLES = `
 .sf-trace-route { color:var(--sf-accent); overflow-wrap:anywhere; line-height:1.6; padding-bottom:6px; }
 .sf-trace-steps { max-height:340px; overflow:auto; min-height:0; }
 .sf-trace-step { border-top:1px solid var(--sf-border); padding:4px 0; }
+.sf-trace-step[aria-current="step"] { background:var(--sf-soft); outline:1px solid var(--sf-accent); outline-offset:-1px; border-radius:6px; }
 .sf-trace-note { color:var(--sf-warn); font-size:11px; }
 .sf-trace-note.is-approx { font-style:italic; }
 .sf-trace-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 8px; align-items:center; padding:3px 6px; border-radius:6px; border:0; background:transparent; color:inherit; font:inherit; text-align:left; width:100%; }
@@ -49,7 +53,7 @@ const KIND_LABEL: Record<TraceStep['kind'], string> = {
   transition: 'route', response: 'reply', delegate: 'agent', unknown: 'step'
 };
 
-export function TracePanel({ trace, loading, approximation, onRevealSource }: TracePanelProps) {
+export function TracePanel({ trace, loading, approximation, onRevealSource, focusStep, focusSeq }: TracePanelProps) {
   if (approximation) {
     return <div className="sf-trace" data-testid="sf-trace"><style>{TRACE_PANEL_STYLES}</style><span className="sf-trace-note is-approx">{REHEARSE_LABEL}</span></div>;
   }
@@ -58,11 +62,19 @@ export function TracePanel({ trace, loading, approximation, onRevealSource }: Tr
   if (!trace.available) {
     return <div className="sf-trace" data-testid="sf-trace"><style>{TRACE_PANEL_STYLES}</style><span className="sf-trace-note">{trace.reason || 'No runtime trace is available for this turn.'}</span></div>;
   }
-  return <TraceSteps key={`${trace.runId}:${trace.planId}:${trace.turn}`} trace={trace} onRevealSource={onRevealSource} />;
+  return <TraceSteps key={`${trace.runId}:${trace.planId}:${trace.turn}`} trace={trace} onRevealSource={onRevealSource} focusStep={focusStep} focusSeq={focusSeq} />;
 }
 
-function TraceSteps({ trace, onRevealSource }: { trace: TurnTrace; onRevealSource?: TracePanelProps['onRevealSource'] }) {
+function TraceSteps({ trace, onRevealSource, focusStep, focusSeq }: TracePanelProps & { trace: TurnTrace }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
+  const steps = useRef<HTMLDivElement>(null);
+  const validFocus = focusStep !== undefined && Number.isInteger(focusStep) && focusStep >= 0 && focusStep < trace.steps.length;
+  useEffect(() => {
+    if (!validFocus) return;
+    setOpen(prior => ({ ...prior, [focusStep!]: true }));
+    const row = steps.current?.children[focusStep!] as HTMLElement | undefined;
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [focusStep, focusSeq, validFocus]);
   const summary = traceSummary(trace);
   const max = Math.max(1, ...trace.steps.map(s => s.latencyMs ?? 0));
   const payloads = trace.steps.flatMap((s, i) => s.inputPreview || s.outputPreview ? [i] : []);
@@ -77,7 +89,8 @@ function TraceSteps({ trace, onRevealSource }: { trace: TurnTrace; onRevealSourc
       </div>
       {topics.length > 0 && <div className="sf-trace-route" aria-label="Topic route">{topics.join(' → ')}</div>}
       {trace.reason && <span className="sf-trace-note">{trace.reason}</span>}
-      <div className="sf-trace-steps" role="list" aria-label="Trace steps">
+      {focusStep !== undefined && !validFocus && <span className="sf-trace-note" role="alert">The requested trace step is unavailable.</span>}
+      <div ref={steps} className="sf-trace-steps" role="list" aria-label="Trace steps">
       {trace.steps.map((step, i) => {
         if (step.kind === 'topic') grouped = true;
         const nested = grouped && step.kind !== 'topic' && step.kind !== 'input';
@@ -94,7 +107,7 @@ function TraceSteps({ trace, onRevealSource }: { trace: TurnTrace; onRevealSourc
           </>
         );
         const cls = `sf-trace-row k-${step.kind}${nested ? ' is-nested' : ''}`;
-        return <div key={i} role="listitem" className="sf-trace-step">
+        return <div key={i} role="listitem" className="sf-trace-step" tabIndex={-1} aria-current={validFocus && focusStep === i ? 'step' : undefined}>
           {source && onRevealSource
             ? <button type="button" className={cls} onClick={() => onRevealSource(source.path, source.line)} title={`Reveal ${source.path}:${source.line}`}>{body}</button>
             : <div className={cls}>{body}</div>}

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
+import { parse } from '@sf-agentscript/agentforce';
 import { sha256Hex } from './agent-files.js';
 import { AGENT_SOURCE_MAX, AGENT_SOURCE_MAX_LABEL } from './studio-contract.js';
 
@@ -45,6 +46,29 @@ export function draftDestination(projectRoot: string) {
   directory(root, parts);
   return { root, dxRoot, parts, directory: parts.join('/'), initializesProject: nested && !existsSync(configPath) };
 }
+
+function copyAgentIdentity(source: string, apiName: string): string {
+  const prefix = /^[ \t]*#[ \t]*@dialect\s*:/m.test(source.slice(0, 400)) ? '' : '# @dialect:agentforce\n';
+  const annotated = prefix + source;
+  const doc = parse(annotated);
+  const config = doc.ast.config;
+  const identity = config?.developer_name ?? config?.agent_name;
+  const range = identity?.__cst?.range;
+  // Duplicate config blocks and repeated identity keys are parser warnings, but cannot
+  // safely identify one agent. Text in instructions never participates in this lookup.
+  const configCount = doc.ast.__children?.filter(row => row.__type === 'field' && row.key === 'config').length;
+  const identityCount = config?.__children.filter((row: { key?: string }) => row.key === 'developer_name' || row.key === 'agent_name').length;
+  if (configCount !== 1 || identityCount !== 1 || identity?.__kind !== 'StringLiteral' || !/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(identity.value) || identity.__diagnostics.some((row: { severity?: number }) => row.severity === 1) || !range || range.start.line !== range.end.line) {
+    throw Error('Source must include one unambiguous config.developer_name or config.agent_name string.');
+  }
+  // Use character ranges, not CST byte offsets, so preceding Unicode and CRLF stay intact.
+  const lines = annotated.split('\n');
+  const lineStart = lines.slice(0, range.start.line).reduce((offset, line) => offset + line.length + 1, 0) - prefix.length;
+  const start = lineStart + range.start.character;
+  const end = lineStart + range.end.character;
+  return source.slice(0, start) + JSON.stringify(apiName) + source.slice(end);
+}
+
 export function agentDraftSource(input: AgentDraftInput): string {
   const name = input.name?.trim();
   if (!name || name.length > 120 || /[\0\r\n]/.test(name)) throw Error('Enter an agent name of 1–120 characters.');
@@ -53,8 +77,7 @@ export function agentDraftSource(input: AgentDraftInput): string {
   if (input.source !== undefined) {
     if (typeof input.source !== 'string' || !input.source.trim() || input.source.length > AGENT_SOURCE_MAX) throw Error(`Draft source must be non-empty and at most ${AGENT_SOURCE_MAX_LABEL}.`);
     // A new draft is a new local identity; never inherit the source's name or metadata target.
-    if (!/^\s+agent_name:\s*.*$/m.test(input.source)) throw Error('Source must include config.agent_name.');
-    return input.source.replace(/^(\s+agent_name:)\s*.*$/m, `$1 ${JSON.stringify(input.apiName)}`);
+    return copyAgentIdentity(input.source, input.apiName);
   }
   return `# @dialect:agentforce\nconfig:\n    agent_name: ${JSON.stringify(input.apiName)}\n\nsystem:\n    instructions: ${JSON.stringify(input.purpose?.trim() || 'Help the user with clear, concise answers. Ask for missing details and stay within your capabilities.')}\n\nstart_agent welcome:\n    description: ${JSON.stringify(name)}\n    reasoning:\n        instructions: ->\n            | Welcome the user and ask how you can help.\n            | Do not claim to have performed actions that are not available.\n`;
 }

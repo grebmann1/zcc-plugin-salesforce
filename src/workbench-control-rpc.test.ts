@@ -11,8 +11,8 @@ describe('uiCommandReadsOrg', () => {
     expect(uiCommandReadsOrg('panel.open', { tool: 'org-preview' })).toBe(true);
     expect(uiCommandReadsOrg('panel.open', { tool: 'release' })).toBe(false); // Release is no longer a Studio tool
   });
-  it('treats preview.start/send as org reads for every engine', () => {
-    for (const command of ['preview.start', 'preview.send']) {
+  it('treats preview lifecycle commands as org reads for every engine', () => {
+    for (const command of ['preview.start', 'preview.send', 'preview.end']) {
       expect(uiCommandReadsOrg(command, { engine: 'simulate' })).toBe(true);
       expect(uiCommandReadsOrg(command, { engine: 'live' })).toBe(true);
       expect(uiCommandReadsOrg(command, undefined)).toBe(true);

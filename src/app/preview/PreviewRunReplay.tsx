@@ -3,6 +3,7 @@ import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import type { LabSnapshot } from '../../../lib/agentforce-lab-contract.js';
 import { STUDIO_RPC, type TurnTrace } from '../../../lib/studio-contract.js';
 import { TracePanel } from './TracePanel.js';
+import { focusedReply } from './trace-focus.js';
 
 export const RUN_REPLAY_STYLES = `
 .sf-run { display:flex; flex-direction:column; gap:12px; flex:1; min-height:0; overflow:auto; padding:16px 20px; user-select:text; -webkit-user-select:text; }
@@ -22,14 +23,24 @@ const unavailable = (runId: string, reason: string): TurnTrace => ({ runId, turn
  * Reopens one lab run read-only: its transcript, the chosen turn and that turn's planner trace.
  * The run lives in the plugin process, so it is gone after a restart, 30 idle minutes or a newer run.
  */
-export function PreviewRunReplay(props: {
+type PreviewRunReplayProps = {
   pluginId: string;
   projectId?: string;
   runId: string;
   turn?: number;
+  /** Commands target an exact owner/reply; ordinary retained-run cards may clamp a stale turn. */
+  expectedPath?: string;
+  step?: number;
+  focusSeq?: number;
   onRevealSource?(path: string, line: number): void;
   onClose(): void;
-}) {
+};
+
+export function PreviewRunReplay(props: PreviewRunReplayProps) {
+  return <RunReplay key={JSON.stringify([props.pluginId, props.projectId, props.runId, props.turn, props.expectedPath, props.step, props.focusSeq])} {...props} />;
+}
+
+function RunReplay(props: PreviewRunReplayProps) {
   const { pluginId, projectId, runId } = props;
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
   const [selected, setSelected] = useState<number | null>(props.turn ?? null);
@@ -44,7 +55,15 @@ export function PreviewRunReplay(props: {
       (result) => {
         if (!alive) return;
         const row = result as { ok?: boolean; data?: LabSnapshot; error?: string } | null;
-        setLoaded(row?.ok && row.data ? { state: 'ready', run: row.data } : { state: 'missing', message: row?.error || 'This run is no longer available.' });
+        if (row?.ok && row.data) {
+          if (props.expectedPath !== undefined) {
+            try {
+              if (row.data.id !== runId) throw Error('The requested run is unavailable.');
+              focusedReply(row.data, props.expectedPath, props.turn);
+            } catch (error) { setLoaded({ state: 'missing', message: (error as Error).message }); return; }
+          }
+          setLoaded({ state: 'ready', run: row.data });
+        } else setLoaded({ state: 'missing', message: row?.error || 'This run is no longer available.' });
       },
       (error: unknown) => { if (alive) setLoaded({ state: 'missing', message: error instanceof Error ? error.message : String(error) }); }
     );
@@ -54,14 +73,14 @@ export function PreviewRunReplay(props: {
   const run = loaded.state === 'ready' ? loaded.run : null;
   const agentTurns = run ? run.turns.filter((turn) => turn.role === 'agent') : [];
   // Default to the latest reply; a turn past the end (a stale card) also lands there.
-  const current = agentTurns.length ? Math.min(selected ?? agentTurns.length, agentTurns.length) : 0;
+  const current = agentTurns.length ? Math.min(selected || agentTurns.length, agentTurns.length) : 0;
   const planId = current ? agentTurns[current - 1]?.planId : undefined;
 
   useEffect(() => {
     if (!run || run.engine === 'rehearsal' || !current) { setTrace(null); return; }
     if (!planId) { setTrace(unavailable(runId, 'This reply has no plan to trace.')); return; }
     let alive = true;
-    setTracing(true);
+    setTrace(null); setTracing(true);
     void callPluginRpc(pluginId, STUDIO_RPC.trace, { ...scope, id: runId, planId, turn: current, ...(run.path ? { path: run.path } : {}) }).then(
       (result) => {
         const row = result as { ok?: boolean; data?: TurnTrace; error?: string } | null;
@@ -91,7 +110,7 @@ export function PreviewRunReplay(props: {
     <section className="sf-run" data-testid="salesforce-preview-run" aria-label="Preview run">
       <style>{RUN_REPLAY_STYLES}</style>
       <div className="sf-run-head">
-        <strong>{run.engine === 'preview' ? 'Simulate run' : 'Rehearse run'}</strong>
+        <strong>{run.engine === 'preview' ? run.live ? 'Live run' : 'Simulate run' : 'Rehearse run'}</strong>
         <span>{run.orgAlias}</span>
         {run.path ? <span title={run.path}>{run.path.split('/').pop()}</span> : null}
         <span>{run.closed ? 'Ended' : run.failed ? 'Stopped' : 'Still open'}</span>
@@ -114,7 +133,8 @@ export function PreviewRunReplay(props: {
           );
         })}
       </div>
-      {current ? <TracePanel trace={trace} loading={tracing} approximation={run.engine === 'rehearsal'} onRevealSource={props.onRevealSource} /> : null}
+      {current ? <TracePanel trace={trace} loading={tracing} approximation={run.engine === 'rehearsal'} onRevealSource={props.onRevealSource}
+        focusStep={props.expectedPath !== undefined && current === (props.turn || agentTurns.length) ? props.step : undefined} focusSeq={props.focusSeq} /> : null}
     </section>
   );
 }

@@ -2,7 +2,7 @@ import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import type { LabSnapshot } from '../../../lib/agentforce-lab-contract.js';
 import { useCallback, useEffect, useSyncExternalStore, type SetStateAction } from 'react';
 
-export interface StudioRunOwner { pluginId: string; projectId?: string; orgAlias?: string; path?: string; view: 'preview' | 'roleplay' | 'org-preview' }
+export interface StudioRunOwner { pluginId: string; projectId?: string; orgAlias?: string; path?: string; threadId?: string; view: 'preview' | 'roleplay' | 'org-preview' }
 export interface StudioRunDescriptor extends StudioRunOwner {
   key: string; runId: string; engine: 'simulate' | 'live' | 'rehearse';
   status: 'active' | 'running' | 'ended' | 'expired'; turn: number; updatedAt: number;
@@ -30,11 +30,11 @@ const subscribe = (listener: () => void) => {
 const notify = () => { revision++; listeners.forEach(listener => listener()); };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
-export const studioRunKey = (owner: StudioRunOwner) => JSON.stringify([owner.pluginId, owner.projectId ?? '', owner.orgAlias ?? '', owner.path ?? '', owner.view]);
+export const studioRunKey = (owner: StudioRunOwner) => JSON.stringify([owner.pluginId, owner.projectId ?? '', owner.orgAlias ?? '', owner.path ?? '', owner.view, ...(owner.threadId ? [owner.threadId] : [])]);
 function parseWorkspace(value: unknown): Workspace | null {
   if (!record(value) || typeof value.key !== 'string' || value.key.length > 16_384 || !record(value.values)) return null;
   const descriptor = value.descriptor;
-  const validOwner = record(descriptor) && ['pluginId', 'runId'].every(field => typeof descriptor[field] === 'string' && (descriptor[field] as string).length > 0 && (descriptor[field] as string).length < 4096) && ['projectId', 'orgAlias', 'path'].every(field => descriptor[field] === undefined || typeof descriptor[field] === 'string' && (descriptor[field] as string).length < 4096) && typeof descriptor.turn === 'number' && Number.isInteger(descriptor.turn) && descriptor.turn >= 0 && typeof descriptor.updatedAt === 'number' && Number.isFinite(descriptor.updatedAt);
+  const validOwner = record(descriptor) && ['pluginId', 'runId'].every(field => typeof descriptor[field] === 'string' && (descriptor[field] as string).length > 0 && (descriptor[field] as string).length < 4096) && ['projectId', 'orgAlias', 'path', 'threadId'].every(field => descriptor[field] === undefined || typeof descriptor[field] === 'string' && (descriptor[field] as string).length < 4096) && typeof descriptor.turn === 'number' && Number.isInteger(descriptor.turn) && descriptor.turn >= 0 && typeof descriptor.updatedAt === 'number' && Number.isFinite(descriptor.updatedAt);
   return { key: value.key, at: Number(value.at) || 0, values: value.values,
     ...(validOwner && record(descriptor) && studioRunKey(descriptor as unknown as StudioRunOwner) === value.key && descriptor.key === value.key
       && ['preview', 'roleplay', 'org-preview'].includes(String(descriptor.view)) && ['active', 'running', 'ended', 'expired'].includes(String(descriptor.status))

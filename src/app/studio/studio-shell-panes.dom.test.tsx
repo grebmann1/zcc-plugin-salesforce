@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STUDIO_CHANGED_CHANNEL, type ExplorerNode, type ScenarioSuite } from '../../../lib/studio-contract.js';
 import { BottomTests, BottomTrace } from './BottomPanes.js';
 import { StudioShell } from './StudioShell.js';
-import { suiteStatus, useSuites, withSuiteBadges } from './useSuites.js';
+import { suiteStatus, useSuiteList, useSuites, withSuiteBadges } from './useSuites.js';
 
 const rpc = vi.fn();
 let realtime: ((payload: unknown) => void) | undefined;
@@ -127,6 +127,36 @@ describe('useSuites helpers', () => {
 });
 
 describe('useSuites', () => {
+  it('follows a superseding progress refresh and resolves an old load when project is cleared', async () => {
+    rpc.mockResolvedValue({ ok: true, suites: [suite()] });
+    const { result, rerender } = renderHook(({ projectId }: { projectId: string | undefined }) => useSuiteList('salesforce', projectId), { initialProps: { projectId: 'p1' as string | undefined } });
+    await waitFor(() => expect(result.current.suites).toHaveLength(1));
+    let finishOld!: (value: unknown) => void;
+    let finishNew!: (value: unknown) => void;
+    rpc.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.refresh(); });
+    rpc.mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
+    await act(async () => { realtime?.({ kind: 'suite-progress', projectId: 'p1' }); });
+    await act(async () => { finishNew({ ok: true, suites: [suite({ id: 'fresh' })] }); finishOld({ ok: true, suites: [suite({ id: 'stale' })] }); expect(await pending).toBe(true); });
+    expect(result.current.suites[0]?.id).toBe('fresh');
+    rpc.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    act(() => { pending = result.current.refresh(); });
+    rerender({ projectId: undefined });
+    await act(async () => { finishOld({ ok: true, suites: [suite()] }); expect(await pending).toBe(false); });
+    expect(result.current.suites).toEqual([]);
+  });
+  it('explicitly refreshes the same mounted list and reports a failed reload', async () => {
+    rpc.mockResolvedValue({ ok: true, suites: [suite({ lastResults: { c1: res('pass') } })] });
+    const { result } = renderHook(() => useSuiteList('salesforce', 'p1'));
+    await waitFor(() => expect(result.current.suites).toHaveLength(1));
+    rpc.mockResolvedValue({ ok: true, suites: [suite({ lastResults: { c1: res('fail') } })] });
+    await act(async () => { expect(await result.current.refresh()).toBe(true); });
+    expect(result.current.suites[0]?.lastResults?.c1?.outcome).toBe('fail');
+    rpc.mockResolvedValue({ ok: false });
+    await act(async () => { expect(await result.current.refresh()).toBe(false); });
+    expect(result.current.suites[0]?.lastResults?.c1?.outcome).toBe('fail');
+  });
   it('refreshes progress and discards a response from the previous project', async () => {
     let finishOld!: (value: unknown) => void;
     rpc.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
@@ -186,6 +216,78 @@ describe('BottomTests', () => {
 
 describe('BottomTrace', () => {
   const base = { pluginId: 'salesforce', path: 'Help.agent', visible: true, onOpenPreview: vi.fn() };
+  const snapshot = { id: 'target', path: 'Help.agent', engine: 'preview', turns: [{ role: 'agent', text: 'Welcome' }, { role: 'user', text: 'Hi' }, { role: 'agent', text: 'first', planId: 'plan-first' }, { role: 'agent', text: 'last', planId: 'plan-last' }] };
+  it('loads the requested run/reply in project scope and focuses its exact step', async () => {
+    rpc.mockImplementation(async (_plugin, method, args) => method === 'agentLab.get' ? { ok: true, data: snapshot } : {
+      ok: true, data: { runId: args.id, planId: args.planId, turn: args.turn, available: true, steps: [{ kind: 'response', label: 'Requested reply', outputPreview: 'first' }] }
+    });
+    const { rerender } = render(<BottomTrace {...base} projectId="p1" run={{ runId: 'other-current-run', engine: 'live', turn: 9 }} focus={{ runId: 'target', turn: 2, step: 0, seq: 1 }} />);
+    expect((await screen.findByText('Requested reply')).closest('[role=listitem]')?.getAttribute('aria-current')).toBe('step');
+    expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.get', { projectId: 'p1', id: 'target' });
+    expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.trace', { projectId: 'p1', id: 'target', engine: 'simulate', path: 'Help.agent', turn: 2, planId: 'plan-first' });
+    await waitFor(() => expect(document.querySelector<HTMLDetailsElement>('details')?.open).toBe(true));
+    rerender(<BottomTrace {...base} projectId="p1" run={null} focus={{ runId: 'target', turn: 0, seq: 2 }} />);
+    await waitFor(() => expect(rpc).toHaveBeenLastCalledWith('salesforce', 'agentLab.trace', expect.objectContaining({ turn: 3, planId: 'plan-last' })));
+    expect(rpc.mock.calls.every(([, , args]) => !args.includeSource)).toBe(true);
+  });
+  it('refuses an unrelated owner, missing reply/plan or missing run without tracing anything else', async () => {
+    const { rerender } = render(<BottomTrace {...base} run={null} visible={false} focus={{ runId: 'target', turn: 1, seq: 0 }} />);
+    expect(rpc).not.toHaveBeenCalled();
+    const attempts = [
+      { result: { ok: true, data: { ...snapshot, path: 'Other.agent' } }, turn: 2, message: 'does not belong' },
+      { result: { ok: true, data: snapshot }, turn: 4, message: 'reply is unavailable' },
+      { result: { ok: true, data: snapshot }, turn: 1, message: 'no plan to trace' },
+      { result: { ok: true, data: { ...snapshot, id: 'wrong' } }, turn: 2, message: 'requested run is unavailable' },
+      { result: { ok: false, error: 'gone' }, turn: 2, message: 'gone' },
+      { result: null, turn: 2, message: 'no longer available' }
+    ];
+    for (const [seq, attempt] of attempts.entries()) {
+      rpc.mockResolvedValueOnce(attempt.result);
+      rerender(<BottomTrace {...base} run={null} focus={{ runId: 'target', turn: attempt.turn, seq: seq + 1 }} />);
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(attempt.message));
+    }
+    expect(rpc.mock.calls.every(([, method]) => method === 'agentLab.get')).toBe(true);
+  });
+  it('shows a targeted rehearsal approximation and discards old owner/scope lookups', async () => {
+    let oldGet!: (value: unknown) => void;
+    rpc.mockImplementationOnce(() => new Promise(resolve => { oldGet = resolve; }));
+    const { rerender } = render(<BottomTrace {...base} projectId="old" run={null} focus={{ runId: 'target', turn: 2, seq: 1 }} />);
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...snapshot, path: 'New.agent', engine: 'rehearsal' } });
+    rerender(<BottomTrace {...base} projectId="new" path="New.agent" run={null} focus={{ runId: 'target', turn: 2, seq: 2 }} />);
+    await waitFor(() => expect(screen.getByTestId('sf-trace').textContent).toContain('Approximation'));
+    await act(async () => oldGet({ ok: true, data: snapshot }));
+    expect(rpc.mock.calls.every(([, method]) => method === 'agentLab.get')).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('discards an in-flight trace after changing targets and on unmount', async () => {
+    let oldTrace!: (value: unknown) => void;
+    rpc.mockImplementation(async (_plugin, method) => method === 'agentLab.get' ? { ok: true, data: snapshot } : new Promise(resolve => { oldTrace = resolve; }));
+    const { rerender, unmount } = render(<BottomTrace {...base} run={null} focus={{ runId: 'target', turn: 2, seq: 1 }} />);
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    rpc.mockResolvedValue({ ok: false, error: 'new run unavailable' });
+    rerender(<BottomTrace {...base} run={null} focus={{ runId: 'new', turn: 1, seq: 2 }} />);
+    expect(screen.queryByText('Old secret')).toBeNull();
+    await screen.findByText('new run unavailable');
+    await act(async () => oldTrace({ ok: true, data: { available: true, steps: [{ kind: 'response', label: 'Old secret' }] } }));
+    expect(screen.queryByText('Old secret')).toBeNull();
+    unmount();
+  });
+  it('preserves keyboard focus when typing begins while a requested trace is loading', async () => {
+    let finishTrace!: (value: unknown) => void;
+    rpc.mockImplementation(async (_plugin, method) => method === 'agentLab.get' ? { ok: true, data: snapshot } : new Promise(resolve => { finishTrace = resolve; }));
+    render(<><input aria-label="Editor" /><BottomTrace {...base} run={null} focus={{ runId: 'target', turn: 2, step: 0, seq: 1 }} /></>);
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    const editor = screen.getByRole('textbox', { name: 'Editor' });
+    editor.focus();
+    fireEvent.change(editor, { target: { value: 'Still typing' } });
+    fireEvent.keyDown(editor, { key: 'g' });
+    await act(async () => finishTrace({ ok: true, data: { runId: 'target', planId: 'plan-first', turn: 2, available: true,
+      steps: [{ kind: 'response', label: 'Requested step', outputPreview: 'reply' }] } }));
+    await waitFor(() => expect(screen.getByText('Requested step').closest('[role=listitem]')?.getAttribute('aria-current')).toBe('step'));
+    expect(document.querySelector<HTMLDetailsElement>('details')?.open).toBe(true);
+    expect(document.activeElement).toBe(editor);
+    expect((editor as HTMLInputElement).value).toBe('Still typing');
+  });
   it('prompts when there is no run and opens Preview', () => {
     render(<BottomTrace {...base} run={null} />);
     expect(screen.getByText(/Run a conversation in Preview/)).toBeTruthy();

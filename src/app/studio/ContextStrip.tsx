@@ -18,10 +18,13 @@ export const CONTEXT_STRIP_STYLES = `
 /** What the agent can see, as short text parts (exported for tests). */
 export function describeVisibleContext(view: StudioViewState): string[] {
   if (!view.share) return [];
-  const parts = [view.path ? view.path.split('/').pop()! : 'unsaved draft'];
+  const owner = view.path ? view.path.split('/').pop()! : 'unsaved draft';
+  const parts = [view.reference ? `${view.reference.kind} ${view.reference.apiName} (read-only)` : owner];
+  if (view.reference) parts.push(`owner ${owner}`);
   if (view.dirty) parts.push('unsaved edits');
-  if (view.selection) parts.push(`lines ${view.selection.startLine}-${view.selection.endLine}`);
-  else if (view.cursor) parts.push(`line ${view.cursor.line}`);
+  if (view.reference?.source) parts.push(`${view.reference.source} source`);
+  if (!view.reference && view.selection) parts.push(`lines ${view.selection.startLine}-${view.selection.endLine}`);
+  else if (!view.reference && view.cursor) parts.push(`line ${view.cursor.line}`);
   if (view.tool) parts.push(`${view.tool} tool`);
   const problems = view.diagnostics.filter(d => d.severity === 'error' || d.severity === 'warning').length;
   if (problems) parts.push(`${problems} problem${problems === 1 ? '' : 's'}`);

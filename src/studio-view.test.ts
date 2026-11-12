@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StudioViewState } from '../lib/studio-contract.js';
 import { STUDIO_RPC } from '../lib/studio-contract.js';
-import { buildViewInstructions, describeView, INSTRUCTIONS_MAX_CHARS, readOpenComments, registerStudioContext, StudioViewStore, VIEW_MAX_ENTRIES, VIEW_TTL_MS, viewStoreFor } from '../lib/studio-view.js';
+import { buildViewInstructions, describeView, INSTRUCTIONS_MAX_CHARS, readOpenComments, registerStudioContext, StudioViewStore, VIEW_MAX_ENTRIES, VIEW_MAX_PUBLISHERS, VIEW_PUBLISHER_TTL_MS, VIEW_TTL_MS, viewStoreFor } from '../lib/studio-view.js';
 
 const state = (over: Partial<StudioViewState> = {}): StudioViewState => ({ surface: 'studio', path: 'force-app/Help.agent', dirty: false, tool: 'code', diagnostics: [], share: true, at: 1, ...over });
 
@@ -79,6 +79,68 @@ describe('StudioViewStore', () => {
     expect(store.threadPath('p', 'same')).toBeUndefined();
     expect(store.threadPath('p', 'thread-999')).toBe('a.agent');
   });
+
+  it('rejects late publishes and duplicate sequences after a publisher withdraws', () => {
+    let now = 1000;
+    const store = new StudioViewStore(() => now);
+    expect(store.publish('p', state(), 't', { id: 'window-a', sequence: 1 })).toBe(true);
+    expect(store.publish('p', state({ share: false }), 't', { id: 'window-a', sequence: 3 })).toBe(false);
+    now += 300_001; // Still protected after the host's 300s request timeout.
+    expect(store.publish('p', state(), 't', { id: 'window-a', sequence: 2 })).toBe(false);
+    expect(store.publish('p', state(), 't', { id: 'window-a', sequence: 3 })).toBe(false);
+    expect(store.get('p', 't')).toBeNull();
+    expect(store.publish('p', state({ cursor: { line: 9, column: 1 } }), 't', { id: 'window-a', sequence: 4 })).toBe(true);
+    expect(store.get('p', 't')?.state.cursor?.line).toBe(9);
+  });
+
+  it('retains independent publishers of the same path and withdraws only its owner', () => {
+    const store = new StudioViewStore();
+    store.publish('p', state({ cursor: { line: 1, column: 1 } }), null, { id: 'window-a', sequence: 1 });
+    store.publish('p', state({ cursor: { line: 2, column: 1 } }), null, { id: 'window-b', sequence: 1 });
+    expect(store.latest('p')?.state.cursor?.line).toBe(2);
+    store.publish('p', state({ share: false }), null, { id: 'window-b', sequence: 2 });
+    expect(store.latest('p')?.state.cursor?.line).toBe(1);
+    store.publish('p', state({ share: false }), null, { id: 'window-a', sequence: 2 });
+    expect(store.latest('p')).toBeNull();
+  });
+
+  it('replaces the publisher previous path even when its old-path withdrawal arrives late', () => {
+    const store = new StudioViewStore();
+    store.publish('p', state({ path: 'a.agent' }), null, { id: 'window', sequence: 1 });
+    store.bindThread('p', 'assistant-a', 'a.agent');
+    store.publish('p', state({ path: 'b.agent' }), null, { id: 'window', sequence: 3 });
+    store.publish('p', state({ path: 'a.agent', share: false }), null, { id: 'window', sequence: 2 });
+    expect(store.latest('p', 'a.agent')).toBeNull();
+    expect(store.get('p', 'assistant-a')).toBeNull();
+    expect(store.latest('p')?.state.path).toBe('b.agent');
+  });
+
+  it('scopes publisher ordering to its authoritative project and thread', () => {
+    const store = new StudioViewStore();
+    store.publish('p', state(), 'one', { id: 'same', sequence: 9 });
+    expect(store.publish('other', state(), 'one', { id: 'same', sequence: 1 })).toBe(true);
+    expect(store.publish('p', state(), 'two', { id: 'same', sequence: 1 })).toBe(true);
+    store.publish('p', state({ share: false }), 'one', { id: 'same', sequence: 10 });
+    expect(store.get('p', 'one')).toBeNull();
+    expect(store.get('other', 'one')).not.toBeNull();
+    expect(store.get('p', 'two')).not.toBeNull();
+  });
+
+  it('keeps tombstones bounded without evicting fresh ordering protection', () => {
+    let now = 1000;
+    const store = new StudioViewStore(() => now);
+    for (let i = 0; i < VIEW_MAX_PUBLISHERS; i++) store.publish('p', state({ share: false }), null, { id: `window-${i}`, sequence: 2 });
+    expect(store.size).toBe(0);
+    expect(store.publish('p', state(), null, { id: 'new-window', sequence: 1 })).toBe(false);
+    expect(store.publish('p', state(), null, { id: 'window-0', sequence: 1 })).toBe(false);
+    expect(store.publish('p', state(), null, { id: 'window-0', sequence: 3 })).toBe(true);
+    now += VIEW_PUBLISHER_TTL_MS + 1;
+    expect(store.publish('p', state(), null, { id: 'new-window', sequence: 1 })).toBe(true);
+    expect(store.latest('p')?.publisherId).toBe('new-window');
+    now += VIEW_TTL_MS + 1;
+    expect(store.latest('p')).toBeNull();
+    expect(store.size).toBe(0);
+  });
 });
 
 describe('describeView / instructions', () => {
@@ -113,6 +175,24 @@ describe('describeView / instructions', () => {
     expect(buildViewInstructions(store, { projectId: 'p', pluginMetadata: { panelAgent: { view: 'a.agent' } } })).toContain('File: a.agent');
     expect(buildViewInstructions(store, { projectId: 'p', pluginMetadata: { sfAgentPath: 'a.agent' } })).not.toContain('File: b.agent');
     expect(buildViewInstructions(store, { projectId: 'p', pluginMetadata: { panelAgent: { view: 'closed.agent' } } })).toBeNull();
+  });
+
+  it('distinguishes the owner agent from the currently viewed read-only resource', () => {
+    const reference = { kind: 'flow' as const, apiName: 'BT_Modsol_AF_Billing_Journey', path: 'force-app/flows/BT_Modsol_AF_Billing_Journey.flow-meta.xml', source: 'project' as const };
+    const shared = state({ path: 'GuiAgentReview_1.agent', reference, cursor: { line: 45, column: 1 }, selection: { startLine: 45, endLine: 46, text: 'hidden selection' }, diagnostics: full.diagnostics });
+    const text = describeView(shared);
+    expect(text).toContain('Owner agent: GuiAgentReview_1.agent');
+    expect(text).toContain('Viewing: flow BT_Modsol_AF_Billing_Journey (read-only, source: project)');
+    expect(text).toContain(`Reference file: ${reference.path}`);
+    expect(text).toContain('Owner agent problems (8):');
+    expect(text).not.toContain('hidden selection');
+    expect(text).not.toContain('Cursor:');
+    expect(describeView(state({ reference: { kind: 'apex', apiName: 'QuoteAction' } }))).toContain('Viewing: apex QuoteAction (read-only)');
+    const store = new StudioViewStore();
+    store.publish('p', shared);
+    store.bindThread('p', 'assistant', 'GuiAgentReview_1.agent');
+    expect(store.get('p', 'assistant')?.state.path).toBe('GuiAgentReview_1.agent');
+    expect(buildViewInstructions(store, { projectId: 'p', threadId: 'assistant' })).toContain('Viewing: flow BT_Modsol_AF_Billing_Journey');
   });
 });
 
@@ -154,6 +234,19 @@ describe('registerStudioContext', () => {
     expect(h.call(STUDIO_RPC.viewPublish, { state: state() }).code).toBe('project_required');
     expect(h.call(STUDIO_RPC.viewGet, {}).code).toBe('project_required');
     expect(h.providers[0]({ projectId: '', threadId: 't' })).toBeNull();
+  });
+
+  it('validates optional publisher envelopes and keeps legacy publishes compatible', () => {
+    const h = harness();
+    for (const publisher of [null, [], {}, { id: '', sequence: 1 }, { id: 'x'.repeat(101), sequence: 1 }, { id: '../bad', sequence: 1 }, { id: 'valid', sequence: 0 }, { id: 'valid', sequence: 1.5 }, { id: 'valid', sequence: Number.MAX_SAFE_INTEGER + 1 }]) {
+      expect(h.call(STUDIO_RPC.viewPublish, { state: state(), publisher }).code).toBe('invalid_input');
+    }
+    expect(h.call(STUDIO_RPC.viewPublish, { state: state(), publisher: { id: 'uuid-A_1', sequence: 1 } })).toEqual({ ok: true, shared: true });
+    expect(h.call(STUDIO_RPC.viewPublish, { state: state({ share: false }), publisher: { id: 'uuid-A_1', sequence: 3 } }).shared).toBe(false);
+    expect(h.call(STUDIO_RPC.viewPublish, { state: state(), publisher: { id: 'uuid-A_1', sequence: 2 } }).shared).toBe(false);
+    expect(h.call(STUDIO_RPC.viewGet, {}).state).toBeNull();
+    expect(h.call(STUDIO_RPC.viewPublish, { state: state() }).shared).toBe(true);
+    expect(h.call(STUDIO_RPC.viewPublish, { state: state({ share: false }) }).shared).toBe(false);
   });
 
   it('logs instead of throwing when instructions are already registered', () => {

@@ -56,6 +56,10 @@ describe('Studio UI verbs on the control channel', () => {
     expect(validateUiCommandInput('preview.send', { text: 'a', engine: 'z' })).toMatch(/engine/);
     expect(validateUiCommandInput('preview.send', { text: 'a', foo: 1 })).toMatch(/accepts only/);
     expect(validateUiCommandInput('preview.send', { text: 'a', engine: 'simulate' })).toBeUndefined();
+    expect(validateUiCommandInput('preview.end', {})).toBeUndefined();
+    expect(validateUiCommandInput('preview.end', { engine: 'simulate' })).toBeUndefined();
+    expect(validateUiCommandInput('preview.end', { engine: 'live' })).toMatch(/simulate/);
+    expect(validateUiCommandInput('preview.end', { extra: true })).toMatch(/only/);
     expect(validateUiCommandInput('trace.focus', {})).toBeUndefined();
     expect(validateUiCommandInput('trace.focus', { runId: '' })).toMatch(/runId/);
     expect(validateUiCommandInput('trace.focus', { runId: 5 })).toMatch(/runId/);
@@ -67,6 +71,13 @@ describe('Studio UI verbs on the control channel', () => {
     expect(validateUiCommandInput('graph.focus', { node: 'n' })).toBeUndefined();
     expect(validateUiCommandInput('layout.set', { compact: true, x: 1 })).toMatch(/compact/);
     expect(validateUiCommandInput('file.open', {})).toBeUndefined();
+    expect(validateUiCommandInput('orgTests.open', { name: 'AgentChecks', runId: 'a'.repeat(18) })).toBeUndefined();
+    expect(validateUiCommandInput('orgTests.open', { name: '../invalid' })).toMatch(/name/);
+    expect(validateUiCommandInput('orgTests.open', { extra: true })).toMatch(/only/);
+    expect(validateUiCommandInput('orgTests.open', { runId: 'bad' })).toMatch(/runId/);
+    expect(validateUiCommandInput('simulations.open', { batchId: 'batch-1' })).toBeUndefined();
+    expect(validateUiCommandInput('simulations.open', { batchId: '../invalid' })).toMatch(/batchId/);
+    expect(validateUiCommandInput('simulations.open', { extra: true })).toMatch(/only/);
   });
 
   it('wakes the target view when a command is queued and survives a throwing listener', () => {

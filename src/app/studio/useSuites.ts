@@ -22,23 +22,34 @@ export function withSuiteBadges(nodes: ExplorerNode[], suites: ScenarioSuite[]):
 }
 
 /** Saved scenario suites of the project (studio.suites.list), refreshed when a suite changes. */
-export function useSuites(pluginId: string, projectId?: string): ScenarioSuite[] {
+export function useSuiteList(pluginId: string, projectId?: string) {
   const [suites, setSuites] = useState<ScenarioSuite[]>([]);
   const alive = useRef(true);
   const sequence = useRef(0);
+  const latestLoad = useRef<Promise<boolean> | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const load = useCallback(async () => {
+  const load = useCallback((): Promise<boolean> => {
     const request = ++sequence.current;
-    if (!projectId) { setSuites([]); return; }
+    if (!projectId) { setSuites([]); const pending = Promise.resolve(false); latestLoad.current = pending; return pending; }
+    const pending = (async () => {
     try {
       const result = await callPluginRpc(pluginId, STUDIO_RPC.suites, { projectId }) as { ok?: boolean; suites?: ScenarioSuite[] } | null;
-      if (alive.current && request === sequence.current && result?.ok !== false && Array.isArray(result?.suites)) setSuites(result.suites);
+      if (alive.current && request === sequence.current && result?.ok !== false && Array.isArray(result?.suites)) { setSuites(result.suites); return true; }
     } catch { /* badges and the Tests tab are optional */ }
+    // An opening Tests command follows the newer realtime refresh rather than
+    // reporting a false failure (or acknowledging its older saved results).
+    if (alive.current && request !== sequence.current) return latestLoad.current ?? false;
+    return false;
+    })();
+    latestLoad.current = pending;
+    return pending;
   }, [pluginId, projectId]);
   useEffect(() => { setSuites([]); void load(); }, [load]);
   useRealtime(STUDIO_CHANGED_CHANNEL, payload => {
     const row = payload as { kind?: string; projectId?: string } | null;
     if ((row?.kind === 'suites' || row?.kind === 'suite-progress') && (!row.projectId || row.projectId === projectId)) void load();
   });
-  return suites;
+  return { suites, refresh: load };
 }
+
+export function useSuites(pluginId: string, projectId?: string): ScenarioSuite[] { return useSuiteList(pluginId, projectId).suites; }

@@ -54,6 +54,16 @@ describe('ContextStrip', () => {
     fireEvent.click(screen.getByRole('switch'));
     expect(onShareChange).toHaveBeenLastCalledWith(true);
   });
+
+  it('names the foreground reference and owner without hidden script coordinates', () => {
+    const reference = { kind: 'flow' as const, apiName: 'Billing', source: 'org' as const };
+    render(<ContextStrip view={view({ reference, cursor: { line: 45, column: 1 }, selection: { startLine: 45, endLine: 46, text: 'hidden' } })} />);
+    const strip = screen.getByTestId('studio-context-strip');
+    expect(strip.textContent).toContain('flow Billing (read-only) · owner Help.agent · org source');
+    expect(strip.textContent).not.toContain('line 45');
+    expect(strip.textContent).not.toContain('lines 45-46');
+    expect(describeVisibleContext(view({ reference: { kind: 'apex', apiName: 'QuoteAction' } }))).toContain('apex QuoteAction (read-only)');
+  });
 });
 
 describe('AskAgentButton', () => {
@@ -237,13 +247,14 @@ describe('useStudioView', () => {
     rerender({ i: { ...input, path: 'b.agent' } });
     rerender({ i: { ...input, path: 'c.agent' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(rpc).toHaveBeenCalledTimes(2);
-    expect(rpc.mock.calls[1][2].state.path).toBe('c.agent');
+    const shared = rpc.mock.calls.filter(call => call[2].state.share);
+    expect(shared).toHaveLength(2);
+    expect(shared[1][2].state.path).toBe('c.agent');
     act(() => result.current.setShare(false));
     expect(localStorage.getItem(SHARE_STORAGE_KEY)).toBe('false');
     expect(result.current.view.share).toBe(false);
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(rpc.mock.calls[2][2].state.share).toBe(false);
+    expect(rpc.mock.calls.at(-1)![2].state.share).toBe(false);
   });
 
   it('restores the saved preference, skips publishing without a project and tolerates rpc failure', async () => {

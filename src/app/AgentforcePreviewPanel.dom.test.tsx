@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AgentforcePreviewPanel } from './AgentforcePreviewPanel.js';
+import { AgentforcePreviewPanel, type AgentPreviewControl, type AgentPreviewState } from './AgentforcePreviewPanel.js';
 
 const rpc = vi.fn(async (_pluginId: string, method: string, args?: Record<string, unknown>) => {
   if (method === 'agentPreview.context') return { ok: true, fields: [] };
@@ -84,7 +84,7 @@ describe('AgentforcePreviewPanel', () => {
     delete (globalThis as { __ZCC_PLUGIN_RUNTIME__?: unknown }).__ZCC_PLUGIN_RUNTIME__;
   });
 
-  async function mount(params: unknown = { path: 'force-app/bots/QC.agent' }, pinnedPath?: string) {
+  async function mount(params: unknown = { path: 'force-app/bots/QC.agent' }, pinnedPath?: string, extra: Record<string, unknown> = {}) {
     const el = document.createElement('div');
     document.body.appendChild(el);
     const root = createRoot(el);
@@ -102,6 +102,7 @@ describe('AgentforcePreviewPanel', () => {
           threadId: 'thr-1',
           projectId: 'proj-1',
           params,
+          ...extra,
           ...(pinnedPath ? { pinnedPath } : {})
         })
       );
@@ -112,6 +113,72 @@ describe('AgentforcePreviewPanel', () => {
     });
     return el;
   }
+
+  it('controls a thread-owned simulation with actual replies and explicit non-user origin', async () => {
+    const path = 'force-app/bots/QC.agent';
+    const owner = { pluginId: 'salesforce', projectId: 'proj-1', orgAlias: 'dev', path, view: 'org-preview' as const, threadId: 'thr-1' };
+    const key = studioRunKey(owner);
+    writeWorkspaceValue(key, 'mode', 'live', 'simulate');
+    let control: AgentPreviewControl | null = null;
+    let state: AgentPreviewState | null = null;
+    const el = await mount({ path }, path, { controlledThreadId: 'thr-1', onControl: (next: AgentPreviewControl | null) => { control = next; }, onState: (next: AgentPreviewState) => { state = next; } });
+    expect(() => control!.assertReady('send')).toThrow('Start a simulated preview');
+    let result: unknown;
+    await act(async () => { result = await control!.start([{ name: 'account', type: 'Text', value: 'A' }]); });
+    expect(result).toMatchObject({ sessionId: 'sess-1', engine: 'simulate', response: 'Welcome from your agent' });
+    expect(rpc).toHaveBeenCalledWith('salesforce', 'agentLab.start', expect.objectContaining({ projectId: 'proj-1', threadId: 'thr-1', path, live: false, startedByUser: false, contextVariables: [{ name: 'account', type: 'Text', value: 'A' }] }));
+    expect(rpc.mock.calls.some(call => call[1] === 'agentPreview.start')).toBe(false);
+    await act(async () => { writeWorkspaceValue(key, 'mode', 'live', 'simulate'); });
+    expect(state).toMatchObject({ engine: 'simulate', status: 'active' });
+    await act(async () => { result = await control!.send('typed by control'); });
+    expect(result).toMatchObject({ response: 'echo:typed by control' });
+    expect(el.textContent).toContain('echo:typed by control');
+    expect(state).toMatchObject({ sessionId: 'sess-1', engine: 'simulate', status: 'active', turns: 1, lastReply: 'echo:typed by control', replyTruncated: false });
+    await act(async () => { await control!.send('a'.repeat(2500)); });
+    expect(state).toMatchObject({ lastReply: 'echo:' + 'a'.repeat(1995), replyTruncated: true });
+    await act(async () => { result = await control!.end(); });
+    expect(result).toMatchObject({ sessionId: null, ended: true });
+    expect(state).toMatchObject({ sessionId: null, status: 'idle' });
+    expect(el.textContent).toContain('Preview ended.');
+    expect(studioRunKey({ ...owner, threadId: 'thr-2' })).not.toBe(key);
+    expect(studioRunKey({ ...owner, threadId: undefined })).toBe(JSON.stringify(['salesforce', 'proj-1', 'dev', path, 'org-preview']));
+  });
+
+  it('refuses busy or live sessions and surfaces remote failure without a successful reply', async () => {
+    const path = 'force-app/bots/QC.agent';
+    let control: AgentPreviewControl | null = null;
+    let state: AgentPreviewState | null = null;
+    await mount({ path }, path, { controlledThreadId: 'thr-1', onControl: (next: AgentPreviewControl | null) => { control = next; }, onState: (next: AgentPreviewState) => { state = next; } });
+    let finish!: (value: any) => void;
+    rpc.mockImplementation(async (plugin, method, args) => method === 'agentLab.start' ? new Promise(resolve => { finish = resolve; }) : baseRpc(plugin, method, args));
+    let pending!: Promise<unknown>;
+    await act(async () => { pending = control!.start(); await Promise.resolve(); });
+    expect(() => control!.assertReady('start')).toThrow('busy');
+    expect(state).toMatchObject({ status: 'starting', busy: true });
+    await act(async () => { finish({ ok: false, error: 'Compile failed' }); await expect(pending).rejects.toThrow('Compile failed'); });
+    expect(state).toMatchObject({ status: 'failed', sessionId: null, error: 'Compile failed' });
+    const key = studioRunKey({ pluginId: 'salesforce', projectId: 'proj-1', orgAlias: 'dev', path, view: 'org-preview', threadId: 'thr-1' });
+    await act(async () => { writeWorkspaceValue(key, 'sessionId', 'live-id', null); writeWorkspaceValue(key, 'lifecycle', { simulated: false }, {}); });
+    expect(() => control!.assertReady('send')).toThrow('live preview');
+    await expect(control!.end()).rejects.toThrow('live preview');
+    expect(rpc.mock.calls.some(call => call[1] === 'agentPreview.end')).toBe(false);
+  });
+
+  it('refuses imperative controls without a pinned thread-owned project target', async () => {
+    let control: AgentPreviewControl | null = null;
+    await mount(undefined, undefined, { onControl: (next: AgentPreviewControl | null) => { control = next; } });
+    expect(() => control!.assertReady('start')).toThrow('thread-owned local agent');
+  });
+
+  it('refuses controls while the selected org workspace is unresolved', async () => {
+    const finishes: Array<(value: unknown) => void> = [];
+    rpc.mockImplementation(async (plugin, method, args) => method === 'org' ? new Promise(resolve => { finishes.push(resolve); }) : baseRpc(plugin, method, args));
+    let control: AgentPreviewControl | null = null;
+    await mount(undefined, 'force-app/bots/QC.agent', { controlledThreadId: 'thr-1', onControl: (next: AgentPreviewControl | null) => { control = next; } });
+    expect(() => control!.assertReady('start')).toThrow('selected org to load');
+    await act(async () => { const payload = await baseRpc('salesforce', 'org', {}); finishes.splice(0).forEach(finish => finish(payload)); });
+    expect(() => control!.assertReady('start')).not.toThrow();
+  });
 
   it('pins the preview to one agent: no picker, the shared thread target is ignored', async () => {
     // A previously chosen agent for this thread (what another panel left behind).
