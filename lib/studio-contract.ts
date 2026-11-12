@@ -3,7 +3,7 @@
  * (lib/*), the renderer (src/app/*) and the playground iframe. No node imports.
  */
 import { BUILDER_TOOLS, type BuilderScorer, type BuilderTool } from './studio-builder-contract.js';
-export type StudioTool = BuilderTool | 'code' | 'preview' | 'tests' | 'graph' | 'actions' | 'data' | 'deploy' | 'assistant' | 'comments' | 'agents';
+export type StudioTool = BuilderTool | 'code' | 'preview' | 'tests' | 'graph' | 'actions' | 'types' | 'data' | 'deploy' | 'assistant' | 'comments' | 'agents';
 export type StudioEngine = 'rehearse' | 'simulate' | 'live';
 export interface StudioDiagnostic { line: number; column: number; endLine: number; endColumn: number; severity: 'error' | 'warning' | 'info' | 'hint'; message: string; code?: string }
 /** Problem counters count errors and warnings; info and hint entries are listed but not counted. */
@@ -15,7 +15,15 @@ export interface StudioViewState {
   cursor?: { line: number; column: number }; selection?: { startLine: number; endLine: number; text: string /* <=2000 */ };
   tool: StudioTool | null; lastRun?: { runId: string; engine: StudioEngine; turn?: number }; diagnostics: StudioDiagnostic[] /* <=50 */;
   orgAlias?: string; share: boolean; at: number;
+  /** Describes the foreground read-only resource; path above remains the owner agent. */
+  reference?: StudioViewReference;
 }
+export interface StudioViewReference {
+  kind: 'apex' | 'flow' | 'lightning-type' | 'lwc'; apiName: string;
+  path?: string; source?: 'project' | 'org';
+}
+/** Optional ordering envelope for view publishers; older clients may omit it. */
+export interface StudioViewPublisher { id: string; sequence: number }
 export type ThreadRole = 'author' | 'editor' | 'reviewer' | 'tester' | 'assistant';
 export interface StudioThreadLink { threadId: string; title: string; role: ThreadRole; action?: string; path: string; lastActivityAt: number }
 export interface StudioComment {
@@ -140,7 +148,7 @@ export const AGENT_SOURCE_MAX = 10 * 1024 * 1024;
 export const AGENT_SOURCE_MAX_LABEL = '10 MB';
 
 export const STUDIO_LIMITS = { diagnostics: 50, selectionText: 2000, quote: 2000, commentBody: 2000 } as const;
-export const STUDIO_TOOLS: readonly StudioTool[] = ['code', 'preview', 'tests', 'graph', 'actions', 'data', 'deploy', 'assistant', 'comments', 'agents', ...BUILDER_TOOLS];
+export const STUDIO_TOOLS: readonly StudioTool[] = ['code', 'preview', 'tests', 'graph', 'actions', 'types', 'data', 'deploy', 'assistant', 'comments', 'agents', ...BUILDER_TOOLS];
 export const STUDIO_ENGINES: readonly StudioEngine[] = ['rehearse', 'simulate', 'live'];
 /** The engines Preview offers. Rehearse is hidden for now; saved Rehearse runs still load and replay. */
 export const PREVIEW_ENGINES: readonly StudioEngine[] = ['simulate', 'live'];
@@ -194,6 +202,20 @@ export function isProposeEditInput(value: unknown): value is ProposeEditInput {
     && value.edits.every(edit => isRecord(edit) && isPos(edit.startLine) && isPos(edit.endLine) && Number(edit.endLine) >= Number(edit.startLine) - 1 && typeof edit.text === 'string' && edit.text.length <= AGENT_SOURCE_MAX);
 }
 
+export function isStudioViewPublisher(value: unknown): value is StudioViewPublisher {
+  return isRecord(value) && typeof value.id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value.id)
+    && Number.isSafeInteger(value.sequence) && Number(value.sequence) > 0;
+}
+
+export function isStudioViewReference(value: unknown): value is StudioViewReference {
+  if (!isRecord(value)) return false;
+  return ['apex', 'flow', 'lightning-type', 'lwc'].includes(String(value.kind))
+    && typeof value.apiName === 'string' && value.apiName.length > 0 && value.apiName.length <= 200 && !/[\s\x00-\x1f\x7f]/.test(value.apiName)
+    && (value.source === undefined || value.source === 'project' || value.source === 'org')
+    && (value.path === undefined || (typeof value.path === 'string' && value.path.length > 0 && value.path.length <= 1000
+      && !/^(?:\/|~|[a-zA-Z]:)/.test(value.path) && !/[\\\x00-\x1f\x7f]/.test(value.path) && !value.path.split('/').includes('..')));
+}
+
 export function isStudioViewState(value: unknown): value is StudioViewState {
   if (!isRecord(value)) return false;
   const cursor = value.cursor;
@@ -205,6 +227,7 @@ export function isStudioViewState(value: unknown): value is StudioViewState {
     && typeof value.dirty === 'boolean' && typeof value.share === 'boolean' && typeof value.at === 'number'
     && (value.tool === null || STUDIO_TOOLS.includes(value.tool as StudioTool))
     && (value.orgAlias === undefined || typeof value.orgAlias === 'string')
+    && (value.reference === undefined || isStudioViewReference(value.reference))
     && (cursor === undefined || (isRecord(cursor) && isPos(cursor.line) && isPos(cursor.column)))
     && (selection === undefined || (isRecord(selection) && isPos(selection.startLine) && isPos(selection.endLine) && typeof selection.text === 'string' && selection.text.length <= STUDIO_LIMITS.selectionText))
     && (lastRun === undefined || (isRecord(lastRun) && typeof lastRun.runId === 'string' && STUDIO_ENGINES.includes(lastRun.engine as StudioEngine) && (lastRun.turn === undefined || Number.isInteger(lastRun.turn))))

@@ -2,7 +2,7 @@ import { AGENT_SOURCE_MAX_LABEL, isProposeEditInput, PREVIEW_ENGINES, type Studi
 import { parsePreviewContext } from './preview-context.js';
 
 /** Isomorphic input validation for the Studio UI verbs (server request() and the renderer executor share it). */
-export const STUDIO_UI_COMMANDS = ['editor.proposeEdit', 'preview.start', 'preview.send', 'trace.focus', 'graph.focus', 'layout.set', 'orgTests.open', 'simulations.open', 'context.set'] as const;
+export const STUDIO_UI_COMMANDS = ['editor.proposeEdit', 'preview.start', 'preview.send', 'preview.end', 'trace.focus', 'graph.focus', 'layout.set', 'orgTests.open', 'simulations.open', 'context.set'] as const;
 export type StudioUiCommandName = typeof STUDIO_UI_COMMANDS[number];
 export const PREVIEW_TEXT_MAX = 4000;
 const presetId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
@@ -23,6 +23,8 @@ export function validateUiCommandInput(command: string, input: Record<string, un
       if (unknownKeys(input, ['text', 'engine'])) return 'preview.send accepts only text and engine.';
       if (input.engine !== undefined && !PREVIEW_ENGINES.includes(input.engine as StudioEngine)) return 'engine must be simulate or live.';
       return typeof input.text === 'string' && input.text.trim() && input.text.length <= PREVIEW_TEXT_MAX ? undefined : `Provide text (1-${PREVIEW_TEXT_MAX} characters).`;
+    case 'preview.end':
+      return !unknownKeys(input, ['engine']) && (input.engine === undefined || input.engine === 'simulate') ? undefined : 'preview.end accepts only engine simulate.';
     case 'trace.focus':
       if (unknownKeys(input, ['runId', 'turn', 'step'])) return 'trace.focus accepts runId, turn and step.';
       if (input.runId !== undefined && (typeof input.runId !== 'string' || !input.runId || input.runId.length > 200)) return 'runId must be a short string.';

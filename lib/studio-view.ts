@@ -5,40 +5,58 @@
  * contributeInstructions section, and @-mention providers.
  */
 import { formatComments, formatDiagnostics } from './studio-agent-actions.js';
-import { isStudioComment, isStudioViewState, STUDIO_RPC, type StudioComment, type StudioViewState } from './studio-contract.js';
+import { isStudioComment, isStudioViewPublisher, isStudioViewState, STUDIO_RPC, type StudioComment, type StudioViewPublisher, type StudioViewState } from './studio-contract.js';
 import { rpcFailure, type StudioServerContext } from './studio-server-context.js';
 import { studioThreadPath } from './studio-agent-binding.js';
 
 export const VIEW_TTL_MS = 60_000;
 export const VIEW_MAX_ENTRIES = 40;
+// Keep withdrawal tombstones beyond the host RPC timeout (300s).
+export const VIEW_PUBLISHER_TTL_MS = 600_000;
+export const VIEW_MAX_PUBLISHERS = 1000;
 export const INSTRUCTIONS_MAX_CHARS = 1200;
 const PROJECT_SCOPE = 'project';
 const MAX_ID_PART = 300;
 
-interface Entry { projectId: string; threadId: string | null; state: StudioViewState; receivedAt: number }
+interface Entry { projectId: string; threadId: string | null; publisherId: string | null; state: StudioViewState; receivedAt: number }
 
 /** In-memory, bounded, TTL'd store of the latest shared view per project (and per thread). */
 export class StudioViewStore {
   private readonly entries = new Map<string, Entry>();
   private readonly bindings = new Map<string, string>();
+  private readonly publishers = new Map<string, { sequence: number; receivedAt: number }>();
   constructor(private readonly now: () => number = Date.now) {}
 
-  private key(projectId: string, threadId: string | null, path?: string | null) { return JSON.stringify([projectId, threadId || PROJECT_SCOPE, path ?? null]); }
+  private key(projectId: string, threadId: string | null, path?: string | null, publisherId?: string | null) { return JSON.stringify([projectId, threadId || PROJECT_SCOPE, path ?? null, publisherId ?? null]); }
   private fresh(entry: Entry | undefined): Entry | null {
     if (!entry) return null;
-    if (this.now() - entry.receivedAt > VIEW_TTL_MS) { this.entries.delete(this.key(entry.projectId, entry.threadId, entry.state.path)); return null; }
+    if (this.now() - entry.receivedAt > VIEW_TTL_MS) { this.entries.delete(this.key(entry.projectId, entry.threadId, entry.state.path, entry.publisherId)); return null; }
     return entry;
   }
 
   /** Stores the view when `share` is on; a `share:false` publish forgets what was shared. */
-  publish(projectId: string, state: StudioViewState, threadId: string | null = null): boolean {
-    const key = this.key(projectId, threadId, state.path);
+  publish(projectId: string, state: StudioViewState, threadId: string | null = null, publisher?: StudioViewPublisher): boolean {
+    const publisherId = publisher?.id ?? null;
+    if (publisher) {
+      const now = this.now();
+      for (const [id, entry] of this.publishers) if (now - entry.receivedAt > VIEW_PUBLISHER_TTL_MS) this.publishers.delete(id);
+      const publisherKey = this.key(projectId, threadId, null, publisherId);
+      const previous = this.publishers.get(publisherKey);
+      if (previous && publisher.sequence <= previous.sequence) return false;
+      // Do not evict fresh tombstones: delayed requests must remain rejected.
+      if (!previous && this.publishers.size >= VIEW_MAX_PUBLISHERS) return false;
+      this.publishers.set(publisherKey, { sequence: publisher.sequence, receivedAt: now });
+      // Moving this publisher to another path also retires its previous view.
+      // Another publisher of the same path keeps its independently owned entry.
+      for (const [id, entry] of this.entries) if (entry.projectId === projectId && entry.threadId === threadId && entry.publisherId === publisherId) this.entries.delete(id);
+    }
+    const key = this.key(projectId, threadId, state.path, publisherId);
     if (!state.share) {
-      for (const [id, entry] of this.entries) if (entry.projectId === projectId && entry.threadId === threadId && (threadId !== null || entry.state.path === state.path)) this.entries.delete(id);
+      if (!publisher) for (const [id, entry] of this.entries) if (entry.projectId === projectId && entry.threadId === threadId && (threadId !== null || entry.state.path === state.path)) this.entries.delete(id);
       return false;
     }
     this.entries.delete(key);
-    this.entries.set(key, { projectId, threadId, state, receivedAt: this.now() });
+    this.entries.set(key, { projectId, threadId, publisherId, state, receivedAt: this.now() });
     this.sweep();
     return true;
   }
@@ -101,12 +119,15 @@ const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 export function describeView(state: StudioViewState, ageMs = 0): string {
   const lines = [
     `Surface: ${state.surface}${state.tool ? `, tool: ${state.tool}` : ''}${state.orgAlias ? `, org: ${state.orgAlias}` : ''}`,
-    `File: ${state.path ?? '(unsaved draft)'}${state.dirty ? ' (unsaved edits)' : ''}`
+    `${state.reference ? 'Owner agent' : 'File'}: ${state.path ?? '(unsaved draft)'}${state.dirty ? ' (unsaved edits)' : ''}`
   ];
-  if (state.selection) lines.push(`Selection: lines ${state.selection.startLine}-${state.selection.endLine}: "${clip(oneLine(state.selection.text), 200)}"`);
+  if (state.reference) {
+    lines.push(`Viewing: ${state.reference.kind} ${state.reference.apiName} (read-only${state.reference.source ? `, source: ${state.reference.source}` : ''})`);
+    if (state.reference.path) lines.push(`Reference file: ${state.reference.path}`);
+  } else if (state.selection) lines.push(`Selection: lines ${state.selection.startLine}-${state.selection.endLine}: "${clip(oneLine(state.selection.text), 200)}"`);
   else if (state.cursor) lines.push(`Cursor: line ${state.cursor.line}`);
   if (state.lastRun) lines.push(`Last preview run: ${state.lastRun.runId} (${state.lastRun.engine}${state.lastRun.turn !== undefined ? `, turn ${state.lastRun.turn}` : ''})`);
-  if (state.diagnostics.length) lines.push(`Problems (${state.diagnostics.length}):`, ...formatDiagnostics(state.diagnostics, 5));
+  if (state.diagnostics.length) lines.push(`${state.reference ? 'Owner agent problems' : 'Problems'} (${state.diagnostics.length}):`, ...formatDiagnostics(state.diagnostics, 5));
   if (ageMs > 5000) lines.push(`(updated ${Math.round(ageMs / 1000)}s ago)`);
   return lines.join('\n');
 }
@@ -153,8 +174,9 @@ export function registerStudioContext(studio: StudioServerContext): void {
     const input = record(args);
     const state = input.state;
     if (!isStudioViewState(state)) return rpcFailure('invalid_input', 'Invalid Studio view state.');
+    if (input.publisher !== undefined && !isStudioViewPublisher(input.publisher)) return rpcFailure('invalid_input', 'Invalid Studio view publisher.');
     const threadId = typeof input.threadId === 'string' && input.threadId.length <= 200 ? input.threadId : null;
-    return { ok: true, shared: store.publish(projectId, state, threadId) };
+    return { ok: true, shared: store.publish(projectId, state, threadId, input.publisher) };
   });
 
   studio.registerRpc(STUDIO_RPC.viewGet, args => {

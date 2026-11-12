@@ -42,6 +42,7 @@ import { useContextChangeRelay } from './context-sync.js';
 import { recordRecentAgent } from './recent-agents.js';
 import { studioAgentResource } from './studio-window-route.js';
 import { projectViewStorageKey, readProjectView, rememberProjectView } from './project-view.js';
+import { subscribeAgentScriptOpen, takeQueuedAgentScriptOpen } from './agent-script-open.js';
 
 export { readProjectView } from './project-view.js';
 
@@ -117,12 +118,12 @@ export function SalesforceProjectTab(props: {
   useEffect(() => {
     if (resourceId) { setViewState('agentforce'); setAgentFocus({ path: resourceId, nonce: ++focusSeq.current }); }
   }, [resourceId, context.resourceRequestId]);
-  const setView = (next: WorkbenchView) => {
+  const setView = useCallback((next: WorkbenchView) => {
     setViewState(next);
     props.onViewChange?.(next);
     if (next !== "agentforce") setAgentFocus(null);
     if (!studio) rememberProjectView(props.projectId, next, studio);
-  };
+  }, [props.projectId, props.onViewChange, studio]);
   const [orgsOpen, setOrgsOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [loginRequest, setLoginRequest] = useState(0);
@@ -139,6 +140,21 @@ export function SalesforceProjectTab(props: {
     setSyncOpen(false);
     setLoginRequest(0);
   }, [props.projectId, studio]);
+  useEffect(() => {
+    // Resource-bound windows and detached hosts must keep their existing ownership.
+    if (studio || detached) return;
+    const openQueued = (projectId: string) => {
+      if (projectId !== props.projectId) return;
+      const path = takeQueuedAgentScriptOpen(projectId);
+      if (!path) return;
+      setView('agentforce');
+      setAgentFocus({ path, nonce: ++focusSeq.current });
+    };
+    const unsubscribe = subscribeAgentScriptOpen(openQueued);
+    // Cards can queue before navigation mounts this tab, or while it is already open.
+    openQueued(props.projectId);
+    return unsubscribe;
+  }, [props.projectId, studio, detached, setView]);
   const alias = chosenTarget?.projectId === props.projectId ? chosenTarget.alias : status.data?.selectedAlias || status.data?.defaultOrg || "";
   useEffect(() => { setChosenTarget(null); }, [props.projectId, status.data]);
   const selected = (alias: string) => setChosenTarget({ projectId: props.projectId, alias });

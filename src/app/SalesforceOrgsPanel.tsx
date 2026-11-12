@@ -1,5 +1,5 @@
 import { SalesforcePicklist } from './components/SalesforcePicklist.js';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppWindow, ArrowLeft, Bot, Database, FileCode, FlaskConical, Home, Package, type LucideIcon } from 'lucide-react';
 import { useZccNavigate } from '@zana-ai/zcc-plugin-sdk/app';
 import type { HubProject } from '../../lib/hub-projects.js';
@@ -35,6 +35,11 @@ function storeProject(projectId: string): void {
   try { localStorage.setItem(PROJECT_KEY, projectId); } catch { /* optional */ }
 }
 
+/** The id ends with the project name, which the host shows as "Ask about <name>." */
+export function hubPanelScope(project: Pick<HubProject, 'id' | 'name'>): { id: string; projectId: string } {
+  return { id: `${project.id}/${project.name.replace(/[\\/\u0000-\u001f\u007f]/g, ' ').trim() || 'project'}`, projectId: project.id };
+}
+
 const fileName = (path: string) => (path.split('/').pop() || path).replace(/\.agent$/i, '');
 
 function ago(openedAt: number, now: number): string {
@@ -63,6 +68,18 @@ export function SalesforceOrgsPanel(props: { pluginId: string; subPath?: string 
   const project = projects.find(row => row.id === chosen) ?? projects[0] ?? null;
   useEffect(() => activeView === 'agentforce' && project ? registerHubStudioProject(project.id) : undefined, [activeView, project?.id]);
   useEffect(() => { setWindowError(null); }, [project?.id]);
+  // The hub is a global page: name the chosen project so its side-panel
+  // conversations run there, not in the default project. The embedded Studio
+  // names its own open file instead. Layout effects order this cleanup before
+  // the Studio's scope is set (hosts without project scopes ignore it).
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const hubScope = activeView !== 'agentforce' && project ? hubPanelScope(project) : null;
+  useLayoutEffect(() => {
+    if (!hubScope) return;
+    navigateRef.current.setPanelScope?.(hubScope);
+    return () => { navigateRef.current.setPanelScope?.(null); };
+  }, [hubScope?.id, hubScope?.projectId]);
   const names = useMemo(() => new Map(projects.map(row => [row.id, row.name])), [projects]);
   const recentRows = recent.filter(row => names.has(row.projectId));
   const salesforceProjects = projects.filter(row => row.salesforce);

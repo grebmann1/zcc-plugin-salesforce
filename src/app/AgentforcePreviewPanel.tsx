@@ -1,5 +1,5 @@
 import { SalesforcePicklist } from './components/SalesforcePicklist.js';
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { callPluginRpc, useZccContext, useZccNavigate } from '@zana-ai/zcc-plugin-sdk/app';
 import { PopoverPicklist } from '@zana-ai/zcc-ui/popover-picklist';
 import { parseAgentforcePanelRun } from './agentforce-panel-params.js';
@@ -30,6 +30,7 @@ import { PREVIEW_CONTEXT_STYLES, PreviewContextEditor, PreviewContextSetup, Prev
 import { getStudioRun, readWorkspaceValue, runWorkspaceRef, studioRunKey, updateStudioRun, useRunWorkspaceState, type StudioRunOwner } from './studio/run-workspaces.js';
 import type { LabSnapshot } from '../../lib/agentforce-lab-contract.js';
 import type { PreviewContextVariable } from '../../lib/preview-context.js';
+import type { ControlState } from '../../lib/workbench-control.js';
 
 const PLUGIN_ID = 'salesforce';
 const PANEL_ROOT: CSSProperties = { height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' };
@@ -37,6 +38,14 @@ const PANEL_ROOT: CSSProperties = { height: '100%', minHeight: 0, display: 'flex
 function rpcProject(projectId: string | null | undefined, extra?: Record<string, unknown>) {
   return projectId ? { projectId, ...extra } : extra ?? {};
 }
+
+export interface AgentPreviewControl {
+  assertReady(action: 'start' | 'send' | 'end'): void;
+  start(contextVariables?: PreviewContextVariable[]): Promise<ControlState>;
+  send(text: string): Promise<ControlState>;
+  end(): Promise<ControlState>;
+}
+export interface AgentPreviewState { sessionId: string | null; engine: PreviewMode; busy: boolean; status: 'idle' | 'active' | 'starting' | 'sending' | 'ending' | 'failed'; turns: number; error: string | null; lastReply: string | null; replyTruncated: boolean }
 
 interface AgentforcePreviewPanelProps {
   pluginId: string;
@@ -47,6 +56,10 @@ interface AgentforcePreviewPanelProps {
   params?: unknown;
   /** Binds the panel to one agent file: the shared per-thread target and the agent picker are ignored. */
   pinnedPath?: string;
+  /** Thread-owned controls always use a local simulated session, isolated from other threads. */
+  controlledThreadId?: string;
+  onControl?: (control: AgentPreviewControl | null) => void;
+  onState?: (state: AgentPreviewState) => void;
 }
 
 export function AgentforcePreviewPanel(props: AgentforcePreviewPanelProps) {
@@ -77,7 +90,7 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
   const apiName = pinned ? undefined : target?.apiName;
   const targetPath = pinned ?? (target?.path || files.find(file => file.apiName === apiName)?.path || (apiName ? null : files[0]?.path ?? null));
   useEffect(() => { if (!pinned && targetPath && target?.path !== targetPath) select({ path: targetPath }); }, [pinned, target?.path, targetPath, select]);
-  const owner: StudioRunOwner = { pluginId, projectId, orgAlias: pinnedOrg ?? org?.alias, path: targetPath ?? apiName ?? undefined, view: 'org-preview' };
+  const owner: StudioRunOwner = { pluginId, projectId, orgAlias: pinnedOrg ?? org?.alias, path: targetPath ?? apiName ?? undefined, view: 'org-preview', ...(props.controlledThreadId ? { threadId: props.controlledThreadId } : {}) };
   const workspaceKey = studioRunKey(owner);
   const [mode, setMode] = useRunWorkspaceState<PreviewMode>(workspaceKey, 'mode', 'simulate');
   const [sessionId, setSessionId] = useRunWorkspaceState<string | null>(workspaceKey, 'sessionId', null);
@@ -85,6 +98,7 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
   const [turns, setTurns] = useRunWorkspaceState<PreviewTurn[]>(workspaceKey, 'turns', []);
   const [busy, setBusy] = useRunWorkspaceState(workspaceKey, 'busy', false);
   const [error, setError] = useState<string | null>(null);
+  const [operation, setOperation] = useState<'start' | 'send' | 'end' | null>(null);
   const hasTarget = Boolean(targetPath || apiName);
   const context = usePreviewContext({ pluginId, projectId, path: targetPath ?? undefined, apiName: apiName ?? undefined, orgAlias: pinnedOrg ?? org?.alias, scope: `${projectId ?? ''}:${targetPath ?? apiName ?? ''}:${pinnedOrg ?? org?.alias ?? ''}` });
   const epoch = runWorkspaceRef(workspaceKey, 'epoch', 0);
@@ -142,28 +156,29 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
   }, [pluginId, projectId, refreshOrg]);
 
   const callPreview = useCallback(
-    async (action: 'start' | 'send' | 'end', extra?: Record<string, unknown>): Promise<PreviewResult> => {
+    async (action: 'start' | 'send' | 'end', extra?: Record<string, unknown>, controlled = false): Promise<PreviewResult> => {
       if (action === 'start' || action === 'end') epoch.current++;
       const requestedEpoch = epoch.current;
       locked.current = true; setBusy(true);
+      setOperation(action);
       setError(null);
-      const simulated = action === 'start' ? mode === 'simulate' && Boolean(targetPath) : Boolean(lifecycle.current.simulated);
+      const simulated = action === 'start' ? (controlled || mode === 'simulate') && Boolean(targetPath) : Boolean(lifecycle.current.simulated);
       const scopeArgs = rpcProject(projectId, {
         threadId, orgAlias: org?.alias ?? pinnedOrg,
         path: targetPath || undefined, apiName: targetPath ? undefined : apiName || undefined,
-        // Every call here comes from a click on Start, Send or End: that click is the approval.
-        live: mode === 'live', startedByUser: true
+        // Direct clicks carry user intent; imperative controls are simulation only.
+        live: controlled ? false : mode === 'live', startedByUser: !controlled
       });
-      const ownerForWorkspace: StudioRunOwner = { pluginId, projectId, orgAlias: pinnedOrg ?? org?.alias, path: targetPath ?? apiName ?? undefined, view: 'org-preview' };
-      const owner = action === 'start' ? scopeArgs : lifecycle.current.owner ?? scopeArgs;
-      const args = { ...owner, ...extra };
+      const ownerForWorkspace = owner;
+      const requestOwner = action === 'start' ? scopeArgs : lifecycle.current.owner ?? scopeArgs;
+      const args = { ...requestOwner, ...extra, ...(controlled ? { live: false, startedByUser: false } : {}) };
       try {
         const result = await callOrgPreview(pluginId, action, args, simulated);
         if (epoch.current !== requestedEpoch) return { ok: false };
         if (result?.ok && action === 'start' && result.data?.sessionId) {
           const sessionId = result.data.sessionId;
-          lifecycle.current = { simulated, owner };
-          updateStudioRun({ pluginId, projectId, orgAlias: pinnedOrg ?? org?.alias, path: targetPath ?? apiName ?? undefined, view: 'org-preview' }, { runId: sessionId, engine: simulated ? 'simulate' : 'live', status: 'active', turn: 0 });
+          lifecycle.current = { simulated, owner: requestOwner };
+          updateStudioRun(ownerForWorkspace, { runId: sessionId, engine: simulated ? 'simulate' : 'live', status: 'active', turn: 0 });
         }
         if (result?.ok && action === 'end') {
           lifecycle.current = {};
@@ -185,21 +200,31 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
         if (epoch.current === requestedEpoch) setError(message);
         return { ok: false, error: message };
       } finally {
-        if (epoch.current === requestedEpoch) { locked.current = false; setBusy(false); }
+        if (epoch.current === requestedEpoch) { locked.current = false; setBusy(false); setOperation(null); }
       }
     },
-    [apiName, mode, pluginId, projectId, targetPath, threadId, org?.alias, pinnedOrg]
+    [apiName, mode, pluginId, projectId, targetPath, threadId, org?.alias, pinnedOrg, workspaceKey]
   );
 
-  const start = async (contextVariables: PreviewContextVariable[] = context.values) => {
-    const contextPreset = context.presetIdentity;
+  const assertControlled = (action: 'start' | 'send' | 'end') => {
+    if (!pinned || !projectId || !props.controlledThreadId) throw Error('Preview controls need a thread-owned local agent.');
+    if (!pinnedOrg && !org?.alias) throw Error('Wait for the selected org to load before controlling Preview.');
+    if (locked.current || readWorkspaceValue(workspaceKey, 'busy', false)) throw Error('The preview is busy. Wait for it to finish.');
+    if (readWorkspaceValue(workspaceKey, 'sessionId', null) && !lifecycle.current.simulated) throw Error('A live preview is active. End it yourself before using simulated controls.');
+    if (action === 'send' && !readWorkspaceValue(workspaceKey, 'sessionId', null)) throw Error('Start a simulated preview before sending.');
+  };
+  const requireSuccess = (result: PreviewResult) => { if (!result.ok) throw Error(previewErrorMessage(result)); };
+  const start = async (contextVariables: PreviewContextVariable[] = context.values, controlled = false): Promise<ControlState> => {
+    if (controlled) { assertControlled('start'); setMode('simulate'); }
+    const contextPreset = controlled ? undefined : context.presetIdentity;
     setRun(null);
     if (sessionId) {
-      const ended = await callPreview('end', { sessionId });
-      if (!ended.ok) return;
+      const ended = await callPreview('end', { sessionId }, controlled);
+      if (!ended.ok) { if (controlled) requireSuccess(ended); return {}; }
       setSessionId(null);
     }
-    const result = await callPreview('start', contextVariables.length ? { contextVariables } : undefined);
+    const result = await callPreview('start', contextVariables.length ? { contextVariables } : undefined, controlled);
+    if (controlled) requireSuccess(result);
     const nextSession = result?.data?.sessionId ?? null;
     if (result?.ok && nextSession) {
       setSessionId(nextSession);
@@ -208,42 +233,58 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
         const started = appendPreviewTurn([], {
           id: `${Date.now()}-start`,
           role: 'system',
-          text: mode === 'live' ? 'Live preview started.' : 'Simulate preview started.'
+          text: !controlled && mode === 'live' ? 'Live preview started.' : 'Simulate preview started.'
         });
         const welcome = result.data?.response?.trim();
         return welcome ? appendPreviewTurn(started, { id: `${Date.now()}-welcome`, role: 'agent', text: welcome }) : started;
       });
     }
+    return { sessionId: nextSession, engine: controlled ? 'simulate' : mode, response: result.data?.response ?? null };
   };
 
-  const end = useCallback(async () => {
-    if (!sessionId) return;
-    const result = await callPreview('end', { sessionId });
+  const end = useCallback(async (controlled = false): Promise<ControlState> => {
+    if (controlled) assertControlled('end');
+    if (!sessionId) return { sessionId: null, ended: true };
+    const result = await callPreview('end', { sessionId }, controlled);
+    if (controlled) requireSuccess(result);
     if (result?.ok) {
       setSessionId(null);
       setTurns((current) =>
         appendPreviewTurn(current, { id: `${Date.now()}-end`, role: 'system', text: 'Preview ended.' })
       );
     }
-  }, [callPreview, sessionId]);
+    return { sessionId: null, ended: Boolean(result.ok) };
+  }, [callPreview, sessionId, workspaceKey]);
 
-  const send = useCallback(
-    async (event?: FormEvent) => {
-      event?.preventDefault();
-      const text = utterance.trim();
-      if (busy || !sessionId || !text) return;
+  const sendText = useCallback(
+    async (text: string, controlled = false): Promise<ControlState> => {
+      if (controlled) assertControlled('send');
+      text = text.trim();
+      if (busy || !sessionId || !text) { if (controlled) throw Error('Start a simulated preview and provide text before sending.'); return {}; }
       setUtterance('');
       setTurns((current) => appendPreviewTurn(current, { id: `${Date.now()}-user`, role: 'user', text }));
-      const result = await callPreview('send', { sessionId, utterance: text });
+      const result = await callPreview('send', { sessionId, utterance: text }, controlled);
+      if (controlled) requireSuccess(result);
       const response = result?.data?.response?.trim();
       if (result?.ok && response) {
         setTurns((current) =>
           current.at(-1)?.role === 'agent' && current.at(-1)?.text === response ? current : appendPreviewTurn(current, { id: `${Date.now()}-agent`, role: 'agent', text: response })
         );
       }
+      return { sessionId, engine: lifecycle.current.simulated ? 'simulate' : 'live', response: response ?? null };
     },
-    [busy, callPreview, sessionId, utterance]
+    [busy, callPreview, sessionId, workspaceKey]
   );
+  const send = (event?: FormEvent) => { event?.preventDefault(); return sendText(utterance); };
+  useLayoutEffect(() => {
+    props.onControl?.({ assertReady: assertControlled, start: values => start(values, true), send: text => sendText(text, true), end: () => end(true) });
+    return () => { props.onControl?.(null); };
+  });
+  useEffect(() => {
+    const reply = [...turns].reverse().find(turn => turn.role === 'agent')?.text;
+    props.onState?.({ sessionId, engine: sessionId ? lifecycle.current.simulated ? 'simulate' : 'live' : mode, busy, status: operation === 'start' ? 'starting' : operation === 'send' ? 'sending' : operation === 'end' ? 'ending' : error ? 'failed' : sessionId ? 'active' : 'idle', turns: turns.filter(turn => turn.role === 'user').length, error,
+      lastReply: reply?.slice(0, 2000) ?? null, replyTruncated: (reply?.length ?? 0) > 2000 });
+  }, [props.onState, sessionId, mode, busy, operation, turns, error]);
 
   const fileLabel = useMemo(() => {
     if (targetPath) return targetPath.split('/').pop() ?? targetPath;

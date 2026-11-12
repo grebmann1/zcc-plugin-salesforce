@@ -2,7 +2,7 @@
  * @vitest-environment happy-dom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, createElement } from 'react';
+import { act, createElement, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentDocSnapshot } from '../../lib/agent-doc-contract.js';
 
@@ -10,19 +10,24 @@ import type { AgentDocSnapshot } from '../../lib/agent-doc-contract.js';
 
 const navigate = { toProject: vi.fn(), openInWindow: vi.fn() };
 const rpc = vi.fn();
+const controls = vi.hoisted(() => ({ options: null as any, view: null as any, setShare: vi.fn() }));
+vi.mock('./useSalesforceControl.js', async original => ({ ...await original<object>(), useSalesforceControl: (options: unknown) => { controls.options = options; } }));
+vi.mock('./studio/useStudioView.js', () => ({ useStudioView: (options: unknown) => { controls.view = options; return { share: true, setShare: controls.setShare }; } }));
 let realtime: ((payload: unknown) => void) | null = null;
+let context = { projectId: 'proj-1', threadId: 'thr-1' };
 vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({
   callPluginRpc: (...args: unknown[]) => rpc(...args),
   useRealtime: (_channel: string, handler: (payload: unknown) => void) => { realtime = handler; },
-  useZccContext: () => ({ projectId: 'proj-1', threadId: 'thr-1' }),
+  useZccContext: () => context,
   useZccNavigate: () => navigate
 }));
 
 const docApi = { doc: null as AgentDocSnapshot | null, loading: false, error: null as string | null, leased: false, heldBy: null, resolve: vi.fn(), update: vi.fn(), saved: vi.fn(), takeOver: vi.fn(), propose: vi.fn(), reload: vi.fn() };
 vi.mock('./agent-doc/useAgentScriptDoc.js', () => ({ useAgentScriptDoc: () => docApi }));
 const previewMounts = vi.fn();
+const previewCommands = vi.hoisted(() => ({ assertReady: vi.fn(), start: vi.fn(async () => ({})), send: vi.fn(async () => ({})), end: vi.fn(async () => ({})) }));
 vi.mock('./AgentforcePreviewPanel.js', () => ({
-  AgentforcePreviewPanel: (props: { params: unknown; pinnedPath?: string }) => { previewMounts(); return createElement('div', { 'data-testid': 'preview-stub', 'data-pinned': props.pinnedPath ?? '' }, JSON.stringify(props.params)); }
+  AgentforcePreviewPanel: (props: { params: unknown; pinnedPath?: string; onControl?: (control: unknown) => void; onState?: (state: unknown) => void }) => { useEffect(() => { props.onControl?.(previewCommands); props.onState?.({ sessionId: 'actual-session', engine: 'simulate', status: 'active', turns: 1, lastReply: 'Actual bounded reply', replyTruncated: false }); return () => props.onControl?.(null); }, [props.onControl, props.onState]); previewMounts(); return createElement('div', { 'data-testid': 'preview-stub', 'data-pinned': props.pinnedPath ?? '' }, JSON.stringify(props.params)); }
 }));
 vi.mock('./ActionCodePreview.js', () => ({
   ActionCodePreview: (props: { content: string; line?: number }) => createElement('div', { 'data-testid': 'code-stub', 'data-line': props.line ?? '' }, props.content)
@@ -38,7 +43,8 @@ vi.mock('./AgentActionPanel.js', () => ({
     createElement('div', null, createElement('button', { 'data-testid': 'action-panel', onClick: () => props.onReveal(9) }, `panel:${props.action.name}`), createElement('button', { 'data-testid': 'action-type', onClick: () => props.onOpenType('c__Order') }, 'Open order type'))
 }));
 let suites: unknown[] = [];
-vi.mock('./studio/useSuites.js', () => ({ useSuites: () => suites }));
+const refreshSuites = vi.fn(async () => true);
+vi.mock('./studio/useSuites.js', () => ({ useSuiteList: () => ({ suites, refresh: refreshSuites }) }));
 const orgResult = vi.fn();
 vi.mock('./org-rpc.js', () => ({ fetchConnectedOrg: (...args: unknown[]) => orgResult(...args) }));
 const openInStudioWindow = vi.fn();
@@ -78,6 +84,7 @@ describe('AgentThreadPanel', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
+    context = { projectId: 'proj-1', threadId: 'thr-1' };
     docApi.doc = baseDoc(); docApi.loading = false; docApi.error = null;
     docApi.resolve.mockReset().mockResolvedValue({ ok: true });
     rpc.mockReset().mockImplementation(async (_p: string, method: string) => {
@@ -89,8 +96,86 @@ describe('AgentThreadPanel', () => {
     openInStudioWindow.mockReset().mockResolvedValue(false);
     navigate.toProject.mockClear(); queue.mockClear(); previewMounts.mockClear();
     suites = [];
+    refreshSuites.mockReset().mockResolvedValue(true);
+    for (const fn of Object.values(previewCommands)) fn.mockClear();
+    controls.setShare.mockClear();
   });
   afterEach(() => { for (const stop of roots.splice(0)) stop(); });
+
+  it('registers a truthful thread surface, shared view, and explicit privacy switch', async () => {
+    await mount({ path: PATH });
+    expect(controls.options).toMatchObject({ projectId: 'proj-1', threadId: 'thr-1', surface: 'agentforce' });
+    expect(controls.options.commands).toEqual(['state', 'file.open', 'view.open', 'panel.open', 'editor.reveal', 'preview.start', 'preview.send', 'preview.end']);
+    expect(controls.options.state()).toMatchObject({ path: PATH, threadId: 'thr-1', view: 'file', tool: 'code', ready: true });
+    expect(controls.options.state()).not.toHaveProperty('source');
+    expect(controls.view.input).toMatchObject({ surface: 'sidepanel', path: PATH, tool: 'code' });
+    expect(controls.view.input).not.toHaveProperty('selection');
+    await click([...host.querySelectorAll('button')].find(button => button.textContent === 'Share context')!);
+    expect(controls.setShare).toHaveBeenCalledWith(false);
+    await click(tab('Types'));
+    expect(controls.view.input.tool).toBe('types');
+  });
+
+  it('controls only supported views and its own file, with opt-in source and real line reveal', async () => {
+    await mount({ path: PATH });
+    const run = async (command: string, input: unknown = {}) => { let result: unknown; await act(async () => { result = await controls.options.execute({ command, input }); }); return result; };
+    expect(await run('state')).toEqual({});
+    expect(await run('state', { includeSource: true })).toEqual({ source: 'a\nb\nc' });
+    await run('panel.open', { tool: 'test' });
+    expect(refreshSuites).toHaveBeenCalledOnce();
+    expect(tab('Tests').getAttribute('aria-selected')).toBe('true');
+    await run('view.open', { view: 'code' });
+    await run('file.open', { path: PATH });
+    await run('editor.reveal', { line: 8 });
+    expect(q('[data-testid="code-stub"]')?.dataset.line).toBe('8');
+    await expect(run('file.open', { path: 'Other.agent' })).rejects.toThrow('bound to one agent');
+    await expect(run('editor.reveal', { line: 0 })).rejects.toThrow('positive');
+    await expect(run('view.open', { view: 'apex' })).rejects.toThrow('does not support');
+    await expect(run('editor.proposeEdit')).rejects.toThrow('not supported');
+    refreshSuites.mockResolvedValueOnce(false);
+    await expect(run('panel.open', { tool: 'test' })).rejects.toThrow('refresh saved test results');
+    docApi.doc = baseDoc({ text: null });
+    await click(tab('Graph'));
+    await expect(run('state', { includeSource: true })).rejects.toThrow('unavailable');
+  });
+
+  it('opens Preview lazily and acknowledges dispatch without waiting for a remote response', async () => {
+    await mount({ path: PATH });
+    let finish!: (value: {}) => void;
+    previewCommands.start.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    let pending!: Promise<any>;
+    act(() => { pending = controls.options.execute({ command: 'preview.start', input: {} }); });
+    await flush();
+    await expect(pending).resolves.toMatchObject({ preview: { status: 'starting', pending: true } });
+    expect(tab('Preview').getAttribute('aria-selected')).toBe('true');
+    expect(previewCommands.start).toHaveBeenCalledWith([]);
+    expect(previewCommands.assertReady).toHaveBeenCalledWith('start');
+    expect(controls.options.state()).toMatchObject({ preview: { sessionId: 'actual-session', lastReply: 'Actual bounded reply' } });
+    expect(controls.view.input.lastRun).toMatchObject({ runId: 'actual-session', engine: 'simulate', turn: 1 });
+    await act(async () => { finish({}); });
+    expect(await controls.options.execute({ command: 'preview.send', input: { text: 'Hello' } })).toMatchObject({ preview: { status: 'sending' } });
+    expect(previewCommands.send).toHaveBeenCalledWith('Hello');
+    expect(await controls.options.execute({ command: 'preview.end', input: {} })).toMatchObject({ preview: { status: 'ending' } });
+    expect(previewCommands.end).toHaveBeenCalled();
+    await expect(controls.options.execute({ command: 'preview.start', input: { engine: 'live' } })).rejects.toThrow('only engine simulate');
+    await expect(controls.options.execute({ command: 'preview.start', input: { presetId: 'preset' } })).rejects.toThrow('contextVariables');
+    await expect(controls.options.execute({ command: 'preview.send', input: { text: ' ' } })).rejects.toThrow('Provide preview text');
+  });
+
+  it('remounts thread-owned controls when the same file moves to a different thread or project', async () => {
+    const mounted = await mount({ path: PATH });
+    await click(tab('Preview'));
+    expect(controls.options.state().preview.sessionId).toBe('actual-session');
+    context = { projectId: 'proj-1', threadId: 'thr-2' };
+    await mounted.rerender({ path: PATH });
+    expect(controls.options).toMatchObject({ projectId: 'proj-1', threadId: 'thr-2' });
+    expect(controls.options.state().preview).toBeNull();
+    await click(tab('Preview'));
+    context = { projectId: 'proj-2', threadId: 'thr-2' };
+    await mounted.rerender({ path: PATH });
+    expect(controls.options.projectId).toBe('proj-2');
+    expect(controls.options.state().path).toBe(PATH);
+  });
 
   describe('parseAgentThreadParams', () => {
     it('validates path, view and numbers', () => {

@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PreviewRunReplay } from './PreviewRunReplay.js';
 
 const rpc = vi.fn();
@@ -14,6 +14,44 @@ const mount = (extra: Partial<Parameters<typeof PreviewRunReplay>[0]> = {}) =>
   render(<PreviewRunReplay pluginId="salesforce" runId="r" onClose={vi.fn()} {...extra} />);
 
 describe('PreviewRunReplay', () => {
+  it('validates command ownership/reply before rendering transcript or fetching trace', async () => {
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...base, path: 'Other.agent', turns: [{ role: 'agent', text: 'Private reply', planId: 'private-plan' }] } });
+    const view = mount({ expectedPath: 'Help.agent', turn: 1 });
+    expect((await screen.findByRole('alert')).textContent).toContain('does not belong');
+    expect(screen.queryByText('Private reply')).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(1);
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...base, path: 'Help.agent', turns: [{ role: 'agent', text: 'Welcome', planId: 'p' }] } });
+    view.rerender(<PreviewRunReplay pluginId="salesforce" projectId="p2" runId="r" expectedPath="Help.agent" turn={9} onClose={vi.fn()} />);
+    expect((await screen.findByRole('alert')).textContent).toContain('reply is unavailable');
+    expect(screen.queryByText('Welcome')).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors zero/latest and an exact step, clearing stale content on project/run changes', async () => {
+    let finishOld!: (value: unknown) => void;
+    rpc.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    const view = mount({ expectedPath: 'Old.agent', projectId: 'old', turn: 1, step: 0 });
+    rpc.mockImplementation(async (method, args) => method === 'agentLab.get'
+      ? { ok: true, data: { ...base, id: 'new', live: true, path: 'New.agent', turns: [{ role: 'agent', text: 'A', planId: 'a' }, { role: 'agent', text: 'B', planId: 'b' }] } }
+      : { ok: true, data: { runId: args.id, turn: args.turn, planId: args.planId, available: true, steps: [{ kind: 'response', label: 'Exact step', outputPreview: 'B' }] } });
+    view.rerender(<PreviewRunReplay pluginId="salesforce" projectId="new" runId="new" expectedPath="New.agent" turn={0} step={0} onClose={vi.fn()} />);
+    expect(await screen.findByText('Live run')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Exact step').closest('[role=listitem]')?.getAttribute('aria-current')).toBe('step'));
+    expect(rpc).toHaveBeenCalledWith('agentLab.trace', { projectId: 'new', id: 'new', planId: 'b', turn: 2, path: 'New.agent' });
+    await act(async () => finishOld({ ok: true, data: { ...base, path: 'Old.agent', turns: [{ role: 'agent', text: 'Old secret', planId: 'old' }] } }));
+    expect(screen.queryByText('Old secret')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Turn 1' }));
+    await waitFor(() => expect(rpc).toHaveBeenLastCalledWith('agentLab.trace', expect.objectContaining({ planId: 'a', turn: 1 })));
+    expect(document.querySelector('[aria-current="step"]')).toBeNull();
+    expect(rpc.mock.calls.every(([, args]) => !args.includeSource)).toBe(true);
+  });
+
+  it('rejects a response for the wrong run ID', async () => {
+    rpc.mockResolvedValue({ ok: true, data: { ...base, id: 'other', path: 'Help.agent', turns: [{ role: 'agent', text: 'Hidden', planId: 'p' }] } });
+    mount({ expectedPath: 'Help.agent', turn: 1 });
+    expect((await screen.findByRole('alert')).textContent).toContain('requested run is unavailable');
+    expect(screen.queryByText('Hidden')).toBeNull();
+  });
   it('labels a rehearse run as an approximation and never asks for a trace', async () => {
     rpc.mockResolvedValue({ ok: true, data: { ...base, engine: 'rehearsal', failed: true, turns: [{ role: 'user', text: 'Hi' }, { role: 'agent', text: 'Hello' }] } });
     mount();

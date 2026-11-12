@@ -78,11 +78,13 @@ import { SaveAgentDialog } from './SaveAgentDialog.js';
 import { EmptyState, LoadingState, SalesforceState } from './components/SalesforceState.js';
 import { PreviewWorkbench, type PreviewCommand } from './preview/PreviewWorkbench.js';
 import { PreviewRunReplay } from './preview/PreviewRunReplay.js';
+import type { TraceFocus } from './preview/trace-focus.js';
 import { OperationsPanel } from './panels/OperationsPanel.js';
 import { AskAgentButton } from './studio/AskAgentButton.js';
 import { isPanelTool, panelToolActionId, studioToolScope, useStudioRegistration, useStudioToolSlots, type PanelTool } from './studio/studio-tool-bridge.js';
 import { CommentsPane } from './studio/CommentsPane.js';
 import { useStudioView } from './studio/useStudioView.js';
+import { activeDocumentContext } from './studio/viewed-reference.js';
 import { StudioShell } from './studio/StudioShell.js';
 import { Explorer } from './studio/Explorer.js';
 import { EditorTabs } from './studio/EditorTabs.js';
@@ -259,7 +261,8 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
     // name it so the panel's conversations run there, not in the default
     // project (hosts without project scopes ignore the field).
     const hub = !context.projectId && projectId ? projectId : undefined;
-    const id = hub ? JSON.stringify([hub, activePath]) : activePath;
+    // The host labels the panel with the id's last path segment ("Ask about Support.agent.").
+    const id = hub ? `${hub}/${activePath ?? 'Agentforce Studio'}` : activePath;
     navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}), ...(hub ? { projectId: hub } : {}) } : null);
     return () => { navigateRef.current.setPanelScope?.(null); };
   }, [activePath, context.projectId, projectId]);
@@ -377,7 +380,9 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   // The path the editor frame currently holds (set once its file is read), so a snapshot lands on the right agent.
   const loadedPath = useRef<string | null>(null);
   /** A stored run a card asked to see: shown read-only over that agent's Preview until closed. */
-  const [previewRun, setPreviewRun] = useState<{ path: string; runId: string; turn?: number; seq: number } | null>(null);
+  const [previewRun, setPreviewRun] = useState<{ path: string; runId: string; turn?: number; step?: number; strict?: boolean; seq: number } | null>(null);
+  const [traceFocus, setTraceFocus] = useState<(TraceFocus & { path: string }) | null>(null);
+  const traceFocusSeq = useRef(0);
   const [graphFocus, setGraphFocus] = useState<{ node: string | null; seq: number; caseId?: string }>({ node: null, seq: 0 });
   const [editorCompactOverride, setEditorCompactOverride] = useState<boolean | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
@@ -1373,8 +1378,23 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
       setPreviewCommand({ seq: ++previewSeq.current, type: 'context', ...(preset ? { preset } : { contextVariables: values ?? [] }), ...(merge ? { merge: true } : {}) });
       return preset ? { context: 'preset', presetId: preset.id, preset: preset.name, variables: preset.values.length } : { context: merge ? 'merged' : 'replaced', variables: values?.length ?? 0 };
     },
-    traceFocus: () => {
+    traceFocus: ({ runId, turn, step }) => {
+      const path = activePath;
+      // Explicit targets must never fall back to a different run, reply or agent.
+      const retained = runSessions.find(run => run.path === path && run.status !== 'expired');
+      const id = runId ?? lastRun?.runId ?? retained?.runId;
+      if (runId !== undefined || turn !== undefined || step !== undefined) {
+        if (!path) throw Error('Open an agent before focusing a trace.');
+        if (!id) throw Error('No retained run is available for the open agent.');
+      }
+      const seq = ++traceFocusSeq.current;
+      if (path && id) {
+        const target = { path, runId: id, turn, step, seq };
+        if (wide) setTraceFocus(target);
+        else setPreviewRun({ ...target, strict: true });
+      } else setTraceFocus(null);
       if (wide) patch({ bottomOpen: true, bottomTab: 'trace' }); else openTool('preview');
+      return id ? { trace: { runId: id, turn: turn || 'latest', ...(step !== undefined ? { step } : {}), status: 'loading' } } : {};
     },
     graphFocus: node => { setGraphFocus(current => ({ node, seq: current.seq + 1 })); openTool('graph'); },
     layoutSet: setEditorCompactOverride,
@@ -1535,7 +1555,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
     pluginId, projectId, threadId: threadId ?? null,
     input: {
       surface: 'studio', path: activePath, ...(sha256 ? { sha256 } : {}), dirty,
-      ...(cursor ? { cursor } : {}), ...(selection ? { selection } : {}),
+      ...activeDocumentContext(activeEditorTab, studio.actionOrigin, { ...(cursor ? { cursor } : {}), ...(selection ? { selection } : {}) }),
       tool: STUDIO_TOOL_FOR[currentTool] === undefined ? (currentTool as StudioTool) : STUDIO_TOOL_FOR[currentTool],
       ...(lastRun ? { lastRun: { runId: lastRun.runId, engine: lastRun.engine, turn: lastRun.turn } } : {}),
       diagnostics: problems, ...(org?.alias ? { orgAlias: org.alias } : {})
@@ -1724,7 +1744,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
         if (tab === 'problems') return <ProblemsPanel path={activePath} diagnostics={problems} compact={compact} busy={fixBusy}
           compile={compiled} stale={Boolean(compiled && (dirty || compiled.sha !== (sha256 || undefined)))}
           onReveal={line => revealLine(line)} onFixWithAgent={() => void fixWithAgent()} />;
-        if (tab === 'trace') return <BottomTrace pluginId={pluginId} path={activePath} run={lastRun} visible={visible} onOpenPreview={() => openTool('preview')}
+        if (tab === 'trace') return <BottomTrace pluginId={pluginId} projectId={projectId} path={activePath} run={lastRun} focus={traceFocus?.path === activePath ? traceFocus : undefined} visible={visible} onOpenPreview={() => openTool('preview')}
           onRevealSource={(path, line) => { if (path === activePathRef.current) revealLine(line); else void openFile(path).then(opened => { if (opened) revealLine(line); }); }} />;
         if (tab === 'output') return visible ? <OperationsPanel pluginId={pluginId} projectId={projectId} orgAlias={org?.alias} threadId={threadId} /> : null;
         return <BottomTests key={`${projectId}:${activePath}`} suites={suites}
@@ -1784,6 +1804,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
         : target === 'preview'
         ? <>
           {previewRun?.path === agent.path && <PreviewRunReplay key={`${previewRun.runId}:${previewRun.turn ?? ''}:${previewRun.seq}`} pluginId={pluginId} projectId={projectId} runId={previewRun.runId} turn={previewRun.turn}
+            expectedPath={previewRun.strict ? agent.path : undefined} step={previewRun.step} focusSeq={previewRun.seq}
             onRevealSource={revealIn} onClose={() => setPreviewRun(null)} />}
           {/* Stays mounted behind a replay: a live session is not ended by looking at an old run. */}
           <div style={{ display: previewRun?.path === agent.path ? 'none' : 'contents' }}>

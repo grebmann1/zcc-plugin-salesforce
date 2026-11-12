@@ -93,7 +93,7 @@ describe('AgentCard', () => {
     expect(takeQueuedAgentScriptOpen('p1')).toBeNull();
     await act(async () => (el.querySelector('.plugin-directive-card-open') as HTMLButtonElement).click());
     expect(navigate.toProject).toHaveBeenCalledWith('p1', { tabId: 'salesforce' });
-    takeQueuedAgentScriptOpen('p1');
+    expect(takeQueuedAgentScriptOpen('p1')).toBe('force-app/Bot.agent');
   });
   it('opens the agent in the Studio window when no thread panel can take it', async () => {
     navigate.openThreadPanel.mockReturnValueOnce(false);

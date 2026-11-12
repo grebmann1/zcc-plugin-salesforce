@@ -76,4 +76,29 @@ describe('TracePanel', () => {
     await act(async () => toggle.click());
     expect(payloads.every(p => !p.open)).toBe(true);
   });
+  it('highlights zero-based steps, opens payloads and repeats the reveal without taking keyboard focus', () => {
+    const reveal = vi.fn();
+    const scroll = vi.fn();
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(scroll);
+    const el = render(<TracePanel trace={trace} focusStep={0} focusSeq={1} onRevealSource={reveal} />);
+    const first = el.querySelectorAll<HTMLElement>('[role=listitem]')[0];
+    expect(first.getAttribute('aria-current')).toBe('step');
+    expect(first.querySelector('details')?.open).toBe(true);
+    expect(document.activeElement).not.toBe(first);
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    act(() => root!.render(<TracePanel trace={trace} focusStep={1} focusSeq={2} onRevealSource={reveal} />));
+    const second = el.querySelectorAll<HTMLElement>('[role=listitem]')[1];
+    expect(first.hasAttribute('aria-current')).toBe(false);
+    expect(document.activeElement).not.toBe(second);
+    act(() => root!.render(<TracePanel trace={trace} focusStep={1} focusSeq={3} onRevealSource={reveal} />));
+    expect(document.activeElement).not.toBe(second);
+    expect(scroll).toHaveBeenCalledTimes(3);
+    expect(reveal).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+  it('reports a missing step rather than highlighting a different one', () => {
+    const el = render(<TracePanel trace={trace} focusStep={4} />);
+    expect(el.querySelector('[role=alert]')?.textContent).toContain('requested trace step is unavailable');
+    expect(el.querySelector('[aria-current]')).toBeNull();
+  });
 });

@@ -30,6 +30,10 @@ export const test = base.extend({ app: async ({ app, home, launchEnv }, use) => 
       ZCC_SESSION_ID: undefined, ZCC_SESSION_TOKEN: undefined, ZCC_SKIP_PLUGIN_NPM: '1', npm_config_registry: 'https://registry.npmjs.org/' }
   });
   expect(result.stderr).not.toContain('Error:');
+  // Installing the plugin can re-offer the host's tutorial hint over the titlebar; it never belongs to these flows.
+  await app.window.addLocatorHandler(app.window.getByRole('region', { name: 'Discover video tutorials' }), async () => {
+    await app.window.getByRole('button', { name: 'Dismiss tutorial hint' }).click();
+  });
   await use(app);
 } });
 `);

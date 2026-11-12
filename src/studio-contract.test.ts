@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_SOURCE_MAX,
-  isProposalOutcome, isProposeEditInput, isStudioComment, isStudioDiagnostic, isStudioDiagnostics, isStudioViewState,
+  isProposalOutcome, isProposeEditInput, isStudioComment, isStudioDiagnostic, isStudioDiagnostics, isStudioViewPublisher, isStudioViewReference, isStudioViewState,
   CONTEXT_CHANGED_CHANNEL, STUDIO_CHANGED_CHANNEL, STUDIO_RPC, UI_WAKE_CHANNEL, contextOrigin
 } from '../lib/studio-contract.js';
 
@@ -51,5 +51,21 @@ describe('studio contract', () => {
     expect(isStudioViewState(view)).toBe(true);
     expect(isStudioViewState({ ...view, surface: 'sidepanel', path: null, tool: null, sha256: sha, orgAlias: 'dev', cursor: { line: 1, column: 1 }, selection: { startLine: 1, endLine: 2, text: 'x' }, lastRun: { runId: 'r', engine: 'live', turn: 2 } })).toBe(true);
     for (const bad of [null, { ...view, surface: 'x' }, { ...view, path: 1 }, { ...view, dirty: 'no' }, { ...view, tool: 'zzz' }, { ...view, cursor: { line: 0, column: 1 } }, { ...view, selection: { startLine: 1, endLine: 1, text: 'x'.repeat(2001) } }, { ...view, lastRun: { runId: 'r', engine: 'warp' } }, { ...view, diagnostics: Array(51).fill(diag) }, { ...view, orgAlias: 1 }, { ...view, sha256: 1 }, { ...view, at: 'x' }]) expect(isStudioViewState(bad)).toBe(false);
+  });
+  it('bounds publisher identity and accepts only positive safe sequence numbers', () => {
+    expect(isStudioViewPublisher({ id: 'window_A-1', sequence: Number.MAX_SAFE_INTEGER })).toBe(true);
+    for (const value of [null, [], {}, { id: 1, sequence: 1 }, { id: '', sequence: 1 }, { id: 'x'.repeat(101), sequence: 1 }, { id: 'window/path', sequence: 1 }, { id: 'window', sequence: 0 }, { id: 'window', sequence: -1 }, { id: 'window', sequence: 1.5 }, { id: 'window', sequence: NaN }, { id: 'window', sequence: Infinity }, { id: 'window', sequence: Number.MAX_SAFE_INTEGER + 1 }]) expect(isStudioViewPublisher(value)).toBe(false);
+  });
+  it('bounds read-only references and confines optional paths to relative project metadata', () => {
+    const reference = { kind: 'flow', apiName: 'Billing', path: 'force-app/main/default/flows/Billing.flow-meta.xml', source: 'project' };
+    expect(isStudioViewReference(reference)).toBe(true);
+    expect(isStudioViewState({ ...view, reference })).toBe(true);
+    expect(isStudioViewReference({ kind: 'apex', apiName: 'c__OrderAction', source: 'org' })).toBe(true);
+    expect(isStudioViewReference({ kind: 'lightning-type', apiName: 'c__Order' })).toBe(true);
+    expect(isStudioViewReference({ kind: 'lwc', apiName: 'c/orderSummary' })).toBe(true);
+    for (const bad of [null, {}, { ...reference, kind: 'agent' }, { ...reference, apiName: '' }, { ...reference, apiName: 1 }, { ...reference, apiName: 'x'.repeat(201) }, { ...reference, apiName: 'Name\nInstruction' }, { ...reference, source: 'remote' }, ...['', '/tmp/file.xml', '~/file.xml', 'C:/file.xml', 'force-app/../file.xml', 'force-app\\file.xml', 'force-app/\x00file.xml', 'x'.repeat(1001)].map(path => ({ ...reference, path })), { ...reference, path: 1 }]) {
+      expect(isStudioViewReference(bad)).toBe(false);
+      expect(isStudioViewState({ ...view, reference: bad })).toBe(false);
+    }
   });
 });
