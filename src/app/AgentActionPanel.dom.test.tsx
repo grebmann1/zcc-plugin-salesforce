@@ -27,7 +27,10 @@ describe('Agent action explorer', () => {
     expect(selected.textContent).toContain('Find ordersapex://OrderLookupApex');
     expect(selected.getAttribute('aria-current')).toBe('true');
     const group = selected.closest('details')!;
-    group.open = false; fireEvent(group, new Event('toggle'));
+    fireEvent.click(group.querySelector('summary')!);
+    expect(group.open).toBe(false);
+    // A late native toggle from the remount must not reopen a group the user closed.
+    fireEvent(group, new Event('toggle'));
     const search = screen.getByRole('searchbox', { name: 'Search actions' });
     for (const query of ['Find orders', 'OrderLookup', 'Delivery status']) {
       fireEvent.change(search, { target: { value: query } });
@@ -43,7 +46,8 @@ describe('Agent action explorer', () => {
     fireEvent.change(search, { target: { value: '' } });
     expect(view.container.querySelector('details')?.open).toBe(false);
     const restored = view.container.querySelector('details')!;
-    restored.open = true; fireEvent(restored, new Event('toggle'));
+    fireEvent.click(restored.querySelector('summary')!);
+    expect(restored.open).toBe(true);
     expect(screen.getByRole('button', { name: 'Inspect Find orders (lookup) in start_agent.orders' })).toBeTruthy();
   });
   it('keeps same-named actions scoped and supports empty and unsupported targets', () => {

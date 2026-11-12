@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
@@ -102,6 +103,25 @@ describe('salesforce plugin contract', () => {
     expect(getThread).not.toHaveBeenCalled();
     await harness.callRpc('doctor', { projectId: 'p1' });
     await expect(harness.callRpc('status', {})).resolves.toMatchObject({ lastDoctor: null });
+  });
+
+  it('runs every thread-panel RPC in the owning thread project, and publishes agent drafts to the Studio', async () => {
+    const dx = mkdtempSync(join(tmpdir(), 'sf-thread-project-'));
+    try {
+      const getThread = vi.fn(async ({ threadId }: { threadId: string }) => threadId === 't' ? { id: 't', projectId: 'p1' } as never : null);
+      const { zcc, harness } = createFakePluginHost({ pluginId: 'salesforce', getThread, listProjects: async () => [{ id: 'p1', name: 'DX', path: dx }] });
+      await createSalesforcePlugin(zcc, mockDeps());
+      harness.setSettings({ defaultOrg: 'dev', projectRoot: '/shared' });
+      // A thread panel names only its thread: the draft lands in that thread's project, not the shared root.
+      const created = await harness.callRpc('agents.draft.create', { threadId: 't', name: 'Helper', apiName: 'Helper' }) as { ok: boolean; file: { path: string } };
+      expect(created).toMatchObject({ ok: true });
+      expect(existsSync(join(dx, created.file.path))).toBe(true);
+      expect(harness.published).toContainEqual({ event: STUDIO_CHANGED_CHANNEL, payload: { projectId: 'p1', path: created.file.path, kind: 'files' } });
+      expect(harness.published.some(row => row.event === 'files.changed')).toBe(false);
+      // Unknown threads fail closed only where the caller asked for that thread (composer status).
+      await expect(harness.callRpc('status', { threadId: 'missing' })).resolves.toMatchObject({ ok: false, code: 'invalid_context' });
+      await expect(harness.callRpc('agentScript.parse', { threadId: 'missing', source: '' })).resolves.toMatchObject({ ok: true });
+    } finally { rmSync(dx, { recursive: true, force: true }); }
   });
 
   it('derives a stable id and ships DX skills', () => {

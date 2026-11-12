@@ -56,8 +56,11 @@ describe('org agent sources', () => {
     expect(execSf.mock.calls[1]).toEqual([['project', 'retrieve', 'start', '--metadata', 'AiAuthoringBundle:Support_v2', '--target-org', 'sandbox', '--json', '--wait', '2'], expect.objectContaining({ cwd: temporary(), timeoutMs: 120_000, signal: expect.any(AbortSignal) })]);
     expect(existsSync(temporary())).toBe(false);
     writeFileSync(path, 'local edits');
-    const reopened = await service.start(root, { fullName: 'Support_v2', orgId: org.orgId });
+    // The finished retrieval names its file so the open Studio refreshes; a throwing listener never fails it.
+    const done = vi.fn(() => { throw Error('listener'); });
+    const reopened = await service.start(root, { fullName: 'Support_v2', orgId: org.orgId }, done);
     expect(await finish(service, root, reopened.jobId)).toMatchObject({ state: 'done', file: { existing: true } });
+    expect(done).toHaveBeenCalledWith(expect.objectContaining({ path: result.file.path, existing: true }));
     expect(readFileSync(path, 'utf8')).toBe('local edits');
     expect(execSf).toHaveBeenCalledTimes(2);
     expect(readdirSync(join(root, 'agentforce', org.orgId))).toEqual(['Support_v2']);

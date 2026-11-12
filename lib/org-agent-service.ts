@@ -192,7 +192,7 @@ export class OrgAgentService {
     }
   }
 
-  async start(root: string, input: unknown): Promise<{ jobId: string }> {
+  async start(root: string, input: unknown, onDone?: (file: RetrievedOrgAgent) => void): Promise<{ jobId: string }> {
     const args = record(input);
     if (!validName(args.fullName)) throw Error('Choose an agent version from the org list.');
     const canonicalRoot = realpathSync(root);
@@ -211,7 +211,7 @@ export class OrgAgentService {
     const job = { root: canonicalRoot, at: Date.now(), controller: new AbortController(), result: { state: 'running' } as OrgAgentRetrieval };
     this.jobs.set(jobId, job);
     void this.retrieve(canonicalRoot, org, args.fullName, job.controller.signal).then(
-      file => { job.result = { state: 'done', file }; },
+      file => { job.result = { state: 'done', file }; try { onDone?.(file); } catch { /* a listener never fails the retrieval */ } },
       error => { job.result = { state: 'failed', error: error instanceof Error ? error.message : 'Could not retrieve this agent.' }; },
     );
     return { jobId };

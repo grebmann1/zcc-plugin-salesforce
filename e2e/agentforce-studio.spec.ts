@@ -66,6 +66,13 @@ const ORG_TEST_RESULTS = {
 // Replace only the upstream network in the installed fixture. The real transport,
 // session service, plugin RPC, Monaco iframe and Electron UI all run unchanged.
 const test = base.extend({
+  // The host may re-offer its tutorial hint over the titlebar after startup; it never belongs to these flows.
+  app: async ({ app }, use) => {
+    await app.window.addLocatorHandler(app.window.getByRole('region', { name: 'Discover video tutorials' }), async () => {
+      await app.window.getByRole('button', { name: 'Dismiss tutorial hint' }).click();
+    });
+    await use(app);
+  },
   launchEnv: async ({ home }, use) => {
     const requests: Array<{ path: string; host: string; body: Record<string, unknown> }> = [];
     let evalPolls = 0;
@@ -373,15 +380,20 @@ async function editScenario(pane: Locator, name: string) {
 async function openTool(studio: Locator, name: string) {
   const page = studio.page();
   const view = VIEW_TOOLS[name];
-  await showSidePanel(page);
   const title = view?.title ?? name;
-  const tab = sidePanelTab(page, title);
-  if (await tab.count()) await tab.click();
-  else {
-    await openThreadToolLauncher(sidePanel(page));
-    await sidePanel(page).getByRole('searchbox', { name: 'Search tools and files' }).fill(title);
-    await sidePanel(page).getByTestId(`thread-new-tab-plugin-salesforce-studio-${PANEL_TOOL_IDS[name]}`).click();
-  }
+  // Switching agents remounts that agent's own host panel, which can settle closed
+  // just after the previous one was seen open; retry until the launcher is reached.
+  await expect(async () => {
+    await showSidePanel(page);
+    const tab = sidePanelTab(page, title);
+    if (await tab.count()) await tab.click({ timeout: 3_000 });
+    else {
+      await sidePanel(page).getByTestId('thread-secondary-new-tab').first().waitFor({ timeout: 3_000 });
+      await openThreadToolLauncher(sidePanel(page));
+      await sidePanel(page).getByRole('searchbox', { name: 'Search tools and files' }).fill(title, { timeout: 3_000 });
+      await sidePanel(page).getByTestId(`thread-new-tab-plugin-salesforce-studio-${PANEL_TOOL_IDS[name]}`).click({ timeout: 3_000 });
+    }
+  }).toPass({ timeout: 30_000 });
   await expect(activeSidePanelTab(page)).toHaveText(title);
   if (view) {
     await expect(viewPane(page, view.target)).toBeVisible();
@@ -567,8 +579,8 @@ test('Agentforce Studio: edit, Preview API conversation, AI role-play, cancellat
   await openThreadToolLauncher(sidePanel(page));
   await expect(sidePanel(page).getByTestId('thread-new-tab-plugin-salesforce-studio-actions')).toBeVisible();
   await expect(sidePanel(page).getByTestId('thread-new-tab-plugin-salesforce-studio-comments')).toBeVisible();
-  for (const tool of ['graph', 'preview', 'test', 'org-preview']) await expect(sidePanel(page).getByTestId(`thread-new-tab-plugin-salesforce-studio-${tool}`)).toBeVisible();
-  for (const gone of ['release', 'agents']) await expect(sidePanel(page).getByTestId(`thread-new-tab-plugin-salesforce-studio-${gone}`)).toHaveCount(0);
+  for (const tool of ['agents', 'graph', 'preview', 'test', 'org-preview']) await expect(sidePanel(page).getByTestId(`thread-new-tab-plugin-salesforce-studio-${tool}`)).toBeVisible();
+  await expect(sidePanel(page).getByTestId('thread-new-tab-plugin-salesforce-studio-release')).toHaveCount(0);
   await expect(sidePanel(page).getByTestId('thread-new-tab-plugin-salesforce-playground')).toHaveCount(0);
   await captureElectronScreenshot(app.electron, page, testInfo.outputPath('studio-add-tools.png'));
   await sidePanel(page).getByTestId('thread-secondary-hide').click();
@@ -2312,8 +2324,8 @@ test('Salesforce illustrated states: editor and agents loading, empty results, r
     await captureElectronScreenshot(app.electron, page, testInfo.outputPath('salesforce-agents-unavailable-narrow-light.png'));
     const state = studio.locator('.sf-state[data-kind=error]');
     expect(await state.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-    // Org agents open in Studio itself, so no side panel covers the narrow page.
-    await expect(sidePanel(page)).toBeHidden();
+    // Org agents are a side-panel tool; the narrow page still reaches other sections.
+    await expect(sidePanel(page).getByRole('region', { name: 'Org agents' })).toBeVisible();
     await selectSalesforceSection(workbench, 'data');
     await expect(page.getByRole('heading', { name: 'Run a query to see records.' })).toBeVisible();
     await captureElectronScreenshot(app.electron, page, testInfo.outputPath('salesforce-data-empty-light.png'));
@@ -2505,7 +2517,7 @@ test('Agentforce Studio window: Org tests sit in the activity rail, and an agent
 
   // The Tests workbench combines local suites and org definitions in a full-width editor tab.
   const rail = panel.getByRole('toolbar', { name: 'Studio activity' });
-  expect(await rail.getByRole('button').evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')))).toEqual(['Files', 'Tests', 'Go to file']);
+  expect(await rail.getByRole('button').evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')))).toEqual(['Files', 'Tests', 'Analytics', 'Go to file']);
   await caption('You: click Tests in the left activity rail');
   await rail.getByRole('button', { name: 'Tests', exact: true }).click();
   const tab = panel.getByTestId('studio-org-tests-view');
@@ -3713,7 +3725,7 @@ test('Agentforce case details and list scrolling keep controls and progress in v
   await openTool(studio, 'Tests');
   const tests = viewPane(page, 'tests').getByTestId('studio-tests-pane');
   const list = tests.getByRole('region', { name: 'Test case list' });
-  await expect(tests.getByRole('group', { name: 'Tests view' }).getByRole('button')).toHaveText(['Scenarios', 'Test cases', 'Batch simulations', 'Role-play']);
+  await expect(tests.getByRole('group', { name: 'Tests view' }).getByRole('button')).toHaveText(['Scenarios', 'Test cases', 'Scorers', 'Batch simulations', 'Role-play']);
   await expect(tests.getByTestId('tests-cases-workbench')).toBeVisible();
   // Narrow panels use a dedicated detail page with a keyboard return path.
   await tests.getByRole('button', { name: 'Details for Order lookup scenario 1', exact: true }).focus();
@@ -4221,6 +4233,131 @@ test('Agentforce Studio: copied code pastes as a selection reference in the assi
   await expect(timeline).toContainText('Response to:', { timeout: 30_000 });
   await expect(timeline).toContainText('COPIED_UNSAVED_CONTEXT');
   await expect(timeline).toContainText('force-app/Support.agent:1–3');
+});
+
+test('AgentScript Studio sidepanel regression: a hub conversation runs in the selected project and reads its agent', async ({ app, home }, testInfo) => {
+  test.setTimeout(240_000);
+  const page = app.window;
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1700, height: 1050 });
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(plugin => plugin.id === 'salesforce')?.status), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+  // Reproduce the report: a non-DX "Default Project" is registered first, so the
+  // host would otherwise start a hub side-panel conversation there.
+  mkdirSync(join(home, 'scratch'), { recursive: true });
+  const ids = await page.evaluate(async ({ scratch, dx }) => {
+    const first = await window.cc.projects.add(scratch); if (!first.ok) throw Error(first.message);
+    const second = await window.cc.projects.add(dx); if (!second.ok) throw Error(second.message);
+    return { scratchId: first.value.id, dxId: second.value.id };
+  }, { scratch: join(home, 'scratch'), dx: join(home, 'dx') });
+  await page.evaluate(() => window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' }));
+  await page.getByTestId('nav-salesforce/orgs').click();
+  const hub = page.getByTestId('salesforce-orgs-panel');
+  // The hub preselects the Salesforce (DX) project, as it did for the user.
+  expect(await readPicklistValue(hub.getByRole('button', { name: 'Project', exact: true }))).toBe(ids.dxId);
+  await hub.getByRole('button', { name: 'Open Studio', exact: true }).click();
+  await expect(page).toHaveURL(/\/plugins\/salesforce\/orgs\/agentforce$/);
+  const studio = studioPanel(page);
+  await studio.getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  await expect(studio.locator('.af-document-name')).toHaveText('Support.agent');
+
+  await page.getByTestId('plugin-panel-agent-show').click();
+  const composer = page.getByTestId('panel-agent-tab-composer');
+  const input = composer.getByTestId('thread-command-input');
+  await input.fill('HUB_PROJECT_SCOPE simplify my instructions');
+  await expect(composer.getByTestId('thread-command-send')).toBeEnabled({ timeout: 30_000 });
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('hub-panel-composer.png'));
+  await composer.getByTestId('thread-command-send').click();
+  await expect(page.getByTestId('panel-agent-tab-chat').getByTestId('thread-timeline')).toContainText('HUB_PROJECT_SCOPE', { timeout: 30_000 });
+
+  const thread = await page.evaluate(async () => {
+    // Panel conversations are hidden from the main list; the plugin's panel-thread index owns them.
+    const listed = await (await fetch('/api/v1/plugins/salesforce/panel-threads?panel=orgs&limit=20')).json() as { threads?: Array<{ id: string; projectId: string; title?: string }> };
+    return (listed.threads ?? []).find((row) => (row.title ?? '').includes('HUB_PROJECT_SCOPE'));
+  });
+  expect(thread, 'hub side-panel conversation is indexed under the orgs panel').toBeTruthy();
+  expect(thread!.projectId, 'hub side-panel conversation runs in the hub project, not the default one').toBe(ids.dxId);
+  expect(thread!.projectId).not.toBe(ids.scratchId);
+  // The thread's own tool call: sf_workbench files.read in that thread's project.
+  const read = await page.evaluate(async ({ projectId, threadId }) => {
+    const response = await fetch('/api/v1/plugins/salesforce/cli', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ argv: ['action', 'files.read', '--input', JSON.stringify({ path: 'force-app/Support.agent' }), '--json'], projectId, threadId }) });
+    return JSON.parse((await response.json()).stdout);
+  }, { projectId: thread!.projectId, threadId: thread!.id });
+  expect(read).toMatchObject({ ok: true, file: { path: 'force-app/Support.agent' } });
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('hub-panel-thread.png'));
+  expect(errors).toEqual([]);
+});
+
+test('AgentScript Studio live sync: an agent edit of the open file shows in the editor, in the hub and in a project tab', async ({ app, home }, testInfo) => {
+  test.setTimeout(240_000);
+  const page = app.window;
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.setViewportSize({ width: 1700, height: 1050 });
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(plugin => plugin.id === 'salesforce')?.status), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+  mkdirSync(join(home, 'scratch'), { recursive: true });
+  const ids = await page.evaluate(async ({ scratch, dx }) => {
+    const first = await window.cc.projects.add(scratch); if (!first.ok) throw Error(first.message);
+    const second = await window.cc.projects.add(dx); if (!second.ok) throw Error(second.message);
+    return { scratchId: first.value.id, dxId: second.value.id };
+  }, { scratch: join(home, 'scratch'), dx: join(home, 'dx') });
+  await page.evaluate(() => window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' }));
+  const file = join(home, 'dx', 'force-app', 'Support.agent');
+  const original = readFileSync(file, 'utf8');
+  // What an agent does: sf_workbench files.read, then files.write with the revision it read.
+  const agentWrite = (marker: string) => page.evaluate(async ({ projectId, marker }) => {
+    const cli = async (argv: string[]) => JSON.parse((await (await fetch('/api/v1/plugins/salesforce/cli', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ argv, projectId }) })).json()).stdout);
+    const read = await cli(['action', 'files.read', '--input', JSON.stringify({ path: 'force-app/Support.agent' }), '--json']);
+    const content = read.file.content.replace('Be warm', `Be warm (${marker})`);
+    if (content === read.file.content) throw Error('agent edit changed nothing');
+    return cli(['action', 'files.write', '--input', JSON.stringify({ path: 'force-app/Support.agent', content, expectedSha256: read.file.sha256 }), '--json']);
+  }, { projectId: ids.dxId, marker });
+  const editor = page.frameLocator('iframe[title="Agentforce playground"]');
+  const lines = editor.locator('.view-lines');
+
+  // 1. Global hub page, DX project selected in its picker.
+  await page.getByTestId('nav-salesforce/orgs').click();
+  const hub = page.getByTestId('salesforce-orgs-panel');
+  expect(await readPicklistValue(hub.getByRole('button', { name: 'Project', exact: true }))).toBe(ids.dxId);
+  await hub.getByRole('button', { name: 'Open Studio', exact: true }).click();
+  let studio = studioPanel(page);
+  await studio.getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  await expect(studio.locator('.af-document-name')).toHaveText('Support.agent');
+  await expect(lines).toContainText('Be warm, concise');
+  expect(await agentWrite('HUB_AGENT_EDIT')).toMatchObject({ ok: true });
+  await expect(lines, 'hub editor shows the agent write without a reload').toContainText('HUB_AGENT_EDIT', { timeout: 10_000 });
+  await expect(studio.locator('.af-draft-state')).toHaveText('Saved');
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('live-sync-hub.png'));
+  // A raw disk write (an agent's shell edit) arrives through the poll.
+  writeFileSync(file, readFileSync(file, 'utf8').replace('ask one question', 'ask one question (HUB_DISK_EDIT)'));
+  await expect(lines, 'hub editor picks up a direct disk edit').toContainText('HUB_DISK_EDIT', { timeout: 10_000 });
+
+  // 2. Project tab.
+  await page.evaluate(id => { history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate')); }, ids.dxId);
+  await page.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await selectSalesforceSection(page.getByTestId('salesforce-workbench'), 'agentforce');
+  studio = studioIn(page);
+  await studio.getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  await expect(lines).toContainText('HUB_DISK_EDIT');
+  expect(await agentWrite('TAB_AGENT_EDIT')).toMatchObject({ ok: true });
+  await expect(lines, 'project-tab editor shows the agent write').toContainText('TAB_AGENT_EDIT', { timeout: 10_000 });
+
+  // 3. Unsaved edits are never overwritten: the change is offered as a proposal.
+  await lines.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+End' : 'Control+End');
+  await page.keyboard.type('\n# USER_UNSAVED_EDIT');
+  await expect(studio.locator('.af-draft-state')).not.toHaveText('Saved');
+  expect(await agentWrite('CONFLICT_AGENT_EDIT')).toMatchObject({ ok: true });
+  const bar = editor.locator('.sf-proposal-bar');
+  await expect(bar).toContainText('File changed on disk', { timeout: 10_000 });
+  await expect(lines).toContainText('USER_UNSAVED_EDIT');
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('live-sync-conflict.png'));
+  await bar.getByRole('button', { name: 'Accept all' }).click();
+  await expect(lines).toContainText('CONFLICT_AGENT_EDIT');
+  expect(readFileSync(file, 'utf8')).not.toContain('USER_UNSAVED_EDIT');
+  writeFileSync(file, original);
+  expect(errors).toEqual([]);
 });
 
 test('AgentScript Studio sidepanel regression: hub, project tab and detached window keep every tool beside Script', async ({ app, home }, testInfo) => {

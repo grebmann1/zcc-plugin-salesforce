@@ -43,12 +43,12 @@ const rpc = vi.fn(baseRpc);
 let realtime: ((p: unknown) => void) | undefined;
 const nodes: Array<() => void> = [];
 
-async function mount(arg: string | { subPath?: string; params?: unknown; threadId?: string } = {}, extra: { params?: unknown } = {}) {
+async function mount(arg: string | { subPath?: string; params?: unknown; threadId?: string; projectId?: string | null } = {}, extra: { params?: unknown } = {}) {
   const props = typeof arg === 'string' ? { subPath: arg, ...extra } : arg;
   const el = document.createElement('div'); document.body.appendChild(el);
   const root = createRoot(el);
   nodes.push(() => { root.unmount(); el.remove(); });
-  await act(async () => { root.render(createElement(AgentScriptPanel, { pluginId: 'salesforce', subPath: props.subPath ?? '', params: props.params, projectId: 'proj-1', orgPicker: false, ...('threadId' in props && props.threadId ? { threadId: props.threadId } : {}) })); });
+  await act(async () => { root.render(createElement(AgentScriptPanel, { pluginId: 'salesforce', subPath: props.subPath ?? '', params: props.params, projectId: 'projectId' in props ? props.projectId ?? undefined : 'proj-1', orgPicker: false, ...('threadId' in props && props.threadId ? { threadId: props.threadId } : {}) })); });
   await flush();
   return el;
 }
@@ -229,7 +229,35 @@ describe('AgentScriptPanel studio layout', () => {
     await act(async () => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
     await flush();
     expect(changes()).toHaveLength(1);
+    // A write announced while a poll's read is in flight is read again when that read ends, not left to the next poll.
+    const LATER = 'c'.repeat(64);
+    let release!: () => void;
+    const slowRead = new Promise<void>(resolve => { release = resolve; });
+    let served = 0;
+    rpc.mockImplementation(async (p: string, method: string, args?: any) => {
+      if (method !== 'agentFiles.read') return baseRpc(p, method, args);
+      served += 1;
+      if (served === 1) { await slowRead; return { ok: true, file: { path: args?.path, content: 'start_agent:\n  z\n', sha256: NEXT } }; }
+      return { ok: true, file: { path: args?.path, content: 'start_agent:\n  later\n', sha256: LATER } };
+    });
+    await act(async () => { realtime?.({ kind: 'files', projectId: 'proj-1', path: 'force-app/bots/QC.agent' }); });
+    await act(async () => { realtime?.({ kind: 'files', projectId: 'proj-1', path: 'force-app/bots/QC.agent' }); });
+    expect(served).toBe(1);
+    await act(async () => { release(); });
+    await vi.waitFor(() => expect(changes().at(-1)).toEqual(expect.objectContaining({ content: 'start_agent:\n  later\n', sha256: LATER })));
+    expect(served).toBe(2);
     rpc.mockImplementation(baseRpc);
+  });
+
+  it('re-reads the open file on any project write when the Studio has no project of its own', async () => {
+    const el = await mount({ subPath: 'force-app/bots/QC.agent', projectId: null });
+    await ready(el);
+    const reads = () => rpc.mock.calls.filter(c => c[1] === 'agentFiles.read').length;
+    const before = reads();
+    // An agent's write always names its project; a project-less Studio compares the file itself.
+    await act(async () => { realtime?.({ kind: 'files', projectId: 'proj-9', path: 'force-app/bots/QC.agent' }); });
+    await flush();
+    expect(reads()).toBeGreaterThan(before);
   });
 
   it('handles comment and ask-selection requests from the editor', async () => {

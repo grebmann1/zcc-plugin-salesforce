@@ -255,9 +255,12 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   const layoutScope = windowResource ? `${draftScope}|agent:${windowResource}` : context.surface === 'plugin-view' ? `${draftScope}|window` : draftScope;
   useLayoutEffect(() => {
     // The global Salesforce hub has no host project identity. Include the
-    // selected project so equal relative paths cannot share panel drafts.
-    const id = !context.projectId && projectId ? JSON.stringify([projectId, activePath]) : activePath;
-    navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}) } : null);
+    // selected project so equal relative paths cannot share panel drafts, and
+    // name it so the panel's conversations run there, not in the default
+    // project (hosts without project scopes ignore the field).
+    const hub = !context.projectId && projectId ? projectId : undefined;
+    const id = hub ? JSON.stringify([hub, activePath]) : activePath;
+    navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}), ...(hub ? { projectId: hub } : {}) } : null);
     return () => { navigateRef.current.setPanelScope?.(null); };
   }, [activePath, context.projectId, projectId]);
   const studioWindow = context.surface === 'plugin-view';
@@ -910,12 +913,16 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
   }, [playgroundReady, studio.activeAgent]);
 
   const checkingDisk = useRef(false);
-  const checkDisk = useCallback(async () => {
+  const recheckDisk = useRef(false);
+  const checkDisk = useCallback(async (): Promise<void> => {
     const path = activePathRef.current;
     const draftKey = activeDraft.current;
+    // A change announced while a read is in flight is checked again once it ends, not left to the next poll.
+    if (checkingDisk.current) { recheckDisk.current = true; return; }
     // A follower shows the holder's text; the holder offers disk changes, and the unlock re-baselines this frame.
-    if (!path || !draftKey || checkingDisk.current || saving.current || heldByRef.current) return;
+    if (!path || !draftKey || saving.current || heldByRef.current) return;
     checkingDisk.current = true;
+    recheckDisk.current = false;
     const generation = fileEpoch.current;
     try {
       const result = (await callPluginRpc(pluginId, 'agentFiles.read', rpcArgs({ path }))) as { ok?: boolean; file?: { content: string; sha256: string } };
@@ -924,8 +931,11 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
       send.fileChanged({ draftKey, content: file.content, sha256: file.sha256 });
     } catch { /* the next check retries */ } finally {
       checkingDisk.current = false;
+      if (recheckDisk.current && alive.current) { recheckDisk.current = false; void checkDiskRef.current(); }
     }
   }, [pluginId, rpcArgs, send]);
+  const checkDiskRef = useRef(checkDisk);
+  checkDiskRef.current = checkDisk;
   const loadComments = useCallback(async () => {
     const path = activePathRef.current;
     if (!projectId || !path) { setComments([]); return; }
@@ -963,7 +973,8 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
     if (changed?.kind === 'threads' && (!changed.projectId || changed.projectId === projectId)) void loadThreads();
     if (changed?.kind === 'comments' && (!changed.projectId || changed.projectId === projectId)) void loadComments();
     // Fetch latest wrote org files into the project.
-    if (changed?.kind === 'files' && (!changed.projectId || changed.projectId === projectId)) {
+    // A Studio without a project reads the shared root, so any file event may be its own: it re-reads and compares.
+    if (changed?.kind === 'files' && (!changed.projectId || !projectId || changed.projectId === projectId)) {
       void refreshFiles().catch(() => undefined);
       if (!changed.path || changed.path === activePathRef.current) void checkDisk();
     }
