@@ -5,6 +5,7 @@ import { useReferenceRefresh } from './useReferenceRefresh.js';
 import { UsedByAgents } from './UsedByAgents.js';
 import { STUDIO_RPC, type LightningTypeView as LightningTypeData } from '../../../lib/studio-contract.js';
 import { EmptyState } from '../components/SalesforceState.js';
+import { RefreshButton } from '../components/RefreshButton.js';
 
 /**
  * Read-only Lightning Type tab: the schema's properties, the agents whose actions declare the type, the LWCs its renderer
@@ -50,7 +51,7 @@ export function LightningTypeView({ pluginId, projectId, typeRef, usedBy, onOpen
         </div>
         {data?.description && <p>{data.description}</p>}
       </div>
-      <button type="button" className="sf-atp-btn" disabled={busy} onClick={refresh} aria-label="Refresh Lightning Type">Refresh</button>
+      <RefreshButton label="Refresh Lightning Type" busy={busy} onClick={refresh} />
     </header>
     {!data && busy && <p className="sf-lt-note">Loading…</p>}
     {error && <p className="sf-lt-note is-error" role="alert">{error}</p>}

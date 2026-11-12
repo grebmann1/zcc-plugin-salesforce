@@ -23,6 +23,7 @@ import { ScenariosView } from './ScenariosView.js';
 import { useScenarioLibrary, type ScenarioLibraryControls, type ScenarioSelection } from './useScenarioLibrary.js';
 import { sameContext } from '../../../lib/preview-context-preset-contract.js';
 import { TestsHeader, type TestsView } from './TestsHeader.js';
+import { RefreshButton } from '../components/RefreshButton.js';
 
 /**
  * The Tests tool: a scenario catalogue with a selected case inspector. Simulate runs the
@@ -585,10 +586,10 @@ export function TestsPane(props: TestsPaneProps) {
             {!activeJob && <button type="button" className="sf-tp-btn" disabled={running} aria-expanded={adding} onClick={() => { setComparisonOpen(false); setAdding(true); }}>+ Case</button>}
           </>}
           {activeJob && <button type="button" className="sf-tp-btn is-danger" onClick={() => void rpc(STUDIO_RPC.suiteStop, { jobId: activeJob }).then(() => load())}>Stop suite</button>}
-          <button type="button" className="sf-tp-btn" aria-label="Refresh test cases" disabled={refreshing} onClick={() => {
+          <RefreshButton label="Refresh test cases" busy={refreshing} onClick={() => {
             const scope = loadScope; setRefreshing(true);
             void load().finally(() => { if (alive.current && loadTarget.current === scope) setRefreshing(false); });
-          }}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+          }} />
           <StudioActionMenu label="More test actions" actions={[
             { id: 'compare', group: 'Evaluate', label: busy === 'compare' ? 'Comparing…' : 'Compare saved vs draft', disabled: running || !cases.length || !source.trim(), title: 'Run both sources on the same cases without replacing suite results.', onSelect: () => { void compare(); } },
             ...(comparison && !comparisonOpen ? [{ id: 'last-comparison', group: 'Evaluate', label: 'View last comparison', onSelect: () => { setAdding(false); setComparisonOpen(true); } }] : []),

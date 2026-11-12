@@ -1578,6 +1578,16 @@ test('Salesforce Flow visualizer: official canvas, branches, details, themes and
   const detail = studio.getByTestId('agent-action-panel');
   const frame = detail.locator('iframe[title="Salesforce Flow visualizer"]');
   const flow = page.frameLocator('iframe[title="Salesforce Flow visualizer"]');
+  const refresh = detail.getByRole('button', { name: 'Refresh implementation', exact: true });
+  await expect(refresh).toHaveAttribute('title', 'Refresh implementation');
+  await expect(refresh.locator('svg')).toBeVisible();
+  await expect(refresh).toHaveText('');
+  const refreshSize = await refresh.evaluate(el => {
+    const box = el.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  });
+  expect(refreshSize.width).toBeCloseTo(28, 1);
+  expect(refreshSize.height).toBeCloseTo(28, 1);
   await expect(flow.getByText('Each order item', { exact: true })).toBeVisible();
   await expect(flow.getByText('Tomorrow', { exact: true })).toBeVisible();
   await expect(flow.getByText(/After commit|Run Asynchronously/).first()).toBeVisible();
@@ -1639,6 +1649,11 @@ test('Salesforce Flow visualizer: official canvas, branches, details, themes and
   // A failed local asset must leave a usable map and the complete source.
   await page.route('**/assets/flow-visualizer/*.html', route => route.abort());
   await detail.getByRole('button', { name: 'Refresh implementation' }).click();
+  // An unchanged refresh preserves the mounted canvas. Reopen Map to request the blocked asset.
+  await expect(refresh).toBeEnabled();
+  await expect(frame).toBeVisible();
+  await detail.getByRole('button', { name: 'Source', exact: true }).click();
+  await detail.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(detail.getByLabel('Flow implementation map')).toBeVisible({ timeout: 15_000 });
   await expect(detail.getByText(/Showing the basic map/)).toBeVisible();
   await detail.getByRole('button', { name: 'Source', exact: true }).click();

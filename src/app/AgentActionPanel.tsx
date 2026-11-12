@@ -10,6 +10,7 @@ import { FlowVisualization } from './FlowVisualization.js';
 import { flowFromXml, flowModel, flowRunModeLabel, flowSignature, flowTouches, flowTypeLabel, type FlowTouches } from './action-flow.js';
 import { LoadingState } from './components/SalesforceState.js';
 import { AgentReferenceRow, AgentReferenceSearch } from './AgentReferenceList.js';
+import { RefreshButton } from './components/RefreshButton.js';
 
 export function AgentActionExplorer({ actions, selected, onOpen }: { actions: AgentAction[]; selected?: string; onOpen(action: AgentAction): void }) {
   const [query, setQuery] = useState('');
@@ -217,7 +218,7 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
         <div className="af-action-sourcebar"><div role="group" aria-label="Implementation source" title={sourceNote}>
           <button aria-pressed={origin === 'project'} title={driftTitle} onClick={() => chooseOrigin('project')}>Project{drift === 'differs' && <span className="af-drift" role="img" aria-label="differs from org" />}</button>
           <button aria-pressed={origin === 'org'} disabled={!org} onClick={() => chooseOrigin('org')}>Org{org ? ` · ${org.alias || org.username}` : ''}</button>
-        </div><button aria-label="Refresh implementation" title="Refresh implementation" disabled={busy} onClick={refreshImplementation}>Refresh</button></div>
+        </div><RefreshButton label="Refresh implementation" busy={busy} onClick={refreshImplementation} /></div>
       </div>
       <div className="af-action-glance">
         {owner}
