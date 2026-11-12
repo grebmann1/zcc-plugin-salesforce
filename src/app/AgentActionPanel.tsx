@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Braces, ExternalLink, Info, PanelRight, Shapes, Workflow } from 'lucide-react';
 import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import { parseActionTarget, type AgentAction, type ActionParameter } from '../../lib/agent-action-model.js';
 import type { ActionSource } from '../../lib/action-source.js';
 import type { PublicOrgView } from '../../lib/types.js';
 import { ActionCodePreview } from './ActionCodePreview.js';
+import { useReferenceRefresh } from './studio/useReferenceRefresh.js';
 import { FlowVisualization } from './FlowVisualization.js';
 import { flowFromXml, flowModel, flowRunModeLabel, flowSignature, flowTouches, flowTypeLabel, type FlowTouches } from './action-flow.js';
 import { LoadingState } from './components/SalesforceState.js';
@@ -100,6 +101,13 @@ export function actionTabs(action: AgentAction, kind: 'apex' | 'flow' | undefine
 const normalizeSource = (content: string) => content.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').trim();
 function parsedFlow(data: ActionSource) { return flowModel(data.flow ?? flowFromXml(data.content ?? '')); }
 
+/** Visualization objects are derived from source and must not make every local probe look changed. */
+export function sourceFingerprint(source: ActionSource | undefined): string {
+  if (!source) return '';
+  const { visualization: _visualization, visualizationError: _visualizationError, ...snapshot } = source;
+  return JSON.stringify(snapshot);
+}
+
 /** Whether the project copy and the org copy agree. Flows compare structure (the two sides use different formats), Apex compares text. */
 export function sourceDrift(kind: 'apex' | 'flow', project?: ActionSource, orgSource?: ActionSource): 'same' | 'differs' | undefined {
   if (project?.status !== 'ready' || orgSource?.status !== 'ready') return undefined;
@@ -124,27 +132,37 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
   const [rail, setRail] = useState(false);
   const [candidate, setCandidate] = useState('');
   useEffect(() => setCandidate(''), [action.target]);
-  const [reload, setReload] = useState(0);
-  const [state, setState] = useState<{ key: string; data?: ActionSource; error?: string }>({ key: '' });
+  const [driftReload, setDriftReload] = useState(0);
+  const root = useRef<HTMLElement>(null);
   const [other, setOther] = useState<{ key: string; data?: ActionSource }>({ key: '' });
   const parsed = parseActionTarget(action.target);
   const dependency = action.id.startsWith('dependency:');
   const tabs = actionTabs(action, parsed?.kind);
   const tab = tabs.some(([id]) => id === chosenTab) ? chosenTab : 'implementation';
-  const key = `${projectId}:${action.target}:${origin}:${org?.orgId}:${org?.alias}:${candidate}:${reload}`;
-  const current = state.key === key ? state : undefined;
-  const data = current?.data;
+  const key = JSON.stringify([pluginId, projectId, action.target, origin, org?.orgId, org?.alias, candidate]);
   const orgArgs = () => ({ orgAlias: org!.alias || org!.username });
-  useEffect(() => {
-    if (!parseActionTarget(action.target)) return;
-    if (origin === 'org' && !org) return;
-    let cancelled = false;
-    void callPluginRpc(pluginId, 'agentActions.source', { projectId, target: action.target, origin, ...(parseActionTarget(action.target)?.kind === 'flow' ? { visualize: true } : {}), ...(origin === 'org' ? orgArgs() : {}), ...(candidate && origin === 'project' ? { candidate } : {}) }).then(value => {
-      const result = value as { ok: boolean; data?: ActionSource; error?: string };
-      if (!cancelled) setState({ key, ...(result.ok && result.data ? { data: result.data } : { error: result.error || 'Could not load this implementation.' }) });
-    }).catch(error => { if (cancelled) return; setState({ key, error: error instanceof Error ? error.message : String(error) }); });
-    return () => { cancelled = true; };
-  }, [key, pluginId]);
+  const { data, error, busy, refresh, revision } = useReferenceRefresh<ActionSource>({
+    scope: key, projectId, element: root, automatic: origin === 'project',
+    enabled: Boolean(parsed) && (origin === 'project' || Boolean(org)),
+    paths: data => data?.status === 'ready' && data.origin === 'project' ? [data.label] : [],
+    read: async ({ reason, previous, isCurrent }) => {
+      const args = { projectId, target: action.target, origin, ...(origin === 'org' ? orgArgs() : {}), ...(candidate && origin === 'project' ? { candidate } : {}) };
+      const fetch = async (visualize: boolean) => {
+        const result = await callPluginRpc(pluginId, 'agentActions.source', { ...args, ...(visualize ? { visualize: true } : {}) }) as { ok?: boolean; data?: ActionSource; error?: string } | null;
+        if (!result?.ok || !result.data) throw Error(result?.error || 'Could not load this implementation.');
+        return result.data;
+      };
+      const isFlow = parsed?.kind === 'flow';
+      // Background checks read cheap local XML first. The official viewer is rebuilt only for changed source.
+      if (reason !== 'initial' && reason !== 'manual') {
+        const next = await fetch(false);
+        if (sourceFingerprint(next) === sourceFingerprint(previous)) return previous!;
+        if (!isCurrent() || !isFlow || next.status !== 'ready') return next;
+      }
+      return fetch(isFlow);
+    },
+  });
+  const refreshImplementation = () => { refresh(); setDriftReload(value => value + 1); };
   // Drift needs the other side too: read it once the shown side is ready. A failure only means no drift signal.
   const ready = data?.status === 'ready';
   useEffect(() => {
@@ -156,7 +174,7 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
       if (!cancelled) setOther({ key, ...(result?.ok && result.data ? { data: result.data } : {}) });
     }).catch(() => { if (!cancelled) setOther({ key }); });
     return () => { cancelled = true; };
-  }, [key, pluginId, ready]);
+  }, [key, pluginId, ready, driftReload]);
   const otherData = other.key === key ? other.data : undefined;
   const drift = parsed ? sourceDrift(parsed.kind, origin === 'project' ? data : otherData, origin === 'org' ? data : otherData) : undefined;
   const orgVersion = (origin === 'org' ? data : otherData)?.version;
@@ -173,20 +191,21 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
   const mismatches = dependency ? 0 : [...inputRows, ...outputRows].filter(isMismatch).length;
   const typeLabel = parsed?.kind === 'apex' ? 'Apex class' : flowTypeLabel(flow?.model?.meta);
   const status = !ready ? undefined : origin === 'org' ? `${parsed?.kind === 'flow' ? data?.inactive ? 'Inactive' : 'Active' : 'Deployed'}${data?.version != null ? ` · v${data.version}` : ''}` : flow?.model?.meta?.status;
-  const sourceNote = origin === 'project' ? 'Local snapshot · may differ from deployed source' : 'Org copy · retrieved in source format, refreshed when the org changes';
+  const sourceNote = origin === 'project' ? 'Local snapshot · may differ from deployed source' : 'Org snapshot · use Refresh to check for deployed changes';
   const driftTitle = drift === 'differs' ? `Project copy differs from the org${orgVersion != null ? ` (v${orgVersion})` : ''}${parsed?.kind === 'flow' ? ': elements, connectors or variables changed' : ''}` : drift === 'same' ? `Project copy matches the org${orgVersion != null ? ` (v${orgVersion})` : ''}` : sourceNote;
   const owner = context ? <button type="button" className="af-backlink" title={context.title} onClick={context.onOpen}>← {context.label}</button> : action.owner ? <span>{action.owner}</span> : null;
-  const loadState = (view: (data: ActionSource) => ReactNode) => !parsed ? <p className="af-action-note">This target type has no implementation viewer yet. Its action definition and usage remain available.</p> : origin === 'org' && !org ? <p className="af-action-note">Connect an org to inspect its deployed implementation.</p> : !current ? <LoadingState compact art="code" label="Loading implementation…" /> : current.error ? <p role="alert" className="af-action-note">{current.error}</p> : <>
+  const loadState = (view: (data: ActionSource) => ReactNode) => !parsed ? <p className="af-action-note">This target type has no implementation viewer yet. Its action definition and usage remain available.</p> : origin === 'org' && !org ? <p className="af-action-note">Connect an org to inspect its deployed implementation.</p> : !data && busy ? <LoadingState compact art="code" label="Loading implementation…" /> : <>
+    {error && <p role="alert" className="af-action-note">{error}</p>}
     {data?.message && !ready && <p className="af-action-note">{data.message}</p>}
     {data?.candidates?.map(path => <button key={path} className="af-source-candidate" onClick={() => setCandidate(path)}>{path} →</button>)}
     {data?.status === 'ready' && view(data)}
   </>;
   const flowMap = (data: ActionSource) => flow?.model ? <div className={`af-flow-split${rail ? ' has-rail' : ''}`}>
-    <FlowVisualization key={key} pluginId={pluginId} visualization={data.visualization} error={data.visualizationError} sourceLabel={`${data.label}${data.version != null ? ` · v${data.version}` : ''}`} model={flow.model} onOpenTarget={target => onOpenTarget(target, origin)} />
+    <FlowVisualization key={`${key}:${revision}`} pluginId={pluginId} visualization={data.visualization} error={data.visualizationError} sourceLabel={`${data.label}${data.version != null ? ` · v${data.version}` : ''}`} model={flow.model} onOpenTarget={target => onOpenTarget(target, origin)} />
     {rail && touches && <FlowRail inputs={inputRows} outputs={outputRows} compare={!dependency} touches={touches} runMode={flowRunModeLabel(flow.model.meta)} onOpenTarget={target => onOpenTarget(target, origin)} />}
   </div> : <p className="af-action-note" role="alert">{flow?.error}</p>;
   const code = (data: ActionSource) => <ActionCodePreview content={data.content ?? ''} language={data.language ?? 'apex'} />;
-  return <section className="af-action-panel" data-testid="agent-action-panel" aria-label={`Action ${action.name}`}>
+  return <section ref={root} className="af-action-panel" data-testid="agent-action-panel" aria-label={`Action ${action.name}`}>
     <header className="af-action-heading">
       <div className="af-action-title">
         <span className={`af-action-icon ${parsed?.kind ?? ''}`} aria-hidden="true">{parsed?.kind === 'apex' ? '{ }' : '⑂'}</span>
@@ -198,7 +217,7 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
         <div className="af-action-sourcebar"><div role="group" aria-label="Implementation source" title={sourceNote}>
           <button aria-pressed={origin === 'project'} title={driftTitle} onClick={() => chooseOrigin('project')}>Project{drift === 'differs' && <span className="af-drift" role="img" aria-label="differs from org" />}</button>
           <button aria-pressed={origin === 'org'} disabled={!org} onClick={() => chooseOrigin('org')}>Org{org ? ` · ${org.alias || org.username}` : ''}</button>
-        </div><button aria-label="Refresh implementation" title="Refresh implementation" onClick={() => setReload(n => n + 1)}>↻</button></div>
+        </div><button aria-label="Refresh implementation" title="Refresh implementation" disabled={busy} onClick={refreshImplementation}>Refresh</button></div>
       </div>
       <div className="af-action-glance">
         {owner}
@@ -221,7 +240,7 @@ export function AgentActionPanel({ pluginId, projectId, action, org, context, on
     <div className={`af-action-content${tab === 'implementation' || tab === 'source' ? ' is-implementation' : ''}`}>
       {tab === 'implementation' && loadState(parsed?.kind === 'flow' ? flowMap : code)}
       {tab === 'source' && loadState(code)}
-      {tab === 'parameters' && <><p className="af-action-note">{dependency ? `Inputs and outputs ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'} exposes. Open an action in the agent to compare them with its declarations.` : `Compare action declarations with ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'}. Name matches do not verify type compatibility or runtime behavior.`}</p>{data?.contractMessage && <p className="af-action-note">{data.contractMessage}</p>}{current?.error && <p role="alert" className="af-action-note">{current.error}</p>}<Parameters onOpenType={onOpenType} title="Inputs" rows={inputRows} verified={actualInputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /><Parameters onOpenType={onOpenType} title="Outputs" rows={outputRows} verified={actualOutputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /></>}
+      {tab === 'parameters' && <><p className="af-action-note">{dependency ? `Inputs and outputs ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'} exposes. Open an action in the agent to compare them with its declarations.` : `Compare action declarations with ${origin === 'project' ? 'this project’s implementation' : 'the selected org’s registered contract'}. Name matches do not verify type compatibility or runtime behavior.`}</p>{data?.contractMessage && <p className="af-action-note">{data.contractMessage}</p>}{error && <p role="alert" className="af-action-note">{error}</p>}<Parameters onOpenType={onOpenType} title="Inputs" rows={inputRows} verified={actualInputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /><Parameters onOpenType={onOpenType} title="Outputs" rows={outputRows} verified={actualOutputs !== undefined} compare={!dependency} contractLabel={origin === 'project' ? 'Project implementation' : 'Org contract'} /></>}
       {tab === 'usage' && <><p className="af-action-note">Static references in the current editor draft. Availability does not mean the action executed.</p><button className="af-target-link" onClick={() => onReveal(action.line)}>Go to action definition · line {action.line} ↗</button>{action.uses.length ? action.uses.map((use, i) => <article className="af-action-use" key={i}><button onClick={() => onReveal(use.line)}>{use.kind === 'run' ? 'Explicit run' : 'Available to the model'} <span>Line {use.line} ↗</span></button><pre>{use.code}</pre></article>) : <p className="af-action-note">No direct calls or model bindings found in this scope.</p>}</>}
     </div>
   </section>;

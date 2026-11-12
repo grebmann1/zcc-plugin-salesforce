@@ -320,7 +320,8 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
   const followedKey = useRef(key);
   const [jump, setJump] = useState<{ line?: number; node?: string; seq: number }>({ line: parsed.line, node: parsed.node, seq: 1 });
   const [org, setOrg] = useState<PublicOrgView | null>(null);
-  const api = useAgentScriptDoc(pluginId, projectId ?? null, path);
+  const element = useRef<HTMLDivElement>(null);
+  const api = useAgentScriptDoc(pluginId, projectId ?? null, path, { element });
   const { doc } = api;
   const [typeRequest, setTypeRequest] = useState<OpenAgentType | null>(null);
   const [actionRequest, setActionRequest] = useState<{ id: string; seq: number } | null>(null);
@@ -367,8 +368,31 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
 
   const name = path.split(/[\\/]/).pop()!;
   const revealLine = useCallback((line: number) => { setJump(prev => ({ ...prev, line, seq: prev.seq + 1 })); show('file'); }, [show]);
-  const suiteList = useSuiteList(pluginId, projectId);
+  const suiteList = useSuiteList(pluginId, projectId, { agentPath: path, suitePath: agentSuitePath(path), visible: view === 'tests', element });
   const savedSuites = suiteList.suites.filter(suite => suite.path === agentSuitePath(path));
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const refreshPending = useRef<Promise<void> | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const selectView = async (next: AgentThreadView) => {
+    show(next);
+    if (next === 'tests') {
+      const ok = await suiteList.refresh();
+      if (!mounted.current) return;
+      setRefreshError(ok ? null : 'Could not refresh saved test results.');
+      if (!ok) throw Error('Could not refresh saved test results.');
+    }
+  };
+  const refresh = () => {
+    if (refreshPending.current) return refreshPending.current;
+    setRefreshing(true); setRefreshError(null);
+    refreshPending.current = (async () => {
+      const ok = view === 'tests' ? await suiteList.refresh() : await api.reload();
+      if (mounted.current && !ok) setRefreshError(view === 'tests' ? 'Could not refresh saved test results.' : 'Could not refresh the agent.');
+    })().finally(() => { refreshPending.current = null; if (mounted.current) setRefreshing(false); });
+    return refreshPending.current;
+  };
   const state = (): ControlState => ({ path, threadId, view, tool: view === 'file' ? 'code' : view, ready: Boolean(doc), dirty: doc?.dirty ?? false, sha256: doc?.baseSha256,
     preview: previewState, tests: savedSuites.slice(0, 20).map(suite => ({ id: suite.id, ...runSummary(suite.cases, suite.lastResults), ...(suite.progress ? { progress: { mode: suite.progress.mode, completed: suite.progress.completed, stage: suite.progress.stage } } : {}) })) });
   const execute = async ({ command, input }: UiCommand): Promise<ControlState> => {
@@ -384,8 +408,7 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
       const requested = controlText(input, command === 'view.open' ? 'view' : 'tool', 30);
       const selected = requested === 'code' ? 'file' : requested === 'test' ? 'tests' : requested;
       if (!AGENT_THREAD_VIEWS.includes(selected as AgentThreadView)) throw Error('This Agent panel does not support that view.');
-      show(selected as AgentThreadView);
-      if (selected === 'tests' && !await suiteList.refresh()) throw Error('Could not refresh saved test results.');
+      await selectView(selected as AgentThreadView);
       return {};
     }
     if (command === 'editor.reveal') {
@@ -426,28 +449,30 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
     const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
     if (!step) return;
     event.preventDefault();
-    show(AGENT_THREAD_VIEWS[(AGENT_THREAD_VIEWS.indexOf(view) + step + AGENT_THREAD_VIEWS.length) % AGENT_THREAD_VIEWS.length]!);
+    void selectView(AGENT_THREAD_VIEWS[(AGENT_THREAD_VIEWS.indexOf(view) + step + AGENT_THREAD_VIEWS.length) % AGENT_THREAD_VIEWS.length]!).catch(() => {});
   };
   const lazy = (id: AgentThreadView, node: () => ReactNode) => visited.has(id)
     ? <div className="sf-atp-view" role="tabpanel" id={`atp-panel-${id}`} aria-labelledby={`atp-tab-${id}`} hidden={view !== id} data-testid={`atp-view-${id}`}>{node()}</div>
     : null;
   const orgLabel = orgSessionLabel(org);
 
-  return <div className="sf-atp sf-as" data-testid="atp-root">
+  return <div ref={element} className="sf-atp sf-as" data-testid="atp-root">
     <style>{AGENTFORCE_PANEL_STYLES}</style><style>{AGENTFORCE_STUDIO_STYLES}</style><style>{AGENT_ACTION_STYLES}</style><style>{AGENT_TYPES_STYLES}</style><style>{STYLES}</style>
     <div className="sf-atp-head">
       <div className="sf-atp-title"><div className="sf-atp-name">{name.replace(/\.(agent|afscript)$/i, '')}</div><div className="sf-atp-path" title={path}>{path}</div></div>
       {orgLabel && <span className="sf-atp-pill" data-testid="atp-org">{orgLabel}</span>}
+      {(view === 'file' || view === 'graph' || view === 'tests') && <button type="button" className="sf-atp-btn" disabled={refreshing} aria-label={view === 'tests' ? 'Refresh saved tests' : 'Refresh agent'} onClick={() => void refresh()}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>}
       <button type="button" className="sf-atp-btn" aria-pressed={share} onClick={() => setShare(!share)}>Share context</button>
       <button type="button" className="sf-atp-btn is-primary" disabled={!projectId} onClick={() => void openStudio()}>Open in Studio ↗</button>
     </div>
     <div className="sf-atp-tabs" role="tablist" aria-label="Agent views" onKeyDown={onKeyDown}>
-      {AGENT_THREAD_VIEWS.map(id => <button key={id} type="button" role="tab" id={`atp-tab-${id}`} className="sf-atp-tab" aria-selected={view === id} aria-controls={`atp-panel-${id}`} tabIndex={view === id ? 0 : -1} onClick={() => show(id)}>{VIEW_LABEL[id]}</button>)}
+      {AGENT_THREAD_VIEWS.map(id => <button key={id} type="button" role="tab" id={`atp-tab-${id}`} className="sf-atp-tab" aria-selected={view === id} aria-controls={`atp-panel-${id}`} tabIndex={view === id ? 0 : -1} onClick={() => void selectView(id).catch(() => {})}>{VIEW_LABEL[id]}</button>)}
     </div>
     <div className="sf-atp-body">
+      {refreshError && <div className="sf-atp-empty" role="alert">{refreshError}</div>}
       {lazy('file', () => <FileView doc={doc} loading={api.loading} error={api.error} leasedBy={doc?.lease ? doc.lease.label || 'Studio' : null} line={jump.line} resolve={resolve} />)}
       {lazy('preview', () => <AgentforcePreviewPanel pluginId={pluginId} threadId={threadId} tabId={props.tabId} projectId={projectId} orgAlias={props.orgAlias} pinnedPath={path}
-        controlledThreadId={threadId} onControl={receiveControl} onState={setPreviewState}
+        controlledThreadId={threadId} onControl={receiveControl} onState={setPreviewState} sourceSha256={doc?.baseSha256} sourceDirty={doc?.dirty ?? false}
         params={{ path, ...(parsed.runId ? { runId: parsed.runId } : {}), ...(parsed.turn ? { turn: String(parsed.turn) } : {}) }} />)}
       {lazy('tests', () => <TestsView suites={savedSuites} onOpenStudio={() => void openStudio()} />)}
       {lazy('graph', () => doc?.text != null

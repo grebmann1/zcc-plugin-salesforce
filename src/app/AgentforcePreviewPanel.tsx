@@ -45,7 +45,7 @@ export interface AgentPreviewControl {
   send(text: string): Promise<ControlState>;
   end(): Promise<ControlState>;
 }
-export interface AgentPreviewState { sessionId: string | null; engine: PreviewMode; busy: boolean; status: 'idle' | 'active' | 'starting' | 'sending' | 'ending' | 'failed'; turns: number; error: string | null; lastReply: string | null; replyTruncated: boolean }
+export interface AgentPreviewState { sessionId: string | null; engine: PreviewMode; busy: boolean; status: 'idle' | 'active' | 'starting' | 'sending' | 'ending' | 'failed'; turns: number; error: string | null; lastReply: string | null; replyTruncated: boolean; sourceHash?: string | null; sourceStale?: boolean; sourceDirty?: boolean }
 
 interface AgentforcePreviewPanelProps {
   pluginId: string;
@@ -58,6 +58,9 @@ interface AgentforcePreviewPanelProps {
   pinnedPath?: string;
   /** Thread-owned controls always use a local simulated session, isolated from other threads. */
   controlledThreadId?: string;
+  /** Saved document revision for the pinned source. A session keeps the revision it started with. */
+  sourceSha256?: string;
+  sourceDirty?: boolean;
   onControl?: (control: AgentPreviewControl | null) => void;
   onState?: (state: AgentPreviewState) => void;
 }
@@ -94,6 +97,7 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
   const workspaceKey = studioRunKey(owner);
   const [mode, setMode] = useRunWorkspaceState<PreviewMode>(workspaceKey, 'mode', 'simulate');
   const [sessionId, setSessionId] = useRunWorkspaceState<string | null>(workspaceKey, 'sessionId', null);
+  const [sourceHash, setSourceHash] = useRunWorkspaceState<string | null>(workspaceKey, 'sourceHash', null);
   const [utterance, setUtterance] = useRunWorkspaceState(workspaceKey, 'utterance', '');
   const [turns, setTurns] = useRunWorkspaceState<PreviewTurn[]>(workspaceKey, 'turns', []);
   const [busy, setBusy] = useRunWorkspaceState(workspaceKey, 'busy', false);
@@ -121,6 +125,7 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
         if (!attached || epoch.current !== requestedEpoch || readWorkspaceValue(workspaceKey, 'sessionId', null) !== id) return;
         if (result?.ok && result.data) {
           const snapshot = result.data;
+          if (typeof snapshot.sourceHash === 'string') setSourceHash(snapshot.sourceHash);
           setTurns(snapshot.turns.map((turn, index) => ({ id: `${id}:${index}`, role: turn.role, text: turn.text })));
           setBusy(Boolean(snapshot.busy) || locked.current);
           if (snapshot.closed || snapshot.failed) { setSessionId(null); setBusy(false); if (snapshot.failed) setError('This preview could not continue. Start a new conversation to retry.'); }
@@ -178,6 +183,7 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
         if (result?.ok && action === 'start' && result.data?.sessionId) {
           const sessionId = result.data.sessionId;
           lifecycle.current = { simulated, owner: requestOwner };
+          setSourceHash(simulated ? result.data.sourceHash ?? null : null);
           updateStudioRun(ownerForWorkspace, { runId: sessionId, engine: simulated ? 'simulate' : 'live', status: 'active', turn: 0 });
         }
         if (result?.ok && action === 'end') {
@@ -276,6 +282,9 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
     [busy, callPreview, sessionId, workspaceKey]
   );
   const send = (event?: FormEvent) => { event?.preventDefault(); return sendText(utterance); };
+  const simulatedSession = Boolean(sessionId && lifecycle.current.simulated);
+  const sourceDirty = simulatedSession && Boolean(props.sourceDirty);
+  const sourceStale = simulatedSession && !sourceDirty && Boolean(sourceHash && props.sourceSha256 && sourceHash !== props.sourceSha256);
   useLayoutEffect(() => {
     props.onControl?.({ assertReady: assertControlled, start: values => start(values, true), send: text => sendText(text, true), end: () => end(true) });
     return () => { props.onControl?.(null); };
@@ -283,8 +292,9 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
   useEffect(() => {
     const reply = [...turns].reverse().find(turn => turn.role === 'agent')?.text;
     props.onState?.({ sessionId, engine: sessionId ? lifecycle.current.simulated ? 'simulate' : 'live' : mode, busy, status: operation === 'start' ? 'starting' : operation === 'send' ? 'sending' : operation === 'end' ? 'ending' : error ? 'failed' : sessionId ? 'active' : 'idle', turns: turns.filter(turn => turn.role === 'user').length, error,
-      lastReply: reply?.slice(0, 2000) ?? null, replyTruncated: (reply?.length ?? 0) > 2000 });
-  }, [props.onState, sessionId, mode, busy, operation, turns, error]);
+      lastReply: reply?.slice(0, 2000) ?? null, replyTruncated: (reply?.length ?? 0) > 2000,
+      sourceHash: simulatedSession ? sourceHash : null, sourceStale, sourceDirty });
+  }, [props.onState, sessionId, mode, busy, operation, turns, error, sourceHash, sourceStale, sourceDirty, simulatedSession]);
 
   const fileLabel = useMemo(() => {
     if (targetPath) return targetPath.split('/').pop() ?? targetPath;
@@ -361,6 +371,9 @@ function AgentforcePreviewWorkspace(props: AgentforcePreviewPanelProps) {
             : 'Local bundles use simulated actions. Published agents always use live actions and require confirmation.'}
         </div>
       )}
+      {!run && (sourceDirty || sourceStale) && <div className="sf-as-banner" role="status" data-testid="salesforce-preview-source-status">
+        {sourceDirty ? 'Unsaved changes aren’t included in this preview. Save the script, then end and start a new preview.' : 'The script has changed since this preview started. End and start a new preview to use the latest saved source.'}
+      </div>}
       <PreviewContextTabs context={context} />
       {context.tab === 'context' && <div className="sf-context-panel" id={`${context.id}-context-panel`} role="tabpanel" aria-labelledby={`${context.id}-context`}><PreviewContextEditor context={context} running={Boolean(sessionId)} onRestart={() => context.setSetup(true)} /></div>}
       <div className="sf-context-conversation" id={`${context.id}-conversation-panel`} role="tabpanel" aria-labelledby={`${context.id}-conversation`} hidden={context.tab !== 'conversation'}>

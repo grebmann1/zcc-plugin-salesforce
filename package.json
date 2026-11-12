@@ -43,6 +43,8 @@
     "./panels": "./panels.tsx"
   },
   "dependencies": {
+    "@salesforce/metadata-core-sdk": "1.7.0",
+    "@salesforce/metadata-plugins": "1.11.0",
     "@salesforce/metadata-visualizer-web": "1.7.0",
     "@sf-agentscript/agentforce": "2.10.38",
     "@sf-agentscript/lsp": "2.6.33",

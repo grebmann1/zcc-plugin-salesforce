@@ -87,6 +87,7 @@ describe('AgentThreadPanel', () => {
     context = { projectId: 'proj-1', threadId: 'thr-1' };
     docApi.doc = baseDoc(); docApi.loading = false; docApi.error = null;
     docApi.resolve.mockReset().mockResolvedValue({ ok: true });
+    docApi.reload.mockReset().mockResolvedValue(true);
     rpc.mockReset().mockImplementation(async (_p: string, method: string) => {
       if (method === 'agentScript.parse') return { ok: true, result: { actions: [{ id: 'x1', name: 'Lookup', owner: 'topic.t', target: 'apex://L', line: 4, description: '', inputs: [], outputs: [], uses: [] }] } };
       if (method === 'studio.comments.list') return { ok: true, comments: [{ id: 'c1', path: PATH, line: 3, endLine: 3, quote: 'q', body: 'Please fix', author: { kind: 'user', name: 'me' }, createdAt: 1 }] };
@@ -137,6 +138,40 @@ describe('AgentThreadPanel', () => {
     docApi.doc = baseDoc({ text: null });
     await click(tab('Graph'));
     await expect(run('state', { includeSource: true })).rejects.toThrow('unavailable');
+  });
+
+  it('refreshes File and Graph without writing or discarding a dirty Studio draft', async () => {
+    docApi.doc = baseDoc({ text: 'unsaved draft', savedText: 'saved disk', dirty: true });
+    await mount({ path: PATH });
+    await click(q('[aria-label="Refresh agent"]'));
+    expect(docApi.reload).toHaveBeenCalledOnce();
+    expect(q('[data-testid="code-stub"]')?.textContent).toBe('unsaved draft');
+    await click(tab('Graph'));
+    await click(q('[aria-label="Refresh agent"]'));
+    expect(docApi.reload).toHaveBeenCalledTimes(2);
+    expect(q('[data-testid="graph-stub"]')?.textContent).toContain('unsaved draft');
+    expect(docApi.doc.dirty).toBe(true);
+    docApi.reload.mockResolvedValueOnce(false);
+    await click(q('[aria-label="Refresh agent"]'));
+    expect(q('[role="alert"]')?.textContent).toContain('Could not refresh the agent');
+  });
+
+  it('refreshes physical Tests selection and exposes retry for a failed saved-spec refresh', async () => {
+    await mount({ path: PATH });
+    refreshSuites.mockResolvedValueOnce(false);
+    await click(tab('Tests'));
+    expect(refreshSuites).toHaveBeenCalledOnce();
+    expect(q('[role="alert"]')?.textContent).toContain('Could not refresh saved test results');
+    let finish!: (value: boolean) => void;
+    refreshSuites.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await click(q('[aria-label="Refresh saved tests"]'));
+    const refreshButton = q('[aria-label="Refresh saved tests"]') as HTMLButtonElement;
+    expect(refreshButton.disabled).toBe(true);
+    await click(refreshButton);
+    expect(refreshSuites).toHaveBeenCalledTimes(2);
+    await act(async () => { finish(true); });
+    expect(refreshButton.disabled).toBe(false);
+    expect(q('[role="alert"]')).toBeNull();
   });
 
   it('opens Preview lazily and acknowledges dispatch without waiting for a remote response', async () => {

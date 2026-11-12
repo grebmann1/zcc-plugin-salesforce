@@ -2,7 +2,7 @@
 /** @vitest-environment-options {"settings":{"enableIframePageLoading":true}} */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { actionTabs, AgentActionExplorer, AgentActionPanel, contractRows, sourceDrift } from './AgentActionPanel.js';
+import { actionTabs, AgentActionExplorer, AgentActionPanel, contractRows, sourceDrift, sourceFingerprint } from './AgentActionPanel.js';
 import { ActionCodePreview } from './ActionCodePreview.js';
 import { ActionFlowMap } from './ActionFlowMap.js';
 import { flowModel } from './action-flow.js';
@@ -11,12 +11,14 @@ import { ACTION_AGENT, ACTION_APEX, ACTION_FLOW_XML, ACTION_FLOW } from '../acti
 import type { PublicOrgView } from '../../lib/types.js';
 import { PLAYGROUND_BRIDGE_SOURCE } from './playground-bridge.js';
 const rpc = vi.fn();
+let realtime = (_payload: unknown) => {};
+const bindRealtime = () => { (globalThis as any).__ZCC_PLUGIN_RUNTIME__ = { useRealtime: (_channel: string, handler: (payload: unknown) => void) => { realtime = handler; } }; };
 const actions = parseAgentScriptSource(ACTION_AGENT, 'agentforce').actions;
 const org = { alias: 'dev', orgId: '1', username: 'u' } as PublicOrgView;
 const props = { pluginId: 'salesforce', projectId: 'p', org, action: actions[0], onReveal: vi.fn(), onOpenTarget: vi.fn() };
 const ok = (data: Record<string, unknown> = {}) => ({ ok: true, data: { origin: 'project', target: actions[0].target, status: 'ready', label: 'classes/OrderLookup.cls', language: 'apex', content: ACTION_APEX, ...data } });
-beforeEach(() => { rpc.mockReset().mockResolvedValue(ok()); props.onReveal.mockClear(); props.onOpenTarget.mockClear(); (globalThis as Record<string, unknown>).__ZCC_PLUGIN_HOST__ = { callRpc: rpc }; });
-afterEach(() => { cleanup(); delete (globalThis as Record<string, unknown>).__ZCC_PLUGIN_HOST__; vi.restoreAllMocks(); });
+beforeEach(() => { bindRealtime(); rpc.mockReset().mockResolvedValue(ok()); props.onReveal.mockClear(); props.onOpenTarget.mockClear(); (globalThis as Record<string, unknown>).__ZCC_PLUGIN_HOST__ = { callRpc: rpc }; });
+afterEach(() => { cleanup(); delete (globalThis as Record<string, unknown>).__ZCC_PLUGIN_HOST__; delete (globalThis as any).__ZCC_PLUGIN_RUNTIME__; vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('Agent action explorer', () => {
   it('uses declared labels, searches names, targets, descriptions and topics, and restores collapsed topics after search', () => {
@@ -61,6 +63,61 @@ describe('Agent action explorer', () => {
   });
 });
 describe('action implementation panel', () => {
+  it('polls fresh local Apex and scoped file changes while retaining the source frame when unchanged', async () => {
+    vi.useFakeTimers();
+    const ui = render(<AgentActionPanel {...props} org={null} />);
+    await act(async () => {});
+    const frame = screen.getByTitle('Action implementation source');
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(screen.getByTitle('Action implementation source')).toBe(frame);
+    await act(async () => { realtime({ kind: 'files', projectId: 'other' }); realtime({ kind: 'files', projectId: 'p', path: 'classes/Unrelated.cls' }); });
+    expect(rpc).toHaveBeenCalledTimes(2);
+    rpc.mockResolvedValueOnce(ok({ content: 'public class Updated {}' }));
+    await act(async () => realtime({ kind: 'files', projectId: 'p', path: 'classes/OrderLookup.cls' }));
+    expect(rpc).toHaveBeenCalledTimes(3);
+    ui.rerender(<div hidden><AgentActionPanel {...props} org={null} /></div>);
+    await act(async () => {});
+    const calls = rpc.mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(10000); });
+    expect(rpc).toHaveBeenCalledTimes(calls);
+  });
+  it('probes Flow XML without rebuilding an unchanged expanded visualizer, then rebuilds changed source', async () => {
+    const source = { origin: 'project', target: 'flow://CheckReturn', status: 'ready', label: 'flows/CheckReturn.flow-meta.xml', language: 'xml', content: ACTION_FLOW_XML };
+    const visualization = { fileName: 'CheckReturn.flow-meta.xml', data: { nodes: [], edges: [] } };
+    let content = ACTION_FLOW_XML;
+    rpc.mockImplementation(async (_plugin, _method, args) => ({ ok: true, data: { ...source, content, ...(args.visualize ? { visualization } : {}) } }));
+    render(<AgentActionPanel {...props} org={null} action={actions[1]} />);
+    await screen.findByTitle('Salesforce Flow visualizer');
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Flow' }));
+    const frame = screen.getByTitle('Salesforce Flow visualizer');
+    await act(async () => realtime({ kind: 'files', projectId: 'p', path: source.label }));
+    expect(rpc.mock.calls.filter(call => call[2].visualize)).toHaveLength(1);
+    expect(screen.getByTitle('Salesforce Flow visualizer')).toBe(frame);
+    expect(screen.getByRole('dialog', { name: 'Expanded Flow' })).toBeTruthy();
+    content = ACTION_FLOW_XML.replace('Within 30 days', 'Within 60 days');
+    await act(async () => realtime({ kind: 'files', projectId: 'p', path: source.label }));
+    expect(rpc.mock.calls.filter(call => call[2].visualize)).toHaveLength(2);
+    expect(screen.getByTitle('Salesforce Flow visualizer')).not.toBe(frame);
+    expect(sourceFingerprint(undefined)).toBe('');
+    expect(sourceFingerprint({ ...source, visualization } as any)).toBe(sourceFingerprint(source as any));
+  });
+  it('never polls or auto-refreshes org source and does not retrieve org drift on a project poll', async () => {
+    vi.useFakeTimers();
+    const ui = render(<AgentActionPanel {...props} />);
+    await act(async () => {});
+    expect(rpc.mock.calls.filter(call => call[2].origin === 'org')).toHaveLength(1);
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(rpc.mock.calls.filter(call => call[2].origin === 'org')).toHaveLength(1);
+    ui.rerender(<AgentActionPanel {...props} initialOrigin="org" />);
+    await act(async () => {});
+    const calls = rpc.mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(15000); realtime({ kind: 'files', projectId: 'p' }); window.dispatchEvent(new Event('focus')); });
+    expect(rpc).toHaveBeenCalledTimes(calls);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh implementation' }));
+    await act(async () => {});
+    expect(rpc.mock.calls.length).toBeGreaterThan(calls);
+  });
   it('links input and output Lightning Types from Contract, and shows them without a navigation host', async () => {
     const action = { ...actions[0], inputs: [{ ...actions[0].inputs[0], lightningType: 'c__OrderRequest' }], outputs: [{ ...actions[0].outputs[0], lightningType: 'lightning__textType' }] };
     const onOpenType = vi.fn();
@@ -137,7 +194,7 @@ describe('action implementation panel', () => {
     rpc.mockImplementation((_plugin, _method, args: { origin: string }) =>
       Promise.resolve(args.origin === 'project' ? { ok: false, error: 'Forbidden' } : ok()));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh implementation' }));
-    await screen.findByRole('alert'); expect(screen.queryByTitle('Action implementation source')).toBeNull();
+    await screen.findByRole('alert'); expect(screen.queryByTitle('Action implementation source')).toBeTruthy();
     rpc.mockImplementation((_plugin, _method, args: { origin: string }) =>
       args.origin === 'project' ? Promise.reject(new Error('Network down')) : Promise.resolve(ok()));
     fireEvent.click(screen.getByRole('button', { name: 'Refresh implementation' }));

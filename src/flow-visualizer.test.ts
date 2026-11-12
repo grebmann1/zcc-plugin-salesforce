@@ -18,6 +18,14 @@ describe('official Flow visualization', () => {
     expect(data.variables).toContainEqual(expect.objectContaining({ name: 'orderId', isInput: true }));
     expect(JSON.stringify(result)).not.toContain('platformContext');
   });
+  it('returns the same official model as the web engine without its rendering services', async () => {
+    const engine = await createWebVisualizationEngine({ fileSystem: flowSnapshotFileSystem(ACTION_FLOW_XML, 'CheckReturn.flow-meta.xml') });
+    try {
+      const outcome = await engine.getParsedMetadata('/flow-preview/CheckReturn.flow-meta.xml');
+      expect(outcome.error).toBeNull();
+      expect((await visualizeFlowSnapshot(source())).data).toEqual(outcome.result?.data);
+    } finally { engine.dispose(); }
+  });
   it('parses org JSON through the same SDK, including loops and scheduled paths', async () => {
     const data = (await visualizeFlowSnapshot(source({ origin: 'org', flow: VISUALIZER_FLOW }))).data as any;
     expect(data.nodes).toContainEqual(expect.objectContaining({ id: 'Items', kind: 'loop' }));

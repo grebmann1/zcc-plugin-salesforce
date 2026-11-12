@@ -270,6 +270,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   const selectedProvider = async () => toolProvider((await settings.get()).toolProvider);
   const toolkit = new SalesforceToolkitAdapter({
     sdk, provider: selectedProvider, loadRuntime: loadToolkit,
+    changed: scope => zcc.realtime.publish(STUDIO_CHANGED_CHANNEL, { ...scope, kind: 'files' }),
     scope: async ctx => {
       const project = (await zcc.sdk.projects.list()).find(project => project.id === ctx.projectId);
       if (!project?.path || project.local !== true) throw Error('Toolkit execution requires a registered local project attested by this host. Update the host if its SDK does not provide local project attestation.');
@@ -323,6 +324,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
 
   const workbench = new WorkbenchService({
     sdk, contexts, fs: deps, kv: zcc.storage.kv,
+    changed: scope => zcc.realtime.publish(STUDIO_CHANGED_CHANNEL, { ...scope, kind: 'files' }),
     apex: (input, origin) => runApex(input, origin, sdk, artifacts, deps, readSettings),
     lwc: (input) => runLwc(input, deps, readSettings, artifacts)
   });

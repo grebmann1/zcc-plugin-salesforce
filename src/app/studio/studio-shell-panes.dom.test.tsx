@@ -127,6 +127,61 @@ describe('useSuites helpers', () => {
 });
 
 describe('useSuites', () => {
+  it('recovers idle saved specs on visible polling/focus and filters suite file events by project and agent', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    try {
+      rpc.mockResolvedValue({ ok: true, suites: [suite()] });
+      const { result, rerender, unmount } = renderHook(({ visible }) => useSuiteList('salesforce', 'p1', { visible, agentPath: 'a.agent', suitePath: 'tests/a.scenario.json' }), { initialProps: { visible: true } });
+      await act(async () => {});
+      expect(rpc).toHaveBeenCalledWith('salesforce', 'studio.suites.list', { projectId: 'p1', agentPath: 'a.agent' });
+      rpc.mockResolvedValue({ ok: true, suites: [suite({ id: 'external edit' })] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(result.current.suites[0]?.id).toBe('external edit');
+      const count = rpc.mock.calls.length;
+      await act(async () => {
+        realtime?.({ kind: 'files', projectId: 'other', path: 'tests/a.scenario.json' });
+        realtime?.({ kind: 'files', projectId: 'p1', path: 'tests/b.scenario.json' });
+        realtime?.({ kind: 'files', projectId: 'p1', path: 'a.agent' });
+      });
+      expect(rpc).toHaveBeenCalledTimes(count);
+      await act(async () => { realtime?.({ kind: 'files', projectId: 'p1' }); });
+      expect(rpc).toHaveBeenCalledTimes(count + 1);
+      visibility.mockReturnValue('hidden');
+      await act(async () => { await vi.advanceTimersByTimeAsync(10000); window.dispatchEvent(new Event('focus')); });
+      expect(rpc).toHaveBeenCalledTimes(count + 1);
+      visibility.mockReturnValue('visible');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(rpc).toHaveBeenCalledTimes(count + 2);
+      await act(async () => { realtime?.({ kind: 'files', projectId: 'p1', path: 'tests/a.scenario.json' }); });
+      expect(rpc).toHaveBeenCalledTimes(count + 3);
+      rerender({ visible: false });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); window.dispatchEvent(new Event('focus')); });
+      expect(rpc).toHaveBeenCalledTimes(count + 3);
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(rpc).toHaveBeenCalledTimes(count + 3);
+    } finally { visibility.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it('never overlaps poll reads or adopts a response from an old agent in the same project', async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: (value: unknown) => void;
+      rpc.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      rpc.mockResolvedValue({ ok: true, suites: [suite({ id: 'b' })] });
+      const { result, rerender } = renderHook(({ path }) => useSuiteList('salesforce', 'p1', { agentPath: path }), { initialProps: { path: 'a.agent' } });
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000); window.dispatchEvent(new Event('focus')); });
+      expect(rpc).toHaveBeenCalledTimes(1);
+      rerender({ path: 'b.agent' });
+      await act(async () => {});
+      expect(result.current.suites[0]?.id).toBe('b');
+      await act(async () => { finish({ ok: true, suites: [suite({ id: 'a' })] }); });
+      expect(result.current.suites[0]?.id).toBe('b');
+      expect(rpc).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('follows a superseding progress refresh and resolves an old load when project is cleared', async () => {
     rpc.mockResolvedValue({ ok: true, suites: [suite()] });
     const { result, rerender } = renderHook(({ projectId }: { projectId: string | undefined }) => useSuiteList('salesforce', projectId), { initialProps: { projectId: 'p1' as string | undefined } });
@@ -138,7 +193,9 @@ describe('useSuites', () => {
     act(() => { pending = result.current.refresh(); });
     rpc.mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
     await act(async () => { realtime?.({ kind: 'suite-progress', projectId: 'p1' }); });
-    await act(async () => { finishNew({ ok: true, suites: [suite({ id: 'fresh' })] }); finishOld({ ok: true, suites: [suite({ id: 'stale' })] }); expect(await pending).toBe(true); });
+    expect(finishNew).toBeUndefined(); // invalidations coalesce behind the existing read
+    await act(async () => { finishOld({ ok: true, suites: [suite({ id: 'stale' })] }); });
+    await act(async () => { finishNew({ ok: true, suites: [suite({ id: 'fresh' })] }); expect(await pending).toBe(true); });
     expect(result.current.suites[0]?.id).toBe('fresh');
     rpc.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
     act(() => { pending = result.current.refresh(); });

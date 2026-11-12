@@ -26,9 +26,10 @@ async function setup() {
     readResult: vi.fn(async () => ({ data: { value: 'evidence', password: 'secret' } }))
   };
   const loadRuntime = vi.fn(async () => runtime);
-  const adapter = new SalesforceToolkitAdapter({ provider: async () => mode, scope: async () => ({ ...scope }), sdk: { connect, confirm } as unknown as SalesforceSdk, loadRuntime });
+  const changed = vi.fn();
+  const adapter = new SalesforceToolkitAdapter({ provider: async () => mode, scope: async () => ({ ...scope }), sdk: { connect, confirm } as unknown as SalesforceSdk, loadRuntime, changed });
   cleanups.push(() => adapter.dispose());
-  return { adapter, scope, org, runtime, connect, confirm, loadRuntime, setMode: (value: SalesforceToolProvider) => { mode = value; } };
+  return { adapter, scope, org, runtime, connect, confirm, loadRuntime, changed, setMode: (value: SalesforceToolProvider) => { mode = value; } };
 }
 const ctx = { projectId: 'p', threadId: 't' };
 
@@ -54,6 +55,99 @@ describe('provider boundary', () => {
 });
 
 describe('host-owned execution', () => {
+  it('announces only completed local retrieve results, follows resumes and deduplicates one download', async () => {
+    const f = await setup();
+    const original = f.runtime.executeTool;
+    const output = join(f.scope.workspace, 'retrieved');
+    let data: Record<string, unknown> = { submitted: true, job_id: '09S000000000001', output_dir: output };
+    let status = 'pending';
+    f.runtime.executeTool = vi.fn(async (...args) => ({ ...await original(...args), status, data }));
+    const submitted = await f.adapter.invoke('sf_metadata', { action: 'retrieve', output_dir: 'retrieved', metadata: [{ type: 'Flow', fullName: 'Review' }] }, ctx);
+    expect(f.runtime.executeTool).toHaveBeenLastCalledWith('sf_metadata', expect.objectContaining({ output_dir: output }), expect.anything());
+    expect(f.changed).not.toHaveBeenCalled();
+    const initiating = submitted.execution.runId;
+    status = 'success'; data = { job_id: '09S000000000001', status: { done: true, success: true } };
+    const checked = await f.adapter.invoke('sf_metadata', { action: 'retrieve.status' }, ctx, initiating);
+    expect(f.changed).not.toHaveBeenCalled();
+    for (const files of [[], [{ state: 'Unchanged' }], [{ state: 'Failed' }]]) {
+      data = { done: true, job_id: '09S000000000001', output_dir: output, files };
+      await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, ctx, checked.execution.runId);
+      expect(f.changed).not.toHaveBeenCalled();
+    }
+    data = { done: true, job_id: '09S000000000001', output_dir: output, files: [{ state: 'Created', filePath: join(output, 'Review.flow-meta.xml') }] };
+    const downloaded = await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, ctx, checked.execution.runId);
+    expect(f.changed.mock.calls).toEqual([[{ projectId: 'p' }]]);
+    await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, ctx, initiating);
+    await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, ctx, downloaded.execution.runId);
+    expect(f.changed).toHaveBeenCalledTimes(1);
+    await f.adapter.invoke('sf_metadata', { action: 'retrieve.status' }, ctx);
+    expect(f.changed).toHaveBeenCalledTimes(1);
+  });
+  it('does not announce failed, pending, unbound, mismatched or cancelled metadata downloads', async () => {
+    const f = await setup(); const original = f.runtime.executeTool;
+    const output = join(f.scope.workspace, 'retrieved');
+    let data: Record<string, unknown> = { submitted: true, job_id: '09S000000000001', output_dir: output };
+    let ok = true, status = 'pending';
+    f.runtime.executeTool = vi.fn(async (...args) => ({ ...await original(...args), ok, status, data }));
+    const started = await f.adapter.invoke('sf_metadata', { action: 'retrieve', output_dir: output, metadata: [{ type: 'Flow', fullName: 'Review' }] }, ctx);
+    const complete = { done: true, job_id: '09S000000000001', output_dir: output, files: [{ state: 'Changed' }] };
+    for (const change of [
+      { ok: false, status: 'error', data: complete },
+      { ok: true, status: 'pending', data: complete },
+      { ok: true, status: 'success', data: { ...complete, done: false } },
+      { ok: true, status: 'success', data: { ...complete, job_id: '09S000000000002' } },
+      { ok: true, status: 'success', data: { ...complete, output_dir: join(output, 'other') } }
+    ]) {
+      ({ ok, status, data } = change);
+      await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, ctx, started.execution.runId);
+    }
+    data = complete;
+    await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, ctx);
+    const abort = new AbortController();
+    f.runtime.executeTool = vi.fn(async (...args) => { const result = await original(...args); abort.abort(); return { ...result, ok: true, data: complete }; });
+    expect(await f.adapter.invoke('sf_metadata', { action: 'retrieve.result' }, { ...ctx, signal: abort.signal }, started.execution.runId)).toMatchObject({ code: 'interrupted' });
+    expect(f.changed).not.toHaveBeenCalled();
+  });
+  it('does not bind an omitted retrieve destination, which the installed toolkit rejects', async () => {
+    const f = await setup();
+    f.runtime.executeTool = vi.fn(async () => ({ ok: false, status: 'error', error: { code: 'INPUT', message: 'retrieve requires output_dir.' } }));
+    expect(await f.adapter.invoke('sf_metadata', { action: 'retrieve', metadata: [{ type: 'Flow', fullName: 'Review' }] }, ctx)).toMatchObject({ ok: false, error: { code: 'INPUT' } });
+    expect(f.changed).not.toHaveBeenCalled();
+  });
+  it('announces changed Flow quick fixes for their original project, never reads or unchanged/failed fixes', async () => {
+    const f = await setup(), file = join(f.scope.workspace, 'Review.flow-meta.xml');
+    await writeFile(file, '<Flow>before</Flow>');
+    let source = '<Flow>after</Flow>', ok = true;
+    f.runtime.executeTool = vi.fn(async () => { await writeFile(file, source); return { ok, status: ok ? 'success' : 'error' }; });
+    const input = { action: 'fix.apply', file, fix_id: 'canvas', source_version: 'before' };
+    await f.adapter.invoke('sf_flow', input, ctx);
+    expect(f.changed.mock.calls).toEqual([[{ projectId: 'p', path: 'Review.flow-meta.xml' }]]);
+    f.changed.mockClear();
+    await f.adapter.invoke('sf_flow', input, ctx);
+    source = '<Flow>changed but failed</Flow>'; ok = false;
+    await f.adapter.invoke('sf_flow', input, ctx);
+    ok = true;
+    await f.adapter.invoke('sf_flow', { action: 'diagnose.file', file }, ctx);
+    await f.adapter.invoke('sf_metadata', { action: 'deploy.status', job_id: '0Af000000000001' }, ctx);
+    expect(f.changed).not.toHaveBeenCalled();
+    source = '<Flow>original project</Flow>';
+    f.runtime.executeTool = vi.fn(async () => { f.scope.projectId = 'other'; await writeFile(file, source); return { ok: true }; });
+    await f.adapter.invoke('sf_flow', input, ctx);
+    expect(f.changed.mock.calls).toEqual([[{ projectId: 'p', path: 'Review.flow-meta.xml' }]]);
+  });
+  it('keeps successful writes successful if realtime fails, and ignores unavailable Flow revisions', async () => {
+    const f = await setup(), file = join(f.scope.workspace, 'Review.flow-meta.xml');
+    await writeFile(file, 'before');
+    f.changed.mockImplementation(() => { throw Error('realtime unavailable'); });
+    f.runtime.executeTool = vi.fn(async () => { await writeFile(file, 'after'); return { ok: true }; });
+    expect(await f.adapter.invoke('sf_flow', { action: 'fix.apply', file }, ctx)).toMatchObject({ ok: true });
+    expect(f.changed).toHaveBeenCalledTimes(1); f.changed.mockClear();
+    f.runtime.executeTool = vi.fn(async () => ({ ok: true }));
+    await f.adapter.invoke('sf_flow', { action: 'fix.apply' }, ctx);
+    await f.adapter.invoke('sf_flow', { action: 'fix.apply', file: f.scope.workspace }, ctx);
+    await f.adapter.invoke('sf_flow', { action: 'fix.apply', file: join(f.scope.workspace, 'missing.flow-meta.xml') }, ctx);
+    expect(f.changed).not.toHaveBeenCalled();
+  });
   it('allows local diagnostics without org, redacts results and supports opaque evidence/resume', async () => {
     const f = await setup(); f.scope.orgAlias = '';
     const result = await f.adapter.invoke('sf_flow', { action: 'quality.rules' }, ctx);

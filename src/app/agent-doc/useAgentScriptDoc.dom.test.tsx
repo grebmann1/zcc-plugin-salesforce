@@ -2,15 +2,16 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentDocSnapshot } from '../../../lib/agent-doc-contract.js';
-import { AGENT_DOC_LAPSE_CHECK_MS, newAgentDocClientId, stableAgentDocClientId, useAgentScriptDoc, type AgentScriptDocApi } from './useAgentScriptDoc.js';
+import { AGENT_DOC_LAPSE_CHECK_MS, AGENT_DOC_REFRESH_MS, newAgentDocClientId, stableAgentDocClientId, useAgentScriptDoc, type AgentScriptDocApi } from './useAgentScriptDoc.js';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const rpc = vi.fn();
 let realtime: ((p: unknown) => void) | undefined;
+let filesChanged: ((p: unknown) => void) | undefined;
 vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({
   callPluginRpc: (...a: unknown[]) => rpc(...a),
-  useRealtime: (_c: string, h: (p: unknown) => void) => { realtime = h; }
+  useRealtime: (c: string, h: (p: unknown) => void) => { if (c === 'sf.agentDoc.changed') realtime = h; else filesChanged = h; }
 }));
 
 const ME = { clientId: 'me', label: 'Studio' };
@@ -25,8 +26,8 @@ const methods = () => rpc.mock.calls.map(c => c[1]);
 const callsOf = (m: string) => rpc.mock.calls.filter(c => c[1] === m).map(c => c[2]);
 
 let api: AgentScriptDocApi;
-function Probe(props: { pluginId?: string; projectId: string | null; path: string | null; editor?: { clientId: string; label: string; standby?: boolean } }) {
-  api = useAgentScriptDoc(props.pluginId ?? 'sf', props.projectId, props.path, props.editor ? { editor: props.editor } : undefined);
+function Probe(props: { pluginId?: string; projectId: string | null; path: string | null; visible?: boolean; editor?: { clientId: string; label: string; standby?: boolean } }) {
+  api = useAgentScriptDoc(props.pluginId ?? 'sf', props.projectId, props.path, { editor: props.editor, visible: props.visible });
   return null;
 }
 const tick = (ms = 1) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
@@ -41,7 +42,7 @@ function server(state: { doc: AgentDocSnapshot }) {
   });
 }
 
-beforeEach(() => { vi.useFakeTimers(); rpc.mockReset(); realtime = undefined; });
+beforeEach(() => { vi.useFakeTimers(); rpc.mockReset(); realtime = undefined; filesChanged = undefined; });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('moving an editor to another window', () => {
@@ -709,7 +710,8 @@ describe('final review fixes', () => {
 
   it('2: a viewer reads the document again once a lease it saw would have lapsed, re-armed by each snapshot', async () => {
     const state = { doc: snap({ lease: other }) }; server(state);
-    const view = render(<Probe projectId="p" path="a.agent" />); await tick();
+    // Exercise lease recovery separately from the visible viewer's disk polling.
+    const view = render(<Probe projectId="p" path="a.agent" visible={false} />); await tick();
     const opens = () => callsOf('agentDoc.open').length;
     expect(opens()).toBe(1);
     await tick(AGENT_DOC_LAPSE_CHECK_MS - 10_000);
@@ -802,5 +804,65 @@ describe('stableAgentDocClientId', () => {
     expect(stableAgentDocClientId('s')).toMatch(/^studio-/);
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
     try { expect(stableAgentDocClientId('t')).toMatch(/^studio-/); } finally { spy.mockRestore(); }
+  });
+});
+
+describe('visible document recovery', () => {
+  it('polls disk without an open Studio, preserves dirty text and the lease, and recovers on focus', async () => {
+    const state = { doc: snap() }; server(state);
+    const view = render(<Probe projectId="p" path="a.agent" />); await tick();
+    state.doc = snap({ rev: 2, text: 'external saved edit', baseSha256: 'new' });
+    await tick(AGENT_DOC_REFRESH_MS);
+    expect(api.doc?.text).toBe('external saved edit');
+    state.doc = snap({ rev: 3, text: 'unsaved Studio draft', savedText: 'external saved edit', dirty: true, lease: other });
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(api.doc).toMatchObject({ text: 'unsaved Studio draft', dirty: true, lease: other });
+    expect(methods().every(method => method === 'agentDoc.open')).toBe(true);
+    const reads = rpc.mock.calls.length;
+    view.rerender(<Probe projectId="p" path="a.agent" visible={false} />);
+    await tick(AGENT_DOC_REFRESH_MS);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(rpc).toHaveBeenCalledTimes(reads);
+    view.unmount(); await tick(AGENT_DOC_REFRESH_MS);
+    expect(rpc).toHaveBeenCalledTimes(reads);
+    expect(await api.reload()).toBe(false);
+  });
+
+  it('coalesces file invalidations and manual refresh behind a pending read and filters exact project/path', async () => {
+    let finish!: (value: unknown) => void;
+    rpc.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    rpc.mockResolvedValue(ok(snap({ rev: 3, text: 'latest' })));
+    render(<Probe projectId="p" path="a.agent" />);
+    await act(async () => {
+      filesChanged?.({ kind: 'files', projectId: 'other', path: 'a.agent' });
+      filesChanged?.({ kind: 'files', projectId: 'p', path: 'b.agent' });
+      filesChanged?.({ kind: 'suites', projectId: 'p', path: 'a.agent' });
+      filesChanged?.(null);
+    });
+    let refreshed!: Promise<boolean>;
+    act(() => { refreshed = api.reload(); filesChanged?.({ kind: 'files', projectId: 'p', path: 'a.agent' }); });
+    await tick(AGENT_DOC_REFRESH_MS * 3);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(ok(snap())); expect(await refreshed).toBe(true); });
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(api.doc?.text).toBe('latest');
+    expect(callsOf('agentDoc.open')).toEqual([{ projectId: 'p', path: 'a.agent' }, { projectId: 'p', path: 'a.agent' }]);
+    await act(async () => { filesChanged?.({ kind: 'files', projectId: 'other' }); });
+    expect(rpc).toHaveBeenCalledTimes(2);
+    await act(async () => { filesChanged?.({ kind: 'files', projectId: 'p' }); });
+    expect(rpc).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not poll a hidden document and recovers when it becomes visible', async () => {
+    server({ doc: snap() });
+    render(<Probe projectId="p" path="a.agent" />); await tick();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      await tick(AGENT_DOC_REFRESH_MS * 2);
+      expect(rpc).toHaveBeenCalledTimes(1);
+      visibility.mockReturnValue('visible');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(rpc).toHaveBeenCalledTimes(2);
+    } finally { visibility.mockRestore(); }
   });
 });

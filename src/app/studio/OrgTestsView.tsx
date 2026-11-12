@@ -10,6 +10,7 @@ import { declined, type Message } from './approval-notice.js';
 import { OrgRunDetail } from './OrgRunDetail.js';
 import { ORG_CASE_TABLE_STYLES, OrgCaseTable } from './OrgCaseTable.js';
 import { agentNameFromPath, filterDefinitions, groupDefinitions, passRate, percent, relativeTime, sameAgent, sparkSeries } from './org-tests-model.js';
+import { referenceVisible } from './useReferenceRefresh.js';
 
 /** The Org tests view: the org's Testing Center definitions, their runs, and one run's results. */
 export interface OrgTestsViewProps {
@@ -157,6 +158,7 @@ function LastRun({ run }: { run: OrgRunRecord | undefined }) {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export function OrgTestsView(props: OrgTestsViewProps) {
+  const element = useRef<HTMLDivElement>(null);
   const { pluginId, projectId, threadId, path, visible, onAskAgent } = props;
   const call = props.call ?? callPluginRpc;
   const requestApproval = props.requestApproval ?? experimental_requestApproval;
@@ -190,7 +192,6 @@ export function OrgTestsView(props: OrgTestsViewProps) {
   const [localSuites, setLocalSuites] = useState<ScenarioSuite[] | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [selectedLocal, setSelectedLocal] = useState<string | null>(null);
-  const localSeq = useRef(0);
   const alive = useRef(true);
   const listSeq = useRef(0);
   const runSeq = useRef(0);
@@ -203,28 +204,43 @@ export function OrgTestsView(props: OrgTestsViewProps) {
     return reply ?? { ok: false, error: 'No response.' };
   }, [call, pluginId, projectId]);
 
-  const loadLocal = useCallback(async () => {
-    if (!localEnabled) return;
-    const seq = ++localSeq.current;
-    try {
-      const reply = await rpc(STUDIO_RPC.suites);
-      if (!alive.current || seq !== localSeq.current) return;
-      if (reply.ok === false || !Array.isArray(reply.suites)) throw Error(reply.error || 'Could not read the local suites.');
-      setLocalSuites(reply.suites as ScenarioSuite[]);
-      setLocalError(null);
-    } catch (error) {
-      if (alive.current && seq === localSeq.current) {
-        setLocalSuites(current => current ?? []);
-        setLocalError(error instanceof Error ? error.message : String(error));
-      }
-    }
-  }, [localEnabled, rpc]);
+  const localScope = useMemo(() => ({ pending: null as Promise<void> | null, again: false }), [localEnabled, rpc]);
+  const localTarget = useRef(localScope); localTarget.current = localScope;
+  const loadLocal = useCallback((fresh = true): Promise<void> => {
+    const current = () => alive.current && localTarget.current === localScope;
+    if (!localEnabled || !current()) return Promise.resolve();
+    if (localScope.pending) { localScope.again ||= fresh; return localScope.pending; }
+    localScope.pending = (async () => {
+      do {
+        localScope.again = false;
+        try {
+          const reply = await rpc(STUDIO_RPC.suites);
+          if (!current()) return;
+          if (reply.ok === false || !Array.isArray(reply.suites)) throw Error(reply.error || 'Could not read the local suites.');
+          setLocalSuites(reply.suites as ScenarioSuite[]);
+          setLocalError(null);
+        } catch (error) {
+          if (current()) {
+            setLocalSuites(previous => previous ?? []);
+            setLocalError(error instanceof Error ? error.message : String(error));
+          }
+        }
+      } while (localScope.again && current());
+    })().finally(() => { localScope.pending = null; });
+    return localScope.pending;
+  }, [localEnabled, rpc, localScope]);
   useEffect(() => {
-    ++localSeq.current;
     setLocalSuites(null); setLocalError(null); setSelectedLocal(null);
-    return () => { ++localSeq.current; };
   }, [rpc]);
   useEffect(() => { if (visible) void loadLocal(); }, [visible, loadLocal]);
+  useEffect(() => {
+    if (!visible || !localEnabled) return;
+    const refresh = () => { if (referenceVisible(element.current)) void loadLocal(false); };
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [visible, localEnabled, loadLocal]);
 
   const loadRuns = useCallback(async () => {
     try {
@@ -400,9 +416,16 @@ export function OrgTestsView(props: OrgTestsViewProps) {
   }, [visible, pollFailed, openId, runStatus, pollMs, rpc, loadRuns]);
 
   useRealtime(STUDIO_CHANGED_CHANNEL, payload => {
-    const row = payload as { kind?: string; projectId?: string; runId?: string } | null;
+    const row = payload as { kind?: string; projectId?: string; runId?: string; path?: unknown } | null;
     if (!row || (row.projectId && row.projectId !== projectId) || !visible) return;
-    if (row.kind === 'suites' || row.kind === 'suite-progress') { void loadLocal(); return; }
+    if (row.kind === 'files' && row.projectId === projectId && (row.path == null || (typeof row.path === 'string' && row.path.endsWith('.scenario.json')))) {
+      if (referenceVisible(element.current)) void loadLocal();
+      return;
+    }
+    if (row.kind === 'suites' || row.kind === 'suite-progress') {
+      if (referenceVisible(element.current)) void loadLocal();
+      return;
+    }
     if (row.kind !== ORG_TESTS_CHANGED_KIND) return;
     void loadRuns();
     if (row.runId && row.runId === openId && runStatus && !isOrgRunTerminal(runStatus)) void openRun(row.runId);
@@ -566,7 +589,7 @@ export function OrgTestsView(props: OrgTestsViewProps) {
   })();
 
   return (
-    <div className="sf-ot" data-testid="org-tests-view">
+    <div ref={element} className="sf-ot" data-testid="org-tests-view">
       <style>{STYLES}</style>
       <div className="sf-ot-top">
         <h2>{localEnabled ? 'Tests' : 'Org tests'}</h2>

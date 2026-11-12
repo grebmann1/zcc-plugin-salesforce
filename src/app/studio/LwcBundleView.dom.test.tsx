@@ -1,11 +1,13 @@
 /** @vitest-environment happy-dom */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useLayoutEffect } from 'react';
 
 const rpc = vi.hoisted(() => vi.fn());
-vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc }));
+const realtime = vi.hoisted(() => ({ handler: (_payload: unknown) => {} }));
+vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc, useRealtime: (_channel: string, handler: (payload: unknown) => void) => { realtime.handler = handler; } }));
 const { LwcBundleView } = await import('./LwcBundleView.js');
-const { clearReadCache } = await import('./read-cache.js');
+const { clearReadCache, readCacheKey, rememberRead } = await import('./read-cache.js');
 
 afterEach(() => { cleanup(); rpc.mockReset(); clearReadCache(); });
 
@@ -16,6 +18,70 @@ const READY = {
 };
 
 describe('LwcBundleView', () => {
+  it.each(['controller', 'Sketch'])('keeps %s selected before the initial fallback reconciliation effect', async tab => {
+    rememberRead(readCacheKey('sf', 'p1', 'lwc', 'c/orderCard'), READY);
+    rpc.mockResolvedValue({ ok: true, data: READY });
+    const name = tab === 'Sketch' ? 'Sketch' : /controller$/;
+    function SelectOnCommit() {
+      useLayoutEffect(() => { screen.getByRole('tab', { name }).click(); }, []);
+      return <LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />;
+    }
+    render(<SelectOnCommit />);
+    await act(async () => {});
+    expect(screen.getByRole('tab', { name }).getAttribute('aria-selected')).toBe('true');
+    if (tab === 'Sketch') expect(screen.getByTitle('Sketch of orderCard')).toBeTruthy();
+    else expect(screen.getByLabelText(`Source of ${READY.files[1].path}`)).toBeTruthy();
+  });
+  it('keeps the selected file or sketch across bundle reordering and falls back when it is removed', async () => {
+    const controller = { path: `${LWC}/orderCard.js`, content: 'export default class OrderCard {}' };
+    const added = { path: `${LWC}/extra.css`, content: 'p {}' };
+    rpc.mockResolvedValue({ ok: true, data: { ...READY, files: [READY.files[0], controller] } });
+    const ui = render(<LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /controller$/ }));
+    const refreshFiles = async (files: typeof READY.files) => {
+      rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files } });
+      await act(async () => realtime.handler({ kind: 'files', projectId: 'p1', path: LWC }));
+    };
+    await refreshFiles([added, controller, READY.files[0]]);
+    expect(screen.getByLabelText(`Source of ${controller.path}`).textContent).toBe(controller.content);
+    expect(screen.getByRole('tab', { name: /controller$/ }).getAttribute('aria-selected')).toBe('true');
+    await refreshFiles([added, READY.files[0]]);
+    expect(screen.getByLabelText(`Source of ${added.path}`)).toBeTruthy();
+    // Recreating the deleted file must not silently select it again.
+    await refreshFiles([controller, added, READY.files[0]]);
+    expect(screen.getByLabelText(`Source of ${added.path}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Sketch' }));
+    const frame = screen.getByTitle('Sketch of orderCard');
+    await refreshFiles([READY.files[0], added, controller]);
+    expect(screen.getByTitle('Sketch of orderCard')).toBe(frame);
+    expect(screen.getByRole('tab', { name: 'Sketch' }).getAttribute('aria-selected')).toBe('true');
+    await refreshFiles([added, controller]);
+    expect(screen.queryByRole('tab', { name: 'Sketch' })).toBeNull();
+    expect(screen.getByLabelText(`Source of ${added.path}`)).toBeTruthy();
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files: [controller, added] } });
+    ui.rerender(<LwcBundleView pluginId="sf" projectId="p2" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText(`Source of ${controller.path}`)).toBeTruthy());
+  });
+  it('refreshes mounted component source on scoped file changes and offers a manual retry without discarding source', async () => {
+    rpc.mockResolvedValue({ ok: true, data: READY });
+    render(<LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'orderCard' });
+    const source = screen.getByLabelText(/Source of .*orderCard\.html/);
+    source.scrollTop = 50;
+    await act(async () => { realtime.handler({ kind: 'files', projectId: 'other' }); realtime.handler({ kind: 'files', projectId: 'p1', path: 'lwc/unrelated/file.js' }); });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    await act(async () => realtime.handler({ kind: 'files', projectId: 'p1', path: `${LWC}/orderCard.html` }));
+    expect(screen.getByLabelText(/Source of .*orderCard\.html/)).toBe(source);
+    expect(source.scrollTop).toBe(50);
+    rpc.mockResolvedValueOnce({ ok: false, error: 'Disk unavailable' });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh component' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Disk unavailable');
+    expect(source.textContent).toBe('<template></template>');
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files: [{ ...READY.files[0], content: '<template>Updated</template>' }] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh component' }));
+    await waitFor(() => expect(screen.getByLabelText(/Source of .*orderCard\.html/).textContent).toContain('Updated'));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
   it('shows its last answer at once when it remounts, then reads again', async () => {
     rpc.mockResolvedValue({ ok: true, data: READY });
     const view = () => <LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />;
@@ -87,6 +153,39 @@ describe('LwcBundleView', () => {
     fireEvent.click(screen.getByRole('tab', { name: /styles$/ }));
     expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
     expect(screen.getByLabelText(/Source of .*orderCard\.css/).textContent).toBe(':host { color: red; }');
+  });
+  it('does not show an earlier file copy as successful for a newly selected file', async () => {
+    let finish!: () => void;
+    const writeText = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    rpc.mockResolvedValue({ ok: true, data: { ...READY, files: [READY.files[0], { path: `${LWC}/orderCard.css`, content: ':host {}' }] } });
+    render(<LwcBundleView pluginId="sf" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy' }));
+    fireEvent.click(screen.getByRole('tab', { name: /styles$/ }));
+    await act(async () => finish());
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy();
+    expect(writeText).toHaveBeenCalledWith('<template></template>');
+  });
+  it('invalidates pending and completed copy feedback when the selected source changes on disk', async () => {
+    let finish!: () => void;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) } });
+    rpc.mockResolvedValue({ ok: true, data: READY });
+    render(<LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy' }));
+    const updateSource = async (text: string) => {
+      rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files: [{ ...READY.files[0], content: `<template>${text}</template>` }] } });
+      await act(async () => realtime.handler({ kind: 'files', projectId: 'p1', path: READY.files[0].path }));
+    };
+    await updateSource('Changed while copying');
+    await act(async () => finish());
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
+    await act(async () => finish());
+    expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy();
+    await updateSource('Changed after copying');
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull();
+    expect(screen.getByLabelText(`Source of ${READY.files[0].path}`).textContent).toContain('Changed after copying');
   });
   it('offers no sketch without a readable template, and ignores a failed copy', async () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });

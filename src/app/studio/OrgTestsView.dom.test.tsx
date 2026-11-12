@@ -140,6 +140,119 @@ it('updates local cases on project events, isolates other projects and clears a 
   expect(screen.getByText('Pick local cases or an org test to see its cases and runs.')).toBeTruthy();
 });
 
+it('refreshes the local catalogue and selected detail on scoped spec writes without reloading org data or search', async () => {
+  let suites = LOCAL;
+  const { call } = setup({ renderLocalSuite: row => <div data-testid="local-editor">{row.cases.length} selected cases</div> }, { 'studio.suites.list': () => ({ ok: true, suites }) });
+  fireEvent.click(within(await screen.findByTestId('local-suite-MyBot')).getByRole('button'));
+  fireEvent.change(screen.getByLabelText('Filter tests'), { target: { value: 'refund' } });
+  const orgCalls = call.mock.calls.filter(([, method]) => method.startsWith('studio.orgTests.')).length;
+  const reads = calls(call, 'studio.suites.list').length;
+  await act(async () => {
+    realtime?.({ kind: 'files', projectId: 'other', path: 'tests/MyBot.scenario.json' });
+    realtime?.({ kind: 'files', path: 'tests/MyBot.scenario.json' });
+    realtime?.({ kind: 'files', projectId: 'p1', path: PATH });
+  });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+  suites = [{ ...LOCAL[0], cases: [...LOCAL[0].cases, { id: 'new', name: 'New case', utterances: ['hello'], expect: {} }] }];
+  await act(async () => realtime?.({ kind: 'files', projectId: 'p1', path: 'tests/MyBot.scenario.json' }));
+  expect(within(screen.getByTestId('local-suite-MyBot')).getByText('2 cases')).toBeTruthy();
+  expect(screen.getByTestId('local-suite-MyBot').getAttribute('aria-selected')).toBe('true');
+  expect(screen.getByTestId('local-editor').textContent).toBe('2 selected cases');
+  expect((screen.getByLabelText('Filter tests') as HTMLInputElement).value).toBe('refund');
+  suites = LOCAL;
+  await act(async () => realtime?.({ kind: 'files', projectId: 'p1' }));
+  expect(within(screen.getByTestId('local-suite-MyBot')).getByText('1 case')).toBeTruthy();
+  expect(call.mock.calls.filter(([, method]) => method.startsWith('studio.orgTests.'))).toHaveLength(orgCalls);
+});
+
+it('probes only visible local specs on an idle timer and focus recovery, with no org reads', async () => {
+  let suites = LOCAL;
+  const { call, props, view } = setup({ renderLocalSuite }, { 'studio.suites.list': () => ({ ok: true, suites }) });
+  await screen.findByTestId('local-suite-MyBot');
+  vi.useFakeTimers();
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  try {
+    view.rerender(<OrgTestsView {...props} visible={false} />);
+    view.rerender(<OrgTestsView {...props} visible />);
+    await act(async () => {});
+    const orgCalls = call.mock.calls.filter(([, method]) => method.startsWith('studio.orgTests.')).length;
+    suites = [{ ...LOCAL[0], cases: [] }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(within(screen.getByTestId('local-suite-MyBot')).getByText('0 cases')).toBeTruthy();
+    let reads = calls(call, 'studio.suites.list').length;
+    view.container.hidden = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); window.dispatchEvent(new Event('focus')); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+    view.container.hidden = false;
+    visibility.mockReturnValue('hidden');
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); document.dispatchEvent(new Event('visibilitychange')); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+    visibility.mockReturnValue('visible');
+    suites = LOCAL;
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(++reads);
+    expect(within(screen.getByTestId('local-suite-MyBot')).getByText('1 case')).toBeTruthy();
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(++reads);
+    expect(call.mock.calls.filter(([, method]) => method.startsWith('studio.orgTests.'))).toHaveLength(orgCalls);
+    view.rerender(<OrgTestsView {...props} visible={false} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); window.dispatchEvent(new Event('focus')); realtime?.({ kind: 'files', projectId: 'p1' }); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+  } finally { visibility.mockRestore(); vi.useRealTimers(); }
+});
+
+it('coalesces local file invalidations without overlapping slow probes or adding a poll backlog', async () => {
+  const { call, table } = setup({ renderLocalSuite }, { 'studio.suites.list': () => ({ ok: true, suites: LOCAL }) });
+  await screen.findByTestId('local-suite-MyBot');
+  const orgCalls = call.mock.calls.filter(([, method]) => method.startsWith('studio.orgTests.')).length;
+  let finish!: (value: unknown) => void;
+  table['studio.suites.list'] = () => new Promise(resolve => { finish = resolve; });
+  await act(async () => realtime?.({ kind: 'files', projectId: 'p1' }));
+  const reads = calls(call, 'studio.suites.list').length;
+  await act(async () => {
+    realtime?.({ kind: 'files', projectId: 'p1', path: 'tests/MyBot.scenario.json' });
+    realtime?.({ kind: 'suite-progress', projectId: 'p1' });
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+  table['studio.suites.list'] = () => ({ ok: true, suites: [] });
+  await act(async () => { finish({ ok: true, suites: LOCAL }); });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads + 1);
+  expect(screen.queryByTestId('local-suite-MyBot')).toBeNull();
+  expect(call.mock.calls.filter(([, method]) => method.startsWith('studio.orgTests.'))).toHaveLength(orgCalls);
+});
+
+it('ignores malformed file paths and automatic local events while the document or its ancestor is hidden', async () => {
+  const { call, view } = setup({ renderLocalSuite }, { 'studio.suites.list': () => ({ ok: true, suites: LOCAL }) });
+  await screen.findByTestId('local-suite-MyBot');
+  const reads = calls(call, 'studio.suites.list').length;
+  await act(async () => {
+    for (const path of [42, false, {}, [], 'unrelated.agent']) realtime?.({ kind: 'files', projectId: 'p1', path });
+  });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+  const events = [
+    { kind: 'files', projectId: 'p1' },
+    { kind: 'files', projectId: 'p1', path: 'tests/MyBot.scenario.json' },
+    { kind: 'suites', projectId: 'p1' },
+    { kind: 'suite-progress', projectId: 'p1' }
+  ];
+  view.container.hidden = true;
+  await act(async () => { for (const event of events) realtime?.(event); });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+  view.container.hidden = false;
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  await act(async () => { for (const event of events) realtime?.(event); });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads);
+  visibility.mockReturnValue('visible');
+  await act(async () => realtime?.(events[1]));
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads + 1);
+  await act(async () => realtime?.(events[2]));
+  expect(calls(call, 'studio.suites.list')).toHaveLength(reads + 2);
+});
+
 it('abandons a pending org selection when local cases are selected', async () => {
   let resolve!: (value: unknown) => void;
   setup({ renderLocalSuite }, { 'studio.suites.list': () => ({ ok: true, suites: LOCAL }), 'studio.orgTests.definition': () => new Promise(r => { resolve = r; }) });

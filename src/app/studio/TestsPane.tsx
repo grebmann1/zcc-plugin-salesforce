@@ -1,8 +1,10 @@
 import { useToolWorkspaceState } from './tool-workspace-state.js';
 import { StudioActionMenu } from './StudioActionMenu.js';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { callPluginRpc, experimental_requestApproval, useRealtime } from '@zana-ai/zcc-plugin-sdk/app';
 import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type CaseOutcome, type CaseResult, type ScenarioCase, type ScenarioSuite } from '../../../lib/studio-contract.js';
+import { agentSuitePath } from '../../../lib/graph-coverage.js';
+import { referenceVisible } from './useReferenceRefresh.js';
 import { parseExtraAssertions, actionCheckLabel, stateCheckLabel } from '../../../lib/scenario-assertions.js';
 import { SuiteComparisonView } from './SuiteComparisonView.js';
 import type { SuiteComparison } from '../../../lib/studio-contract.js';
@@ -243,6 +245,7 @@ export function fixLoopPrompt(loop: Pick<FixLoop, 'id' | 'budget' | 'caseIds'>, 
 }
 
 export function TestsPane(props: TestsPaneProps) {
+  const element = useRef<HTMLElement>(null);
   const { pluginId, projectId, threadId, path, source, visible, dirty, proposalSource, roleplay, onAskAgent, onShowPath } = props;
   const call = props.call ?? callPluginRpc;
   const requestApproval = props.requestApproval ?? experimental_requestApproval;
@@ -292,7 +295,7 @@ export function TestsPane(props: TestsPaneProps) {
   comparisonTarget.current = JSON.stringify([projectId, path]);
   const [filter, setFilter] = useState<CaseFilter>('all');
   const fileInput = useRef<HTMLInputElement>(null);
-  const sequence = useRef(0);
+  const [refreshing, setRefreshing] = useState(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
@@ -301,43 +304,61 @@ export function TestsPane(props: TestsPaneProps) {
     return reply ?? { ok: false, error: 'No response.' };
   }, [call, path, pluginId, projectId]);
 
-  const load = useCallback(async () => {
-    const seq = ++sequence.current;
-    if (!path) { setSuite(null); setLoop(null); setLoaded(true); return; }
-    try {
-      const [listed, latest] = await Promise.all([rpc(STUDIO_RPC.suites), rpc(STUDIO_RPC.loopGet)]);
-      if (!alive.current || seq !== sequence.current) return;
-      if (listed.ok !== false && Array.isArray(listed.suites)) setSuite((listed.suites as Suite[])[0] ?? null);
-      else setNotice({ tone: 'error', text: listed.error || 'Could not read the scenario suite.' });
-      if (listed.ok !== false) setActiveJob((listed.job as { jobId?: string } | null)?.jobId ?? null);
-      if (latest.ok !== false) setLoop((latest.loop as FixLoop | null) ?? null);
-    } catch (error) {
-      if (alive.current && seq === sequence.current) setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      if (alive.current && seq === sequence.current) setLoaded(true);
-    }
-  }, [path, rpc]);
+  const loadScope = useMemo(() => ({ pending: null as Promise<void> | null, again: false, error: null as string | null }), [rpc]);
+  const loadTarget = useRef(loadScope); loadTarget.current = loadScope;
+  const load = useCallback((fresh = true): Promise<void> => {
+    if (!path) { setSuite(null); setLoop(null); setLoaded(true); return Promise.resolve(); }
+    if (loadScope.pending) { loadScope.again ||= fresh; return loadScope.pending; }
+    const current = () => alive.current && loadTarget.current === loadScope;
+    loadScope.pending = (async () => {
+      do {
+        loadScope.again = false;
+        try {
+          const [listed, latest] = await Promise.all([rpc(STUDIO_RPC.suites), rpc(STUDIO_RPC.loopGet)]);
+          if (!current()) return;
+          if (listed.ok !== false && Array.isArray(listed.suites)) {
+            setSuite((listed.suites as Suite[])[0] ?? null);
+            const previousError = loadScope.error;
+            if (previousError) setNotice(previous => previous?.tone === 'error' && previous.text === previousError ? null : previous);
+            loadScope.error = null;
+          } else {
+            loadScope.error = listed.error || 'Could not read the scenario suite.';
+            setNotice({ tone: 'error', text: loadScope.error });
+          }
+          if (listed.ok !== false) setActiveJob((listed.job as { jobId?: string } | null)?.jobId ?? null);
+          if (latest.ok !== false) setLoop((latest.loop as FixLoop | null) ?? null);
+        } catch (error) {
+          if (current()) { loadScope.error = error instanceof Error ? error.message : String(error); setNotice({ tone: 'error', text: loadScope.error }); }
+        } finally { if (current()) setLoaded(true); }
+      } while (loadScope.again && current());
+    })().finally(() => { loadScope.pending = null; });
+    return loadScope.pending;
+  }, [path, rpc, loadScope]);
 
-  useEffect(() => { setBusy(null); setSuite(null); setLoop(null); setDetails({}); setProposal({}); setComparison(null); setComparisonOpen(false); setNotice(null); setAdding(false); setFilter('all'); setLoaded(false); }, [path, projectId]);
+  useEffect(() => { setRefreshing(false); setBusy(null); setSuite(null); setLoop(null); setDetails({}); setProposal({}); setComparison(null); setComparisonOpen(false); setNotice(null); setAdding(false); setFilter('all'); setLoaded(false); }, [path, projectId]);
   useEffect(() => { setProposal({}); }, [proposalSource]);
   useEffect(() => { if (visible) void load(); }, [visible, load]);
   useRealtime(STUDIO_CHANGED_CHANNEL, payload => {
     const row = payload as { kind?: string; projectId?: string; path?: string; loopId?: string } | null;
     if (!row || (row.projectId && row.projectId !== projectId)) return;
-    if ((row.kind === 'suites' || (row.kind === 'suite-progress' && row.path === suite?.path)) && visible) void load();
+    if ((row.kind === 'suites' || (row.kind === 'suite-progress' && row.path === suite?.path) || (row.kind === 'files' && row.projectId === projectId && (!row.path || row.path === agentSuitePath(path ?? '')))) && visible) void load();
     if (row.kind === 'loop' && row.path === path && row.loopId) {
+      const scope = loadScope;
       void rpc(STUDIO_RPC.loopGet, { loopId: row.loopId }).then(reply => {
-        if (alive.current && reply.ok !== false && reply.loop) setLoop(reply.loop as FixLoop);
+        if (alive.current && loadTarget.current === scope && reply.ok !== false && reply.loop) setLoop(reply.loop as FixLoop);
       }).catch(() => undefined);
     }
   });
   // Reconcile after missed realtime messages, and recover a run when reopening Tests.
   const hasRun = Boolean(activeJob || suite?.progress || busy === 'simulate' || busy === 'proposal' || busy === 'compare' || busy === 'eval' || busy === 'reads' || busy?.startsWith('case:'));
   useEffect(() => {
-    if (!visible || !hasRun) return;
-    const timer = setInterval(() => void load(), 2000);
-    return () => clearInterval(timer);
-  }, [visible, hasRun, load]);
+    if (!visible || !path) return;
+    const refresh = () => { if (referenceVisible(element.current)) void load(false); };
+    const timer = setInterval(refresh, hasRun ? 2000 : 5000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [visible, path, hasRun, load]);
 
   /** Runs one step with the busy flag and an error notice; the step returns the notice to show, if any. */
   const perform = useCallback(async (key: string, work: () => Promise<Notice | null>) => {
@@ -505,7 +526,7 @@ export function TestsPane(props: TestsPaneProps) {
   const orgView = orgShown && <div className="sf-tp-subview is-workbench" hidden={view !== 'org'}><OrgTestsView key={`${pluginId}:${projectId}:${path}`} pluginId={pluginId} projectId={projectId} threadId={threadId} path={path} visible={visible && view === 'org'} onAskAgent={onAskAgent} call={props.call} requestApproval={props.requestApproval} renderLocalSuite={renderLocalSuite} /></div>;
 
   if (!path) {
-    return <section className="sf-tp" data-view={view} aria-label={props.title ?? 'Tests'} data-testid="studio-tests-pane"><style>{STYLES}</style>
+    return <section ref={element} className="sf-tp" data-view={view} aria-label={props.title ?? 'Tests'} data-testid="studio-tests-pane"><style>{STYLES}</style>
       {header}
       {view === 'cases' && <div className="sf-tp-empty">Open an agent file to test it.</div>}
       {scenariosView}
@@ -536,7 +557,7 @@ export function TestsPane(props: TestsPaneProps) {
   };
 
   return (
-    <section className="sf-tp" data-view={view} aria-label={props.title ?? 'Tests'} data-testid="studio-tests-pane">
+    <section ref={element} className="sf-tp" data-view={view} aria-label={props.title ?? 'Tests'} data-testid="studio-tests-pane">
       <style>{STYLES}</style>
       {header}
       <div className="sf-tp-cases-view" hidden={view !== 'cases'}>
@@ -564,6 +585,10 @@ export function TestsPane(props: TestsPaneProps) {
             {!activeJob && <button type="button" className="sf-tp-btn" disabled={running} aria-expanded={adding} onClick={() => { setComparisonOpen(false); setAdding(true); }}>+ Case</button>}
           </>}
           {activeJob && <button type="button" className="sf-tp-btn is-danger" onClick={() => void rpc(STUDIO_RPC.suiteStop, { jobId: activeJob }).then(() => load())}>Stop suite</button>}
+          <button type="button" className="sf-tp-btn" aria-label="Refresh test cases" disabled={refreshing} onClick={() => {
+            const scope = loadScope; setRefreshing(true);
+            void load().finally(() => { if (alive.current && loadTarget.current === scope) setRefreshing(false); });
+          }}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>
           <StudioActionMenu label="More test actions" actions={[
             { id: 'compare', group: 'Evaluate', label: busy === 'compare' ? 'Comparing…' : 'Compare saved vs draft', disabled: running || !cases.length || !source.trim(), title: 'Run both sources on the same cases without replacing suite results.', onSelect: () => { void compare(); } },
             ...(comparison && !comparisonOpen ? [{ id: 'last-comparison', group: 'Evaluate', label: 'View last comparison', onSelect: () => { setAdding(false); setComparisonOpen(true); } }] : []),
