@@ -278,6 +278,59 @@ it('polls active progress after missed realtime messages and stops polling when 
   } finally { vi.useRealTimers(); }
 });
 
+it('refreshes idle externally edited test specs automatically and manually, without polling hidden tools', async () => {
+  const { call, props, view, table } = setup();
+  await screen.findByTestId('tests-row-refund');
+  vi.useFakeTimers();
+  try {
+    view.rerender(<TestsPane {...props} visible={false} />);
+    view.rerender(<TestsPane {...props} visible />);
+    await act(async () => {});
+    table['studio.suites.list'] = () => ({ ok: true, suites: [suite({ cases: [{ id: 'external', name: 'External saved edit', utterances: ['hello'], expect: {} }] })] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.queryByTestId('tests-row-refund')).toBeNull();
+    expect(screen.getByTestId('tests-row-external')).toBeTruthy();
+    const count = calls(call, 'studio.suites.list').length;
+    await act(async () => { realtime?.({ kind: 'files', projectId: 'p1', path: 'tests/Other.scenario.json' }); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(count);
+    table['studio.suites.list'] = () => ({ ok: false, error: 'Disk read failed' });
+    await act(async () => { fireEvent.click(button('Refresh test cases')); });
+    expect(screen.getByRole('alert').textContent).toContain('Disk read failed');
+    expect(screen.getByTestId('tests-row-external')).toBeTruthy();
+    table['studio.suites.list'] = () => ({ ok: true, suites: [suite()] });
+    await act(async () => { realtime?.({ kind: 'files', projectId: 'other' }); });
+    expect(screen.queryByTestId('tests-row-refund')).toBeNull();
+    await act(async () => { realtime?.({ kind: 'files', projectId: 'p1' }); });
+    expect(screen.getByTestId('tests-row-refund')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    view.container.hidden = true;
+    const hidden = calls(call, 'studio.suites.list').length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); document.dispatchEvent(new Event('visibilitychange')); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(hidden);
+    view.container.hidden = false;
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(calls(call, 'studio.suites.list')).toHaveLength(hidden + 1);
+  } finally { vi.useRealTimers(); }
+});
+
+it('coalesces pending spec invalidations and discards an old agent response after switching while hidden', async () => {
+  let finish!: (value: unknown) => void;
+  const { call, props, view } = setup({}, { 'studio.suites.list': () => new Promise(resolve => { finish = resolve; }) });
+  await act(async () => {
+    realtime?.({ kind: 'files', projectId: 'p1', path: 'tests/MyBot.scenario.json' });
+    realtime?.({ kind: 'suites', projectId: 'p1' });
+    fireEvent.click(button('Refresh test cases'));
+  });
+  expect(calls(call, 'studio.suites.list')).toHaveLength(1);
+  expect(button('Refresh test cases').disabled).toBe(true);
+  view.rerender(<TestsPane {...props} path="other.agent" visible={false} />);
+  await act(async () => { finish({ ok: true, suites: [suite()] }); });
+  expect(screen.queryByTestId('tests-row-refund')).toBeNull();
+  expect(calls(call, 'studio.suites.list')).toHaveLength(1);
+  expect(button('Refresh test cases').disabled).toBe(false);
+});
+
 it('runs the org eval and shows per-case and totals-only results', async () => {
   const evaluated = suite({ lastEval: { at: 3, org: 'dev', orgId: '00D1', passed: false, specPath: 'tests/MyBot.eval.yaml', perCase: true, historyReplay: true, results: { refund: { outcome: 'pass' }, late: { outcome: 'fail' } }, multiTurn: ['late'] } });
   const { call } = setup({}, { 'studio.suites.eval': () => ({ ok: true, summary: 'Eval failed (1 failure(s)) for v-1', suite: evaluated }) });

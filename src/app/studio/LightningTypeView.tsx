@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { callPluginRpc } from '@zana-ai/zcc-plugin-sdk/app';
 import { cachedRead, readCacheKey, rememberRead } from './read-cache.js';
+import { useReferenceRefresh } from './useReferenceRefresh.js';
 import { UsedByAgents } from './UsedByAgents.js';
 import { STUDIO_RPC, type LightningTypeView as LightningTypeData } from '../../../lib/studio-contract.js';
 import { EmptyState } from '../components/SalesforceState.js';
-
-type Load = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: LightningTypeData };
 
 /**
  * Read-only Lightning Type tab: the schema's properties, the agents whose actions declare the type, the LWCs its renderer
@@ -20,28 +19,24 @@ export function LightningTypeView({ pluginId, projectId, typeRef, usedBy, onOpen
   onOpenComponent?(ref: string): void;
 }) {
   const key = readCacheKey(pluginId, projectId, 'lightning-type', typeRef);
-  const initial = (): Load => { const data = cachedRead<LightningTypeData>(key); return data ? { state: 'ready', data } : { state: 'loading' }; };
-  const [load, setLoad] = useState<Load>(initial);
-  const [file, setFile] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    // A remount keeps the last answer on screen while it reads again; a new ref starts over.
-    setLoad(initial());
-    Promise.resolve(callPluginRpc(pluginId, STUDIO_RPC.lightningType, { ...(projectId ? { projectId } : {}), ref: typeRef }))
-      .then(result => {
-        const res = result as { ok?: boolean; data?: LightningTypeData; error?: string } | null;
-        if (!alive) return;
-        if (res?.ok && res.data) { rememberRead(key, res.data); setLoad({ state: 'ready', data: res.data }); }
-        else setLoad({ state: 'error', message: res?.error || 'The Lightning Type could not be read.' });
-      })
-      .catch(err => { if (alive) setLoad({ state: 'error', message: err instanceof Error ? err.message : String(err) }); });
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` names exactly these inputs.
-  }, [key]);
+  const root = useRef<HTMLElement>(null);
+  const { data, error, busy, refresh } = useReferenceRefresh<LightningTypeData>({
+    scope: key, projectId, element: root, initial: cachedRead<LightningTypeData>(key),
+    paths: data => data?.path ? [data.path] : [],
+    read: async () => {
+      const res = await callPluginRpc(pluginId, STUDIO_RPC.lightningType, { ...(projectId ? { projectId } : {}), ref: typeRef }) as { ok?: boolean; data?: LightningTypeData; error?: string } | null;
+      if (!res?.ok || !res.data) throw Error(res?.error || 'The Lightning Type could not be read.');
+      return res.data;
+    },
+    remember: data => rememberRead(key, data),
+  });
+  const [selection, setSelection] = useState<{ scope: string; path?: string }>({ scope: key });
+  const selected = selection.scope === key ? selection.path : undefined;
+  const shown = data?.files.find(row => row.path === selected) ?? data?.files[0];
+  const file = shown?.path;
+  useEffect(() => { setSelection(previous => previous.scope === key && previous.path === file ? previous : { scope: key, path: file }); }, [file, key]);
 
-  const data = load.state === 'ready' ? load.data : null;
-  const shown = data?.files[file];
-  return <section className="sf-lt" data-testid="lightning-type-view" aria-label={`Lightning Type ${typeRef}`}>
+  return <section ref={root} className="sf-lt" data-testid="lightning-type-view" aria-label={`Lightning Type ${typeRef}`}>
     <header className="sf-lt-head">
       <div>
         <h2>{data?.title || typeRef}</h2>
@@ -52,9 +47,10 @@ export function LightningTypeView({ pluginId, projectId, typeRef, usedBy, onOpen
         </div>
         {data?.description && <p>{data.description}</p>}
       </div>
+      <button type="button" className="sf-atp-btn" disabled={busy} onClick={refresh} aria-label="Refresh Lightning Type">Refresh</button>
     </header>
-    {load.state === 'loading' && <p className="sf-lt-note">Loading…</p>}
-    {load.state === 'error' && <p className="sf-lt-note is-error" role="alert">{load.message}</p>}
+    {!data && busy && <p className="sf-lt-note">Loading…</p>}
+    {error && <p className="sf-lt-note is-error" role="alert">{error}</p>}
     {data?.message && <p className={`sf-lt-note${data.status === 'ready' ? ' is-warn' : ''}`}>{data.message}</p>}
     {usedBy && usedBy.length > 0 && <dl className="sf-lt-rel"><UsedByAgents usedBy={usedBy} onOpenAgent={onOpenAgent} /></dl>}
     {data?.status === 'ready' && <div className="sf-lt-section">
@@ -89,7 +85,7 @@ export function LightningTypeView({ pluginId, projectId, typeRef, usedBy, onOpen
     {data && data.files.length > 0 && <div className="sf-lt-section">
       <h3>Bundle files</h3>
       <div className="sf-lt-files" role="group" aria-label="Bundle files">
-        {data.files.map((row, index) => <button key={row.path} type="button" aria-pressed={index === file} title={row.path} onClick={() => setFile(index)}>{row.path.split('/').slice(-2).join('/')}</button>)}
+        {data.files.map(row => <button key={row.path} type="button" aria-pressed={row.path === file} title={row.path} onClick={() => setSelection({ scope: key, path: row.path })}>{row.path.split('/').slice(-2).join('/')}</button>)}
       </div>
       {shown && <pre className="sf-lt-source" aria-label={`Source of ${shown.path}`}>{shown.truncated ? 'This file is larger than 256 KB. Open it in your editor to read it.' : shown.content}</pre>}
     </div>}

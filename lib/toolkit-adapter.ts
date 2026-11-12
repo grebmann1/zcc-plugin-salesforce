@@ -1,6 +1,7 @@
 import { mkdtemp, realpath, rm, readdir, lstat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import catalog from '../vendor/catalog.json';
 import type { SalesforceSdk } from './sdk-contract.js';
@@ -23,7 +24,8 @@ export function providerTools(provider: SalesforceToolProvider, salesforceReady:
   ];
 }
 export interface ToolkitScope { projectId: string; workspace: string; orgAlias: string; }
-interface SavedRun { projectId: string; workspace: string; org: string | null; runFile: string; resultFile: string; directory: string; }
+interface Retrieval { jobId: string; output: string; notified: boolean; }
+interface SavedRun { projectId: string; workspace: string; org: string | null; runFile: string; resultFile: string; directory: string; retrieval?: Retrieval; }
 
 /** Approval line, e.g. "sf_metadata deploy.start · 6 source paths on dev"; the card renders the details. */
 export function toolkitSummary(name: string, input: Record<string, unknown>, orgAlias?: string): string {
@@ -43,6 +45,7 @@ export class SalesforceToolkitAdapter {
     scope(context: SalesforceToolCallContext): Promise<ToolkitScope>;
     sdk: SalesforceSdk;
     loadRuntime(): Promise<ToolkitRuntime>;
+    changed?(scope: { projectId: string; path?: string }): void;
   }) {}
 
   async catalog() {
@@ -99,19 +102,41 @@ export class SalesforceToolkitAdapter {
       const root = await this.root;
       controller.signal.throwIfAborted();
       directory = await mkdtemp(join(root, 'call-'));
+      const before = name === 'sf_flow' && input.action === 'fix.apply' ? await fileRevision(workspace, input.file, controller.signal) : null;
+      controller.signal.throwIfAborted();
       const result = await runtime.executeTool(name, input, {
         workspace, artifactDir: directory, timeoutMs: 120_000, signal: controller.signal,
         allowEffects: effects && decision.approved, ...(saved ? { resume: saved.runFile } : {})
       });
       controller.signal.throwIfAborted();
       await checkEvidenceSize(directory);
+      const data = result.data;
+      const succeeded = result.ok === true && result.status !== 'pending' && result.status !== 'error';
+      let retrieval = saved?.retrieval;
+      if (name === 'sf_metadata' && input.action === 'retrieve' && result.ok === true && data?.submitted === true && typeof data.job_id === 'string' && typeof data.output_dir === 'string') {
+        // Only the initiating, approved retrieve can bind the resume chain's destination.
+        const output = await confinedToolkitPath(workspace, data.output_dir);
+        if (output === input.output_dir) retrieval = { jobId: data.job_id, output, notified: false };
+      }
       if (result.execution) {
         const runFile = await confinedToolkitPath(directory, result.execution.runFile);
         const resultFile = await confinedToolkitPath(directory, result.execution.resultFile);
         const id = result.execution.runId;
         if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)) throw Error('Invalid toolkit run identity.');
-        this.runs.set(id, { projectId: scope.projectId, workspace, org: org?.orgId ?? null, runFile, resultFile, directory });
+        this.runs.set(id, { projectId: scope.projectId, workspace, org: org?.orgId ?? null, runFile, resultFile, directory, ...(retrieval ? { retrieval } : {}) });
         retained = true;
+      }
+      controller.signal.throwIfAborted();
+      if (succeeded && name === 'sf_metadata' && input.action === 'retrieve.result' && retrieval && !retrieval.notified && data?.done === true && data.job_id === retrieval.jobId && data.output_dir === retrieval.output && hasChangedFiles(data.files)) {
+        // retrieve/status only contact Salesforce; retrieve.result commits the local download.
+        // The shared flag follows all resume records and is bounded by retained run history.
+        retrieval.notified = true;
+        this.changed({ projectId: scope.projectId });
+      }
+      if (succeeded && before) {
+        const after = await fileRevision(workspace, input.file, controller.signal);
+        controller.signal.throwIfAborted();
+        if (after?.path === before.path && after.hash !== before.hash) this.changed({ projectId: scope.projectId, path: after.path });
       }
       const projected = redactToolkitResult(runtime.toModelResult(result, { maxBytes: 24_000 }));
       if (projected.execution) projected.execution = { runId: result.execution.runId };
@@ -154,6 +179,25 @@ export class SalesforceToolkitAdapter {
     if (this.root) await rm(await this.root, { recursive: true, force: true });
   }
   cancelActive() { for (const controller of this.active) controller.abort(); }
+  private changed(scope: { projectId: string; path?: string }) {
+    if (!this.disposed) { try { this.deps.changed?.(scope); } catch { /* A notification failure cannot undo committed files. */ } }
+  }
+}
+
+function hasChangedFiles(files: unknown): boolean {
+  return Array.isArray(files) && files.some(file => file && ['Created', 'Changed', 'Deleted'].includes(file.state));
+}
+
+/** Stream hashes keep Flow invalidation bounded without retaining its source. */
+async function fileRevision(workspace: string, supplied: unknown, signal: AbortSignal): Promise<{ path: string; hash: string } | null> {
+  if (typeof supplied !== 'string') return null;
+  try {
+    const file = await confinedToolkitPath(workspace, supplied);
+    if (!(await lstat(file)).isFile()) return null;
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
+    return { path: relative(workspace, file).split(sep).join('/'), hash: hash.digest('hex') };
+  } catch { return null; }
 }
 
 async function checkEvidenceSize(directory: string) {

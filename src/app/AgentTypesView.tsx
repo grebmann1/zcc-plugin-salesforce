@@ -5,6 +5,7 @@ import type { AgentAction } from '../../lib/agent-action-model.js';
 import { STUDIO_RPC, type LightningTypeSummary } from '../../lib/studio-contract.js';
 import { LightningTypeView } from './studio/LightningTypeView.js';
 import { LwcBundleView } from './studio/LwcBundleView.js';
+import { useReferenceRefresh } from './studio/useReferenceRefresh.js';
 import { AgentReferenceRow, AgentReferenceSearch } from './AgentReferenceList.js';
 
 export interface OpenAgentType { ref: string; seq: number; fromAction: boolean }
@@ -19,9 +20,7 @@ export function AgentTypesView({ pluginId, projectId, actions, loading, error, r
 }) {
   const refs = [...new Set(actions.flatMap(a => [...a.inputs, ...a.outputs].flatMap(p => p.lightningType ? [p.lightningType] : [])))];
   const refsKey = JSON.stringify(refs);
-  const [refresh, setRefresh] = useState(0);
-  const key = JSON.stringify([pluginId, projectId, refsKey, refresh]);
-  const [load, setLoad] = useState<{ key: string; types?: LightningTypeSummary[]; error?: string; truncated?: boolean } | null>(null);
+  const key = JSON.stringify([pluginId, projectId, refsKey]);
   const [section, setSection] = useState<'types' | 'components'>('types');
   const [query, setQuery] = useState('');
   const [history, setHistory] = useState<Location[]>([]);
@@ -34,18 +33,15 @@ export function AgentTypesView({ pluginId, projectId, actions, loading, error, r
     if (!request) return;
     setSection('types'); setHistory([{ kind: 'type', ref: request.ref }]); setFromAction(request.fromAction);
   }, [request]);
-  useEffect(() => {
-    if (!projectId || !refs.length || loading || error) return;
-    let live = true;
-    void Promise.resolve(callPluginRpc(pluginId, STUDIO_RPC.agentTypes, { projectId, refs: refs.slice(0, 120) })).then(value => {
-      const out = value as { ok?: boolean; types?: LightningTypeSummary[]; truncated?: boolean; error?: string } | null;
-      if (!live) return;
-      setLoad(out?.ok && Array.isArray(out.types) ? { key, types: out.types, truncated: out.truncated } : { key, error: out?.error || 'The Lightning Types could not be read.' });
-    }).catch(err => { if (live) setLoad({ key, error: err instanceof Error ? err.message : String(err) }); });
-    return () => { live = false; };
-  }, [key, loading, error]); // `key` includes plugin, project, refs and refresh.
-  const current = load?.key === key ? load : null;
-  const types = current?.types ?? EMPTY;
+  const { data: catalogue, error: readError, busy, refresh } = useReferenceRefresh<{ types: LightningTypeSummary[]; truncated?: boolean }>({
+    scope: key, projectId, element: root, enabled: Boolean(projectId && refs.length && !loading && !error),
+    read: async () => {
+      const out = await callPluginRpc(pluginId, STUDIO_RPC.agentTypes, { projectId, refs: refs.slice(0, 120) }) as { ok?: boolean; types?: LightningTypeSummary[]; truncated?: boolean; error?: string } | null;
+      if (!out?.ok || !Array.isArray(out.types)) throw Error(out?.error || 'The Lightning Types could not be read.');
+      return { types: out.types, truncated: out.truncated };
+    },
+  });
+  const types = catalogue?.types ?? EMPTY;
   const components = useMemo(() => {
     const rows = new Map<string, { ref: string; path?: string; via: string[] }>();
     for (const type of types) for (const component of type.components) {
@@ -66,8 +62,8 @@ export function AgentTypesView({ pluginId, projectId, actions, loading, error, r
   }, [selected?.kind, selected?.ref]);
   const open = (next: Location) => setHistory(prev => [...prev, next]);
   const usedBy = (ref: string) => actions.filter(a => [...a.inputs, ...a.outputs].some(p => p.lightningType === ref));
-  const issue = error || current?.error;
-  const pending = loading || Boolean(projectId && refs.length && !current && !error);
+  const issue = error || readError;
+  const pending = loading || Boolean(projectId && refs.length && !catalogue && !issue);
   const matching = (values: string[]) => values.join(' ').toLowerCase().includes(query.trim().toLowerCase());
   const filteredTypes = types.filter(t => matching([t.ref, t.title ?? '', ...t.components.map(c => c.ref)]));
   const filteredComponents = components.filter(c => matching([c.ref, ...c.via]));
@@ -79,6 +75,7 @@ export function AgentTypesView({ pluginId, projectId, actions, loading, error, r
     setFromAction(false); open({ kind, ref });
   };
   return <div className="sf-atp-types" data-testid="atp-types" ref={root}>
+    {!pending && issue && <p className="sf-atp-empty sf-atp-error" role="alert">{issue}</p>}
     {selected ? <>
       <div className="sf-atp-types-back" ref={heading} tabIndex={-1}>
         <button className="sf-atp-link" type="button" onClick={() => {
@@ -88,20 +85,20 @@ export function AgentTypesView({ pluginId, projectId, actions, loading, error, r
         }}>← {history.length > 1 ? 'Back' : fromAction ? 'Back to action' : section === 'types' ? 'All Lightning Types' : 'All components'}</button>
         <button className="sf-atp-link" type="button" onClick={() => { setHistory([]); setFromAction(false); }}>Browse all</button>
       </div>
-      {pending ? <p className="sf-atp-empty" role="status">Loading types…</p> : issue ? <p className="sf-atp-empty sf-atp-error" role="alert">{issue}</p> : !referenced ? <p className="sf-atp-empty">This reference is no longer used by the current draft.</p> : selected.kind === 'type' ? <>
-        <LightningTypeView key={`${selected.ref}:${refresh}`} pluginId={pluginId} projectId={projectId} typeRef={selected.ref} onOpenAgent={() => undefined} onOpenComponent={ref => open({ kind: 'component', ref })} />
+      {pending ? <p className="sf-atp-empty" role="status">Loading types…</p> : !referenced ? <p className="sf-atp-empty">This reference is no longer used by the current draft.</p> : selected.kind === 'type' ? <>
+        <LightningTypeView key={selected.ref} pluginId={pluginId} projectId={projectId} typeRef={selected.ref} onOpenAgent={() => undefined} onOpenComponent={ref => open({ kind: 'component', ref })} />
         <section className="sf-atp-types-usage" aria-label="Used by actions"><h3>Used by actions</h3><div>{usedBy(selected.ref).map(a => <button key={a.id} className="sf-lt-chip" type="button" title={a.owner} onClick={() => onOpenAction(a.id)}>{a.name} ↗</button>)}</div></section>
-      </> : <LwcBundleView key={`${selected.ref}:${refresh}`} pluginId={pluginId} projectId={projectId} componentRef={selected.ref} via={component?.via} onOpenAgent={() => undefined} onOpenType={ref => open({ kind: 'type', ref })} />}
+      </> : <LwcBundleView key={selected.ref} pluginId={pluginId} projectId={projectId} componentRef={selected.ref} via={component?.via} onOpenAgent={() => undefined} onOpenType={ref => open({ kind: 'type', ref })} />}
     </> : <>
-      <div className="sf-reference-head"><h2>Types</h2><button className="sf-atp-btn" type="button" disabled={pending || !projectId} onClick={() => setRefresh(n => n + 1)}>Refresh</button></div>
+      <div className="sf-reference-head"><h2>Types</h2><button className="sf-atp-btn" type="button" disabled={pending || busy || !projectId} onClick={refresh}>Refresh</button></div>
       <div className="sf-atp-types-sections" role="group" aria-label="Reference sections">
         <button type="button" aria-pressed={section === 'types'} onClick={() => { setSection('types'); setQuery(''); }}><Shapes size={14} aria-hidden="true" />Lightning Types <span>{types.length}</span></button>
         <button type="button" aria-pressed={section === 'components'} onClick={() => { setSection('components'); setQuery(''); }}><Boxes size={14} aria-hidden="true" />Components <span>{components.length}</span></button>
       </div>
       <p className="sf-reference-note">Referenced by this agent’s current draft</p>
       <AgentReferenceSearch label="Search types and components" placeholder={section === 'types' ? 'Search types or components…' : 'Search components…'} value={query} onChange={setQuery} />
-      {!projectId ? <p className="sf-atp-empty">Open this agent in a project to browse its types.</p> : pending ? <p className="sf-atp-empty" role="status">Loading types…</p> : issue ? <p className="sf-atp-empty sf-atp-error" role="alert">{issue}</p> : <>
-        {current?.truncated && <p className="sf-atp-types-note" role="status">Showing the first 60 types. Open an action’s type link to inspect other references.</p>}
+      {!projectId ? <p className="sf-atp-empty">Open this agent in a project to browse its types.</p> : pending ? <p className="sf-atp-empty" role="status">Loading types…</p> : <>
+        {catalogue?.truncated && <p className="sf-atp-types-note" role="status">Showing the first 60 types. Open an action’s type link to inspect other references.</p>}
         {!refs.length ? <p className="sf-atp-empty">No Lightning Types are declared by this agent’s actions.</p> : section === 'types' ? <>
           {([false, true] as const).map(standard => {
             const group = filteredTypes.filter(t => t.standard === standard);

@@ -90,6 +90,7 @@ export class WorkbenchService {
       kv: ExplorerKv;
       apex(input: unknown, origin: { threadId: string; operatorApprovedOrgId?: string }): Promise<ToolResult>;
       lwc(input: unknown): Promise<ToolResult>;
+      changed?(scope: { projectId: string }): void;
     },
   ) {}
 
@@ -286,6 +287,9 @@ export class WorkbenchService {
           : result.jobId
             ? "submitted"
             : "succeeded";
+        if (!this.disposed && row.projectId && row.kind === "retrieve.start" && "filesChanged" in result && result.filesChanged && row.state === "succeeded") {
+          try { this.deps.changed?.({ projectId: row.projectId }); } catch { /* The completed download remains successful. */ }
+        }
       })
       .catch((error) => {
         row.state = "failed";
@@ -396,6 +400,7 @@ export class WorkbenchService {
       data,
       jobId,
       failed: result.success === false,
+      filesChanged: row.kind === "retrieve.start" && result.success === true && result.done !== false && Array.isArray(result.files) && result.files.some(file => ["Created", "Changed", "Deleted"].includes(inputRecord(file).state as string)),
     };
   }
 

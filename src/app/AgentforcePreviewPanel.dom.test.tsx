@@ -144,6 +144,66 @@ describe('AgentforcePreviewPanel', () => {
     expect(studioRunKey({ ...owner, threadId: undefined })).toBe(JSON.stringify(['salesforce', 'proj-1', 'dev', path, 'org-preview']));
   });
 
+  it('shows saved-source changes and unsaved edits without silently restarting a thread preview', async () => {
+    const path = 'force-app/bots/QC.agent';
+    const oldHash = 'a'.repeat(64), newHash = 'b'.repeat(64);
+    let control: AgentPreviewControl | null = null;
+    let state: AgentPreviewState | null = null;
+    rpc.mockImplementation(async (plugin, method, args) => method === 'agentLab.start'
+      ? { ok: true, data: { id: 'sess-1', sourceHash: oldHash, turns: [] } }
+      : baseRpc(plugin, method, args));
+    const props = { pluginId: 'salesforce', threadId: 'thr-1', projectId: 'proj-1', pinnedPath: path, controlledThreadId: 'thr-1',
+      onControl: (next: AgentPreviewControl | null) => { control = next; }, onState: (next: AgentPreviewState) => { state = next; } };
+    const el = await mount({ path }, path, { ...props, sourceSha256: oldHash });
+    await act(async () => { await control!.start(); });
+    expect(el.querySelector('[data-testid="salesforce-preview-source-status"]')).toBeNull();
+    expect(state).toMatchObject({ sourceHash: oldHash, sourceStale: false, sourceDirty: false });
+    const rerender = async (sourceSha256: string, sourceDirty = false) => {
+      await act(async () => nodes.at(-1)!.root.render(createElement(AgentforcePreviewPanel, { ...props, sourceSha256, sourceDirty })));
+    };
+    await rerender(newHash);
+    expect(el.textContent).toContain('The script has changed since this preview started');
+    expect(state).toMatchObject({ sourceStale: true });
+    await rerender(newHash, true);
+    expect(el.textContent).toContain('Unsaved changes aren’t included in this preview');
+    expect(state).toMatchObject({ sourceStale: false, sourceDirty: true });
+    await rerender(oldHash);
+    expect(el.querySelector('[data-testid="salesforce-preview-source-status"]')).toBeNull();
+    expect(rpc.mock.calls.filter(call => call[1] === 'agentLab.start')).toHaveLength(1);
+    expect(rpc.mock.calls.filter(call => call[1] === 'agentLab.end')).toHaveLength(0);
+    await rerender(newHash);
+    await act(async () => { await control!.end(); });
+    expect(el.querySelector('[data-testid="salesforce-preview-source-status"]')).toBeNull();
+    expect(state).toMatchObject({ sessionId: null, sourceHash: null, sourceStale: false });
+  });
+
+  it('does not guess staleness when the running simulation returned no source revision', async () => {
+    const path = 'force-app/bots/QC.agent';
+    let control: AgentPreviewControl | null = null;
+    const el = await mount({ path }, path, { controlledThreadId: 'thr-1', sourceSha256: 'new', onControl: (next: AgentPreviewControl | null) => { control = next; } });
+    await act(async () => { await control!.start(); });
+    expect(el.querySelector('[data-testid="salesforce-preview-source-status"]')).toBeNull();
+  });
+
+  it('reconciles the actual revision of a restored simulation without comparing live revisions', async () => {
+    const path = 'force-app/bots/QC.agent';
+    const owner = { pluginId: 'salesforce', projectId: 'proj-1', orgAlias: 'dev', path, view: 'org-preview' as const, threadId: 'thr-1' };
+    const key = studioRunKey(owner);
+    const props = { controlledThreadId: 'thr-1', orgAlias: 'dev', sourceSha256: 'new' };
+    writeWorkspaceValue(key, 'sessionId', 'sess-1', null);
+    writeWorkspaceValue(key, 'lifecycle', { simulated: true }, {});
+    rpc.mockImplementation(async (plugin, method, args) => method === 'agentLab.get'
+      ? { ok: true, data: { id: 'sess-1', sourceHash: 'old', turns: [] } } : baseRpc(plugin, method, args));
+    const el = await mount({ path }, path, props);
+    expect(el.textContent).toContain('The script has changed since this preview started');
+    await act(async () => { nodes.at(-1)!.root.render(createElement(AgentforcePreviewPanel, { pluginId: 'salesforce', projectId: 'proj-1', threadId: 'other-thread', pinnedPath: path, ...props, controlledThreadId: 'other-thread' })); });
+    expect(el.querySelector('[data-testid="salesforce-preview-source-status"]')).toBeNull();
+    // A published/live conversation must never be compared to a local saved revision.
+    writeWorkspaceValue(key, 'lifecycle', { simulated: false }, {});
+    await act(async () => { nodes.at(-1)!.root.render(createElement(AgentforcePreviewPanel, { pluginId: 'salesforce', projectId: 'proj-1', threadId: 'thr-1', pinnedPath: path, ...props })); });
+    expect(el.querySelector('[data-testid="salesforce-preview-source-status"]')).toBeNull();
+  });
+
   it('refuses busy or live sessions and surfaces remote failure without a successful reply', async () => {
     const path = 'force-app/bots/QC.agent';
     let control: AgentPreviewControl | null = null;

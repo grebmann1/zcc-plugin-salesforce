@@ -24,6 +24,12 @@ describe('org preview session routing', () => {
     expect(rpc).toHaveBeenCalledExactlyOnceWith('salesforce', `agentPreview.${action}`, args);
   });
 
+  it('returns the actual simulated source revision rather than the latest file revision', async () => {
+    rpc.mockResolvedValueOnce({ ok: true, file: { content: 'saved source', sha256: 'file-revision' } })
+      .mockResolvedValueOnce({ ok: true, data: { id: 'new', sourceHash: 'session-revision', turns: [] } });
+    expect((await callOrgPreview('salesforce', 'start', args, true)).data).toMatchObject({ sessionId: 'new', sourceHash: 'session-revision' });
+  });
+
   it('sends the user text to the same simulation and returns its last agent response', async () => {
     rpc.mockResolvedValue({ ok: true, data: { id: 's', turns: [{ role: 'agent', text: 'Welcome' }, { role: 'user', text: 'Hello' }, { role: 'agent', text: 'Reply' }] } });
     expect(await callOrgPreview('salesforce', 'send', args, true)).toMatchObject({ ok: true, data: { sessionId: 's', response: 'Reply' } });

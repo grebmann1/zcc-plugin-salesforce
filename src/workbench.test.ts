@@ -84,6 +84,7 @@ function fixture() {
     summary: "Jest passed",
     data: { success: true },
   }));
+  const changed = vi.fn();
   const service = new WorkbenchService({
     sdk: sdk as unknown as SalesforceSdk,
     contexts,
@@ -91,6 +92,7 @@ function fixture() {
     kv,
     apex,
     lwc,
+    changed,
   });
   const run = <T>(
     work: () => Promise<T>,
@@ -118,6 +120,7 @@ function fixture() {
     run,
     settle,
     fallback,
+    changed,
   };
 }
 
@@ -198,6 +201,56 @@ describe("project target snapshots", () => {
 });
 
 describe("workbench evidence and operations", () => {
+  it.each(["Created", "Changed", "Deleted"])("announces successful committed retrieve files (%s) for the initiating project", async state => {
+    const f = fixture();
+    f.sdk.execSf.mockResolvedValue({ code: 0, stdout: JSON.stringify({ status: 0, result: { done: true, success: true, files: [{ state, filePath: "/alpha/force-app/One.cls" }] } }), stderr: "" });
+    await f.run(() => f.service.start({ kind: "retrieve.start", components: ["ApexClass:One"] }));
+    await f.settle();
+    expect(f.changed.mock.calls).toEqual([[{ projectId: "a" }]]);
+    expect(f.sdk.execSf).toHaveBeenCalledWith(expect.arrayContaining(["project", "retrieve", "start"]), { cwd: "/alpha", timeoutMs: 120_000 });
+    await f.run(() => f.service.list(), { projectId: "b" });
+    expect(f.changed).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { done: true, success: true, files: [] },
+    { done: true, success: true, files: [{ state: "Unchanged" }] },
+    { done: true, success: true, files: [{ state: "Failed" }] },
+    { done: true, success: false, files: [{ state: "Changed" }] },
+    { done: false, success: true, files: [{ state: "Changed" }] },
+    { done: true, success: true }
+  ])("does not announce empty, unchanged, pending or failed retrieve responses: %j", async result => {
+    const f = fixture();
+    f.sdk.execSf.mockResolvedValue({ code: 0, stdout: JSON.stringify({ result }), stderr: "" });
+    await f.run(() => f.service.start({ kind: "retrieve.start", components: ["Flow:One"] }));
+    await f.settle();
+    expect(f.changed).not.toHaveBeenCalled();
+  });
+  it("does not announce denied or failed downloads, previews or deployments", async () => {
+    const f = fixture();
+    f.sdk.confirm.mockResolvedValueOnce({ approved: false, reason: "denied" });
+    await f.run(() => f.service.start({ kind: "retrieve.start", components: ["Flow:One"] })); await f.settle();
+    f.sdk.execSf.mockResolvedValueOnce({ code: 1, stdout: '{"status":1,"message":"failed"}', stderr: "failed" });
+    await f.run(() => f.service.start({ kind: "retrieve.start", components: ["Flow:One"] })); await f.settle();
+    f.sdk.execSf.mockResolvedValue({ code: 0, stdout: '{"result":{"done":true,"success":true,"files":[{"state":"Changed"}]}}', stderr: "" });
+    await f.run(() => f.service.start({ kind: "retrieve.preview" })); await f.settle();
+    await f.run(() => f.service.start({ kind: "deploy.start", components: ["Flow:One"], tests: ["OneTest"] })); await f.settle();
+    expect(f.changed).not.toHaveBeenCalled();
+  });
+  it("keeps download success if notifications fail and stops notifications after disposal", async () => {
+    const f = fixture();
+    const complete = { code: 0, stdout: '{"result":{"done":true,"success":true,"files":[{"state":"Changed"}]}}', stderr: "" };
+    f.sdk.execSf.mockResolvedValue(complete);
+    f.changed.mockImplementationOnce(() => { throw Error("offline"); });
+    await f.run(() => f.service.start({ kind: "retrieve.start", components: ["Flow:One"] })); await f.settle();
+    expect((await f.run(() => f.service.list())).operations[0].state).toBe("succeeded");
+    let finish!: (result: typeof complete) => void;
+    f.sdk.execSf.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const { operation } = await f.run(() => f.service.start({ kind: "retrieve.start", components: ["Flow:Two"] }));
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    f.service.dispose(); finish(complete);
+    await vi.waitFor(() => expect(operation.state).toBe("succeeded"));
+    expect(f.changed).toHaveBeenCalledTimes(1);
+  });
   it("validates metadata and bounds/redacts public evidence", () => {
     for (const components of [
       [],

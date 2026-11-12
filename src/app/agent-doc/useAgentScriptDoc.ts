@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { callPluginRpc, useRealtime } from '@zana-ai/zcc-plugin-sdk/app';
 import {
   AGENT_DOC_CHANNEL, AGENT_DOC_LEASE_TTL_MS, AGENT_DOC_RPC,
   type AgentDocLease, type AgentDocProposal, type AgentDocSnapshot
 } from '../../../lib/agent-doc-contract.js';
-import type { ProposeEditInput, StudioDiagnostic } from '../../../lib/studio-contract.js';
+import { STUDIO_CHANGED_CHANNEL, type ProposeEditInput, type StudioDiagnostic } from '../../../lib/studio-contract.js';
+import { referenceVisible } from '../studio/useReferenceRefresh.js';
 
 /**
  * `standby`: the editor is not ready to edit yet (its frame has not loaded this agent). The document is opened as a viewer that knows
@@ -32,7 +33,7 @@ export interface AgentScriptDocApi {
   resume(): void;
   propose(input: ProposeEditInput, options?: { id?: string; threadId?: string }): Promise<AgentDocProposal | null>;
   resolve(id: string, decision: 'accept' | 'reject' | 'applied', sha256?: string): Promise<{ ok: boolean; error?: string; code?: string }>;
-  reload(): void;
+  reload(): Promise<boolean>;
 }
 
 export const AGENT_DOC_UPDATE_DEBOUNCE_MS = 300;
@@ -41,6 +42,7 @@ export const AGENT_DOC_LEASE_RENEW_MS = 15_000;
 export const AGENT_DOC_LAPSE_CHECK_MS = AGENT_DOC_LEASE_TTL_MS + 1_000;
 /** A failed update is retried with backoff, this many times, before the edit waits for the next one. */
 export const AGENT_DOC_UPDATE_RETRIES = 4;
+export const AGENT_DOC_REFRESH_MS = 5_000;
 
 type Failure = { ok: false; code: string; error: string; doc?: AgentDocSnapshot };
 type Result = { ok: true; doc: AgentDocSnapshot; proposal?: AgentDocProposal } | Failure;
@@ -81,7 +83,7 @@ async function rpc(pluginId: string, method: string, input: Record<string, unkno
 
 interface Session {
   alive: boolean;
-  open(): Promise<void>;
+  open(fresh?: boolean): Promise<boolean>;
   update(text: string, diagnostics?: StudioDiagnostic[], baseSha256?: string): void;
   saved(sha256: string, text: string): Promise<void>;
   takeOver(): Promise<boolean>;
@@ -97,7 +99,7 @@ interface Session {
  * The shared Agent Script document for one project + `.agent` path. Viewers just read it;
  * the editor (options.editor) also holds an edit lease and is the only writer.
  */
-export function useAgentScriptDoc(pluginId: string, projectId: string | null, path: string | null, options?: { editor?: AgentDocEditor }): AgentScriptDocApi {
+export function useAgentScriptDoc(pluginId: string, projectId: string | null, path: string | null, options?: { editor?: AgentDocEditor; visible?: boolean; element?: RefObject<HTMLElement | null> }): AgentScriptDocApi {
   const [sessionEpoch, setSessionEpoch] = useState(0);
   const [doc, setDoc] = useState<AgentDocSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -145,7 +147,7 @@ export function useAgentScriptDoc(pluginId: string, projectId: string | null, pa
     let sending = false;
     let inFlight: Promise<Result> | null = null;
     let finishing = false;
-    const live = () => session.alive;
+    const live = () => session.alive && target.current.projectId === projectId && target.current.path === activePath;
     const setLease = (value: boolean) => { isLeased = value; setLeased(value); };
     const call = (method: string, extra: Record<string, unknown> = {}) => rpc(pluginId, method, { projectId, path: activePath, ...extra });
     const mutate = async (method: string, extra: Record<string, unknown> = {}) => {
@@ -158,7 +160,7 @@ export function useAgentScriptDoc(pluginId: string, projectId: string | null, pa
       } finally {
         busy--;
         // The caller adopts the result after this; a change it does not carry is fetched.
-        if (!busy && live() && announced > Math.max(carried, docRef.current?.rev ?? -1)) { announced = -1; void session.open(); }
+        if (!busy && live() && announced > Math.max(carried, docRef.current?.rev ?? -1)) { announced = -1; void session.open(true); }
         else if (!busy) announced = -1;
       }
     };
@@ -200,21 +202,33 @@ export function useAgentScriptDoc(pluginId: string, projectId: string | null, pa
         if (result.ok) { apply(result.doc, true); setError(null); }
         else if (result.code === 'leased') {
           if (result.doc) apply(result.doc);
-          else { const fresh = await call(AGENT_DOC_RPC.open); if (live() && fresh.ok) apply(fresh.doc); else if (live()) setLease(false); }
+          else if (!await session.open(true) && live()) setLease(false);
         } else if (!isLeased) fail(result); // a held lease survives a failed renewal (offline, restarting); the next tick retries
         return result;
       } finally { acquiring = false; acquisition = undefined; }
     };
 
-    session.open = async () => {
-      const result = await call(AGENT_DOC_RPC.open);
-      if (!live()) return;
-      if (result.ok) { apply(result.doc); setError(null); } else fail(result);
+    let opening: Promise<boolean> | null = null;
+    let reopen = false;
+    session.open = (fresh = false) => {
+      if (opening) { reopen ||= fresh; return opening; }
+      opening = (async () => {
+        let ok = false;
+        do {
+          reopen = false;
+          const result = await call(AGENT_DOC_RPC.open);
+          if (!live()) return false;
+          ok = result.ok;
+          if (result.ok) { apply(result.doc); setError(null); } else fail(result);
+        } while (reopen && live());
+        return ok;
+      })().finally(() => { opening = null; });
+      return opening;
     };
     session.changed = rev => {
       if (rev <= (docRef.current?.rev ?? -1)) return;
       if (busy) { announced = Math.max(announced, rev); return; }
-      void session.open();
+      void session.open(true);
     };
 
     const flush = async () => {
@@ -351,6 +365,21 @@ export function useAgentScriptDoc(pluginId: string, projectId: string | null, pa
     sessionRef.current?.changed(p.rev);
   });
 
+  useRealtime(STUDIO_CHANGED_CHANNEL, payload => {
+    const p = payload as { kind?: unknown; projectId?: unknown; path?: unknown } | null;
+    const now = target.current;
+    if (p?.kind === 'files' && now.path && p.projectId === now.projectId && (p.path == null || p.path === now.path)) void sessionRef.current?.open(true);
+  });
+
+  useEffect(() => {
+    if (!projectId || !path || options?.visible === false) return;
+    const refresh = () => { if (options?.element ? referenceVisible(options.element.current) : document.visibilityState !== 'hidden') void sessionRef.current?.open(); };
+    const timer = setInterval(refresh, AGENT_DOC_REFRESH_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, [projectId, path, options?.visible, options?.element]);
+
   const update = useCallback((text: string, diagnostics?: StudioDiagnostic[], baseSha256?: string) => { sessionRef.current?.update(text, diagnostics, baseSha256); }, []);
   const saved = useCallback(async (sha256: string, text: string) => { await sessionRef.current?.saved(sha256, text); }, []);
   const release = useCallback(async () => { await sessionRef.current?.release(); }, []);
@@ -359,7 +388,7 @@ export function useAgentScriptDoc(pluginId: string, projectId: string | null, pa
   const propose = useCallback(async (input: ProposeEditInput, opts?: { id?: string; threadId?: string }) => (await sessionRef.current?.propose(input, opts)) ?? null, []);
   const resolve = useCallback(async (id: string, decision: 'accept' | 'reject' | 'applied', sha256?: string) =>
     (await sessionRef.current?.resolve(id, decision, sha256)) ?? { ok: false, error: 'No document is open.' }, []);
-  const reload = useCallback(() => { void sessionRef.current?.open(); }, []);
+  const reload = useCallback(async () => (await sessionRef.current?.open(true)) ?? false, []);
 
   const held = leased ? null : heldBy;
   return useMemo(() => ({ doc, loading, error, leased, leaseGen, heldBy: held, update, saved, release, resume, takeOver, propose, resolve, reload }),

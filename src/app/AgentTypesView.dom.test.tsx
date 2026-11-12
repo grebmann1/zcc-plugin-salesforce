@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentAction } from '../../lib/agent-action-model.js';
 import type { LightningTypeSummary } from '../../lib/studio-contract.js';
 const rpc = vi.hoisted(() => vi.fn());
-vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc }));
+const realtime = vi.hoisted(() => ({ handler: (_payload: unknown) => {} }));
+vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc, useRealtime: (_channel: string, handler: (payload: unknown) => void) => { realtime.handler = handler; } }));
 vi.mock('./studio/LightningTypeView.js', () => ({ LightningTypeView: (p: { typeRef: string; onOpenComponent(ref: string): void }) => <div data-testid="type-detail">{p.typeRef}<button onClick={() => p.onOpenComponent('c/orderCard')}>Open renderer</button></div> }));
 vi.mock('./studio/LwcBundleView.js', () => ({ LwcBundleView: (p: { componentRef: string; via: string[]; onOpenType(ref: string): void }) => <div data-testid="component-detail">{p.componentRef}<button onClick={() => p.onOpenType(p.via[0])}>Open type</button></div> }));
 import { AgentTypesView } from './AgentTypesView.js';
@@ -21,6 +22,17 @@ beforeEach(() => { rpc.mockReset().mockResolvedValue({ ok: true, types, truncate
 afterEach(cleanup);
 
 describe('AgentTypesView', () => {
+  it('refreshes the mounted reference catalogue for this project without losing search state', async () => {
+    render(<AgentTypesView {...props} />);
+    await screen.findByRole('button', { name: /Order request c__Order/ });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search types and components' }), { target: { value: 'Order' } });
+    await act(async () => realtime.handler({ kind: 'files', projectId: 'other' }));
+    expect(rpc).toHaveBeenCalledTimes(1);
+    rpc.mockResolvedValueOnce({ ok: true, types: [{ ...types[0], title: 'Order changed' }], truncated: false });
+    await act(async () => realtime.handler({ kind: 'files', projectId: 'p' }));
+    expect(screen.getByRole('button', { name: /Order changed c__Order/ })).toBeTruthy();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Order');
+  });
   it('catalogues only AST-declared types, groups standard/custom and deduplicates renderer/editor components', async () => {
     render(<AgentTypesView {...props} />);
     expect(screen.getByRole('status').textContent).toBe('Loading types…');

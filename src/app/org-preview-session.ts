@@ -5,7 +5,7 @@ export type PreviewResult = {
   ok?: boolean;
   error?: string;
   code?: string;
-  data?: { sessionId?: string | null; response?: string };
+  data?: { sessionId?: string | null; response?: string; sourceHash?: string };
 };
 
 /** Local simulation shares Studio's Preview API, which also supports employee agents without default_agent_user. */
@@ -32,6 +32,7 @@ export async function callOrgPreview(
     ok: true,
     data: {
       sessionId: result.data.id,
+      ...(typeof result.data.sourceHash === 'string' ? { sourceHash: result.data.sourceHash } : {}),
       response: action === 'end' ? undefined : result.data.turns?.at(-1)?.role === 'agent' ? result.data.turns.at(-1)!.text : undefined
     }
   };

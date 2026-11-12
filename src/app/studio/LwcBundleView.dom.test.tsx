@@ -1,9 +1,10 @@
 /** @vitest-environment happy-dom */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const rpc = vi.hoisted(() => vi.fn());
-vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc }));
+const realtime = vi.hoisted(() => ({ handler: (_payload: unknown) => {} }));
+vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc, useRealtime: (_channel: string, handler: (payload: unknown) => void) => { realtime.handler = handler; } }));
 const { LwcBundleView } = await import('./LwcBundleView.js');
 const { clearReadCache } = await import('./read-cache.js');
 
@@ -16,6 +17,56 @@ const READY = {
 };
 
 describe('LwcBundleView', () => {
+  it('keeps the selected file or sketch across bundle reordering and falls back when it is removed', async () => {
+    const controller = { path: `${LWC}/orderCard.js`, content: 'export default class OrderCard {}' };
+    const added = { path: `${LWC}/extra.css`, content: 'p {}' };
+    rpc.mockResolvedValue({ ok: true, data: { ...READY, files: [READY.files[0], controller] } });
+    const ui = render(<LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /controller$/ }));
+    const refreshFiles = async (files: typeof READY.files) => {
+      rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files } });
+      await act(async () => realtime.handler({ kind: 'files', projectId: 'p1', path: LWC }));
+    };
+    await refreshFiles([added, controller, READY.files[0]]);
+    expect(screen.getByLabelText(`Source of ${controller.path}`).textContent).toBe(controller.content);
+    expect(screen.getByRole('tab', { name: /controller$/ }).getAttribute('aria-selected')).toBe('true');
+    await refreshFiles([added, READY.files[0]]);
+    expect(screen.getByLabelText(`Source of ${added.path}`)).toBeTruthy();
+    // Recreating the deleted file must not silently select it again.
+    await refreshFiles([controller, added, READY.files[0]]);
+    expect(screen.getByLabelText(`Source of ${added.path}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Sketch' }));
+    const frame = screen.getByTitle('Sketch of orderCard');
+    await refreshFiles([READY.files[0], added, controller]);
+    expect(screen.getByTitle('Sketch of orderCard')).toBe(frame);
+    expect(screen.getByRole('tab', { name: 'Sketch' }).getAttribute('aria-selected')).toBe('true');
+    await refreshFiles([added, controller]);
+    expect(screen.queryByRole('tab', { name: 'Sketch' })).toBeNull();
+    expect(screen.getByLabelText(`Source of ${added.path}`)).toBeTruthy();
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files: [controller, added] } });
+    ui.rerender(<LwcBundleView pluginId="sf" projectId="p2" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText(`Source of ${controller.path}`)).toBeTruthy());
+  });
+  it('refreshes mounted component source on scoped file changes and offers a manual retry without discarding source', async () => {
+    rpc.mockResolvedValue({ ok: true, data: READY });
+    render(<LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'orderCard' });
+    const source = screen.getByLabelText(/Source of .*orderCard\.html/);
+    source.scrollTop = 50;
+    await act(async () => { realtime.handler({ kind: 'files', projectId: 'other' }); realtime.handler({ kind: 'files', projectId: 'p1', path: 'lwc/unrelated/file.js' }); });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    await act(async () => realtime.handler({ kind: 'files', projectId: 'p1', path: `${LWC}/orderCard.html` }));
+    expect(screen.getByLabelText(/Source of .*orderCard\.html/)).toBe(source);
+    expect(source.scrollTop).toBe(50);
+    rpc.mockResolvedValueOnce({ ok: false, error: 'Disk unavailable' });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh component' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Disk unavailable');
+    expect(source.textContent).toBe('<template></template>');
+    rpc.mockResolvedValueOnce({ ok: true, data: { ...READY, files: [{ ...READY.files[0], content: '<template>Updated</template>' }] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh component' }));
+    await waitFor(() => expect(screen.getByLabelText(/Source of .*orderCard\.html/).textContent).toContain('Updated'));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
   it('shows its last answer at once when it remounts, then reads again', async () => {
     rpc.mockResolvedValue({ ok: true, data: READY });
     const view = () => <LwcBundleView pluginId="sf" projectId="p1" componentRef="c/orderCard" onOpenAgent={vi.fn()} onOpenType={vi.fn()} />;
