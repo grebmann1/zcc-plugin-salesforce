@@ -28,6 +28,7 @@ import { openInStudioWindow, STUDIO_TAB_ID } from './studio-window-route.js';
 import { AGENTFORCE_STUDIO_STYLES } from './agentforce-studio-styles.js';
 import { AGENTFORCE_PANEL_STYLES } from './agentforce-panel-styles.js';
 import { AGENTFORCE_AGENT_VIEWS } from './agentforce-panel-params.js';
+import { RefreshButton } from './components/RefreshButton.js';
 
 const PLUGIN_ID = 'salesforce';
 
@@ -461,7 +462,7 @@ function AgentThreadWorkspace(props: AgentThreadPanelProps & { parsed: AgentThre
     <div className="sf-atp-head">
       <div className="sf-atp-title"><div className="sf-atp-name">{name.replace(/\.(agent|afscript)$/i, '')}</div><div className="sf-atp-path" title={path}>{path}</div></div>
       {orgLabel && <span className="sf-atp-pill" data-testid="atp-org">{orgLabel}</span>}
-      {(view === 'file' || view === 'graph' || view === 'tests') && <button type="button" className="sf-atp-btn" disabled={refreshing} aria-label={view === 'tests' ? 'Refresh saved tests' : 'Refresh agent'} onClick={() => void refresh()}>{refreshing ? 'Refreshing…' : 'Refresh'}</button>}
+      {(view === 'file' || view === 'graph' || view === 'tests') && <RefreshButton busy={refreshing} label={view === 'tests' ? 'Refresh saved tests' : 'Refresh agent'} onClick={() => void refresh()} />}
       <button type="button" className="sf-atp-btn" aria-pressed={share} onClick={() => setShare(!share)}>Share context</button>
       <button type="button" className="sf-atp-btn is-primary" disabled={!projectId} onClick={() => void openStudio()}>Open in Studio ↗</button>
     </div>

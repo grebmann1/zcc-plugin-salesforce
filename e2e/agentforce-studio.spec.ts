@@ -1578,6 +1578,14 @@ test('Salesforce Flow visualizer: official canvas, branches, details, themes and
   const detail = studio.getByTestId('agent-action-panel');
   const frame = detail.locator('iframe[title="Salesforce Flow visualizer"]');
   const flow = page.frameLocator('iframe[title="Salesforce Flow visualizer"]');
+  const refresh = detail.getByRole('button', { name: 'Refresh implementation', exact: true });
+  await expect(refresh).toHaveAttribute('title', 'Refresh implementation');
+  await expect(refresh.locator('svg')).toBeVisible();
+  await expect(refresh).toHaveText('');
+  expect(await refresh.evaluate(el => {
+    const box = el.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  })).toEqual({ width: 28, height: 28 });
   await expect(flow.getByText('Each order item', { exact: true })).toBeVisible();
   await expect(flow.getByText('Tomorrow', { exact: true })).toBeVisible();
   await expect(flow.getByText(/After commit|Run Asynchronously/).first()).toBeVisible();

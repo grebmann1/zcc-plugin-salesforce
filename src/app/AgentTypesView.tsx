@@ -7,6 +7,7 @@ import { LightningTypeView } from './studio/LightningTypeView.js';
 import { LwcBundleView } from './studio/LwcBundleView.js';
 import { useReferenceRefresh } from './studio/useReferenceRefresh.js';
 import { AgentReferenceRow, AgentReferenceSearch } from './AgentReferenceList.js';
+import { RefreshButton } from './components/RefreshButton.js';
 
 export interface OpenAgentType { ref: string; seq: number; fromAction: boolean }
 type Location = { kind: 'type' | 'component'; ref: string };
@@ -90,7 +91,7 @@ export function AgentTypesView({ pluginId, projectId, actions, loading, error, r
         <section className="sf-atp-types-usage" aria-label="Used by actions"><h3>Used by actions</h3><div>{usedBy(selected.ref).map(a => <button key={a.id} className="sf-lt-chip" type="button" title={a.owner} onClick={() => onOpenAction(a.id)}>{a.name} ↗</button>)}</div></section>
       </> : <LwcBundleView key={selected.ref} pluginId={pluginId} projectId={projectId} componentRef={selected.ref} via={component?.via} onOpenAgent={() => undefined} onOpenType={ref => open({ kind: 'type', ref })} />}
     </> : <>
-      <div className="sf-reference-head"><h2>Types</h2><button className="sf-atp-btn" type="button" disabled={pending || busy || !projectId} onClick={refresh}>Refresh</button></div>
+      <div className="sf-reference-head"><h2>Types</h2><RefreshButton label="Refresh types" busy={busy} disabled={pending || !projectId} onClick={refresh} /></div>
       <div className="sf-atp-types-sections" role="group" aria-label="Reference sections">
         <button type="button" aria-pressed={section === 'types'} onClick={() => { setSection('types'); setQuery(''); }}><Shapes size={14} aria-hidden="true" />Lightning Types <span>{types.length}</span></button>
         <button type="button" aria-pressed={section === 'components'} onClick={() => { setSection('components'); setQuery(''); }}><Boxes size={14} aria-hidden="true" />Components <span>{components.length}</span></button>

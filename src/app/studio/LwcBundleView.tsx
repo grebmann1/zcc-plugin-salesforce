@@ -7,6 +7,7 @@ import { sketchLwc } from './lwc-sketch.js';
 import { useReferenceRefresh } from './useReferenceRefresh.js';
 import { UsedByAgents } from './UsedByAgents.js';
 import { STUDIO_RPC, type LwcBundleView as LwcBundleData } from '../../../lib/studio-contract.js';
+import { RefreshButton } from '../components/RefreshButton.js';
 
 /** A separate selection token so bundle file paths stay stable across refreshes. */
 const SKETCH = -1;
@@ -72,7 +73,7 @@ export function LwcBundleView({ pluginId, projectId, componentRef, usedBy, via, 
           {data?.path && <span className="sf-lt-path" title={data.path}>{data.path}</span>}
         </div>
       </div>
-      <button type="button" className="sf-atp-btn" disabled={busy} onClick={refresh} aria-label="Refresh component">Refresh</button>
+      <RefreshButton label="Refresh component" busy={busy} onClick={refresh} />
     </header>
     {!data && busy && <p className="sf-lt-note">Loading…</p>}
     {error && <p className="sf-lt-note is-error" role="alert">{error}</p>}
