@@ -1649,6 +1649,11 @@ test('Salesforce Flow visualizer: official canvas, branches, details, themes and
   // A failed local asset must leave a usable map and the complete source.
   await page.route('**/assets/flow-visualizer/*.html', route => route.abort());
   await detail.getByRole('button', { name: 'Refresh implementation' }).click();
+  // An unchanged refresh preserves the mounted canvas. Reopen Map to request the blocked asset.
+  await expect(refresh).toBeEnabled();
+  await expect(frame).toBeVisible();
+  await detail.getByRole('button', { name: 'Source', exact: true }).click();
+  await detail.getByRole('button', { name: 'Map', exact: true }).click();
   await expect(detail.getByLabel('Flow implementation map')).toBeVisible({ timeout: 15_000 });
   await expect(detail.getByText(/Showing the basic map/)).toBeVisible();
   await detail.getByRole('button', { name: 'Source', exact: true }).click();
