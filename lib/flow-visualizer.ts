@@ -1,10 +1,17 @@
-import { createWebVisualizationEngine } from '@salesforce/metadata-visualizer-web';
+import { FlowParser } from '@salesforce/metadata-plugins';
+import { LogLevel, NoOpTelemetry, type ILogger } from '@salesforce/metadata-core-sdk';
 import { XMLBuilder, XMLValidator } from 'fast-xml-parser';
 import { ACTION_SOURCE_CAP, type ActionSource } from './action-source.js';
 import { parseActionTarget } from './agent-action-model.js';
 import { flowSnapshotFileSystem } from './flow-visualizer-filesystem.js';
 
 export interface FlowVisualization { data: unknown; fileName: string }
+
+const ignoreLog = () => {};
+const logger: ILogger = {
+  debug: ignoreLog, info: ignoreLog, warn: ignoreLog, error: ignoreLog, success: ignoreLog,
+  log: ignoreLog, setLevel: ignoreLog, getLevel: () => LogLevel.Info, createChild: () => logger,
+};
 
 /** Tooling API objects and local XML enter the same official parser. */
 export function flowSnapshotXml(source: ActionSource): string {
@@ -41,16 +48,22 @@ export async function visualizeFlowSnapshot(source: ActionSource): Promise<FlowV
   if (target?.kind !== 'flow' || source.status !== 'ready') throw Error('Choose an available Flow implementation.');
   const fileName = `${target.name}.flow-meta.xml`;
   const xml = flowSnapshotXml(source);
-  const engine = await createWebVisualizationEngine({ fileSystem: flowSnapshotFileSystem(xml, fileName) });
+  // The web engine's getParsedMetadata also renders and requires SDK UI assets
+  // relative to import.meta.url, which changes when bundled into server.mjs.
+  // The public parser produces the same model using only our authorized snapshot;
+  // the separately built self-contained iframe handles rendering in the browser.
+  const parser = new FlowParser();
+  parser.setPlatformContext({ fileSystem: flowSnapshotFileSystem(xml, fileName), logger,
+    telemetry: new NoOpTelemetry(), reactBuildsBasePath: '' });
+  let data: Awaited<ReturnType<FlowParser['parse']>>;
   try {
-    const outcome = await engine.getParsedMetadata(`/flow-preview/${fileName}`);
-    if (!outcome.result || outcome.error) throw Error('The Salesforce visualizer could not parse this Flow. Open Source to inspect its metadata.');
-    // Never serialize the SDK result itself: it also holds plugin instances and services.
-    const data = outcome.result.data as { nodes?: unknown[]; edges?: unknown[] };
-    if (!Array.isArray(data?.nodes) || !Array.isArray(data?.edges)) throw Error('The Salesforce visualizer returned an unsupported Flow model.');
-    if (data.nodes.length > 500 || data.edges.length > 1_000 || Buffer.byteLength(JSON.stringify(data)) > 2_000_000) {
-      throw Error('This Flow is too large for the interactive viewer. Use the basic map or Source.');
-    }
-    return { data, fileName };
-  } finally { engine.dispose(); }
+    data = await parser.parse(`/flow-preview/${fileName}`, {});
+  } catch {
+    throw Error('The Salesforce visualizer could not parse this Flow. Open Source to inspect its metadata.');
+  }
+  if (!Array.isArray(data?.nodes) || !Array.isArray(data?.edges)) throw Error('The Salesforce visualizer returned an unsupported Flow model.');
+  if (data.nodes.length > 500 || data.edges.length > 1_000 || Buffer.byteLength(JSON.stringify(data)) > 2_000_000) {
+    throw Error('This Flow is too large for the interactive viewer. Use the basic map or Source.');
+  }
+  return { data, fileName };
 }
