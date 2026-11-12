@@ -2847,7 +2847,8 @@ test('Agentforce Studio: host tools preserve two agents and all twelve document 
   await openThreadToolLauncher(sidePanel(page));
   await sidePanel(page).getByTestId('thread-new-tab-agent').click();
   const composer = sidePanel(page).getByTestId('panel-agent-tab-composer');
-  await composer.getByTestId('thread-command-input').fill('Review these\n::sf-agent{path="force-app/Support.agent"}\n::sf-preview{runId="rail-run-1" path="force-app/Orders.agent"}');
+  await composer.getByTestId('thread-command-input').fill('Review these\n::sf-agent{path="force-app/Support.agent"}\n::sf-preview{runId="rail-run-1" path="force-app/Orders.agent"}\n\nThanks.');
+  // A closing line keeps the card directive on its own line once the host appends page context to the echoed turn.
   await composer.getByTestId('thread-command-send').click();
   const chat = sidePanel(page).getByTestId('panel-agent-tab-chat');
   const previewCard = chat.getByTestId('sf-card-preview').last().locator('.plugin-directive-card-main');
@@ -4253,6 +4254,9 @@ test('AgentScript Studio sidepanel regression: a hub conversation runs in the se
   await page.getByTestId('plugin-panel-agent-show').click();
   const landing = page.getByTestId('panel-agent-tab-composer');
   await expect(landing).toContainText('Ask about dx.');
+  // Newer hosts also name the fixed project read-only in the composer footer.
+  const landingProject = landing.locator('.thread-command-project');
+  if (await landingProject.count()) await expect(landingProject).toContainText('dx');
   await landing.getByTestId('thread-command-input').fill('HUB_LANDING_SCOPE what is in this project?');
   await expect(landing.getByTestId('thread-command-send')).toBeEnabled({ timeout: 30_000 });
   await landing.getByTestId('thread-command-send').click();

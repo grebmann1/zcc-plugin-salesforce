@@ -8,9 +8,11 @@ export async function selectPicklistValue(trigger: Locator, choice: string | { l
   await menu.waitFor({ state: 'visible' });
   if (typeof choice === 'object') await menu.getByRole('option', { name: choice.label, exact: true }).click();
   else {
-    const index = await menu.getByRole('option').evaluateAll((options, id) => options.findIndex(option => option.id === id), `${menuId}-${choice}`);
-    if (index < 0) throw Error(`Choice ${choice} not found in ${await trigger.getAttribute('aria-label')}`);
-    await menu.getByRole('option').nth(index).click();
+    // Options can arrive after the menu opens (e.g. an org list refreshing), so wait for this one.
+    const option = menu.locator(`[role="option"][id=${JSON.stringify(`${menuId}-${choice}`)}]`);
+    try { await option.waitFor({ state: 'visible', timeout: 10_000 }); }
+    catch { throw Error(`Choice ${choice} not found in ${await trigger.getAttribute('aria-label')}`); }
+    await option.click();
   }
   await menu.waitFor({ state: 'hidden' });
 }

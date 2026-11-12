@@ -529,8 +529,12 @@ test('Salesforce Studio window: one owner, status card, cross-window org sync an
   await expect(panelComposer).toBeVisible();
   await expect(panelComposer.locator('.thread-command-option-label').first()).toBeHidden();
   await expect(panelComposer.locator('.thread-command-options-toggle')).toBeHidden();
-  // The page's project is fixed, so there is no project, folder or machine to pick, and no Create plugin.
-  await expect(panelComposer.locator('.thread-command-project')).toHaveCount(0);
+  // The page's project is fixed: it is shown read-only (newer hosts), with no folder or machine to pick and no Create plugin.
+  const fixedProject = panelComposer.locator('.thread-command-project');
+  if (await fixedProject.count()) {
+    await expect(fixedProject).toContainText('dx');
+    await expect(fixedProject.getByRole('button').first()).toBeDisabled();
+  }
   await expect(panelComposer.locator('.composer-run-setting')).toHaveCount(0);
   await expect(panelComposer.getByTestId('composer-create-plugin')).toHaveCount(0);
   await captureElectronScreenshot(electron, studio, testInfo.outputPath('salesforce-detached-agent.png'));
