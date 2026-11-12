@@ -4,7 +4,7 @@ import { choosePicklistValue } from '../test/picklist.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SalesforceUiProvider } from './components/client.js';
-import { SalesforceOrgsPanel } from './SalesforceOrgsPanel.js';
+import { SalesforceOrgsPanel, hubPanelScope } from './SalesforceOrgsPanel.js';
 import { takeQueuedAgentScriptOpen } from './agent-script-open.js';
 import { readProjectView } from './project-view.js';
 import { recordRecentAgent } from './recent-agents.js';
@@ -21,7 +21,7 @@ const projects = [
 ];
 const call = vi.fn();
 const client = { call };
-let navigate: { toPluginPanel: ReturnType<typeof vi.fn>; toProject: ReturnType<typeof vi.fn>; openInWindow?: ReturnType<typeof vi.fn> };
+let navigate: { toPluginPanel: ReturnType<typeof vi.fn>; toProject: ReturnType<typeof vi.fn>; openInWindow?: ReturnType<typeof vi.fn>; setPanelScope?: ReturnType<typeof vi.fn> };
 
 beforeEach(() => {
   localStorage.clear();
@@ -45,6 +45,27 @@ function HubProjectProbe() {
 }
 
 describe('Salesforce hub', () => {
+  it('runs the landing page side panel in the chosen project and hands the scope to the embedded Studio', async () => {
+    navigate.setPanelScope = vi.fn();
+    const hub = mount();
+    await screen.findByRole('button', { name: 'Open Studio', exact: true });
+    expect(navigate.setPanelScope).toHaveBeenLastCalledWith({ id: 'sf/Agents', projectId: 'sf' });
+    choosePicklistValue(screen.getByRole('button', { name: 'Project' }), 'draft');
+    expect(navigate.setPanelScope).toHaveBeenLastCalledWith({ id: expect.stringMatching(/^draft\//), projectId: 'draft' });
+    // The Studio names its own file scope; the hub releases its own first.
+    fireEvent.click(screen.getByRole('button', { name: 'Open Studio', exact: true }));
+    expect(navigate.setPanelScope).toHaveBeenLastCalledWith(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Deployments' }));
+    expect(navigate.setPanelScope).toHaveBeenLastCalledWith({ id: expect.stringMatching(/^draft\//), projectId: 'draft' });
+    hub.unmount();
+    expect(navigate.setPanelScope).toHaveBeenLastCalledWith(null);
+  });
+
+  it('keeps hub panel scope ids safe for odd project names', () => {
+    expect(hubPanelScope({ id: 'p', name: 'a/b\\c\u0001' })).toEqual({ id: 'p/a b c', projectId: 'p' });
+    expect(hubPanelScope({ id: 'p', name: ' / ' })).toEqual({ id: 'p/project', projectId: 'p' });
+  });
+
   it('binds side-panel tools only to the active Studio project and clears the binding on return or unmount', async () => {
     const probe = render(<HubProjectProbe />);
     const hub = mount('agentforce');

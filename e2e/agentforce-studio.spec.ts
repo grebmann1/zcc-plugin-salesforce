@@ -66,13 +66,6 @@ const ORG_TEST_RESULTS = {
 // Replace only the upstream network in the installed fixture. The real transport,
 // session service, plugin RPC, Monaco iframe and Electron UI all run unchanged.
 const test = base.extend({
-  // The host may re-offer its tutorial hint over the titlebar after startup; it never belongs to these flows.
-  app: async ({ app }, use) => {
-    await app.window.addLocatorHandler(app.window.getByRole('region', { name: 'Discover video tutorials' }), async () => {
-      await app.window.getByRole('button', { name: 'Dismiss tutorial hint' }).click();
-    });
-    await use(app);
-  },
   launchEnv: async ({ home }, use) => {
     const requests: Array<{ path: string; host: string; body: Record<string, unknown> }> = [];
     let evalPolls = 0;
@@ -348,12 +341,8 @@ async function showSidePanel(page: Page) {
       const path = selected?.getAttribute('title') ?? '';
       const resource = document.querySelector('[data-testid="plugin-panel-host-layout"]')?.getAttribute('data-panel-resource');
       if (resource === null || resource === undefined) return false;
-      // The global hub scopes by [project, path]; project and detached tabs use path.
-      if (resource.startsWith('[')) {
-        try { const scoped = JSON.parse(resource); return Array.isArray(scoped) && (scoped[1] ?? '') === path; }
-        catch { return false; }
-      }
-      return resource === path;
+      // The global hub scopes by "<project>/<path>"; project and detached tabs use path.
+      return resource === path || (path !== '' && resource.endsWith(`/${path}`) && !resource.startsWith(path));
     }), { message: 'host panel scope follows the selected Studio agent' }).toBe(true);
   }
   if (!(await sidePanel(page).isVisible())) await page.getByTestId('plugin-panel-host-layout').getByTestId('plugin-panel-secondary-show').click();
@@ -4255,14 +4244,30 @@ test('AgentScript Studio sidepanel regression: a hub conversation runs in the se
   const hub = page.getByTestId('salesforce-orgs-panel');
   // The hub preselects the Salesforce (DX) project, as it did for the user.
   expect(await readPicklistValue(hub.getByRole('button', { name: 'Project', exact: true }))).toBe(ids.dxId);
+  const panelThread = (marker: string) => page.evaluate(async marker => {
+    // Panel conversations are hidden from the main list; the plugin's panel-thread index owns them.
+    const listed = await (await fetch('/api/v1/plugins/salesforce/panel-threads?panel=orgs&limit=20')).json() as { threads?: Array<{ id: string; projectId: string; title?: string }> };
+    return (listed.threads ?? []).find((row) => (row.title ?? '').includes(marker));
+  }, marker);
+  // The landing page itself (no Studio, no open file) also runs in the chosen project.
+  await page.getByTestId('plugin-panel-agent-show').click();
+  const landing = page.getByTestId('panel-agent-tab-composer');
+  await expect(landing).toContainText('Ask about dx.');
+  await landing.getByTestId('thread-command-input').fill('HUB_LANDING_SCOPE what is in this project?');
+  await expect(landing.getByTestId('thread-command-send')).toBeEnabled({ timeout: 30_000 });
+  await landing.getByTestId('thread-command-send').click();
+  await expect(page.getByTestId('panel-agent-tab-chat').getByTestId('thread-timeline')).toContainText('HUB_LANDING_SCOPE', { timeout: 30_000 });
+  await expect.poll(async () => (await panelThread('HUB_LANDING_SCOPE'))?.projectId, { message: 'hub landing conversation runs in the hub project' }).toBe(ids.dxId);
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('hub-landing-thread.png'));
   await hub.getByRole('button', { name: 'Open Studio', exact: true }).click();
   await expect(page).toHaveURL(/\/plugins\/salesforce\/orgs\/agentforce$/);
   const studio = studioPanel(page);
   await studio.getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
   await expect(studio.locator('.af-document-name')).toHaveText('Support.agent');
 
-  await page.getByTestId('plugin-panel-agent-show').click();
+  if (!(await page.getByTestId('panel-agent-tab-composer').isVisible())) await page.getByTestId('plugin-panel-agent-show').click();
   const composer = page.getByTestId('panel-agent-tab-composer');
+  await expect(composer.locator('.panel-agent-tab-hint'), 'hub Studio panel names the open file').toHaveText('Ask about Support.agent.');
   const input = composer.getByTestId('thread-command-input');
   await input.fill('HUB_PROJECT_SCOPE simplify my instructions');
   await expect(composer.getByTestId('thread-command-send')).toBeEnabled({ timeout: 30_000 });
@@ -4270,11 +4275,7 @@ test('AgentScript Studio sidepanel regression: a hub conversation runs in the se
   await composer.getByTestId('thread-command-send').click();
   await expect(page.getByTestId('panel-agent-tab-chat').getByTestId('thread-timeline')).toContainText('HUB_PROJECT_SCOPE', { timeout: 30_000 });
 
-  const thread = await page.evaluate(async () => {
-    // Panel conversations are hidden from the main list; the plugin's panel-thread index owns them.
-    const listed = await (await fetch('/api/v1/plugins/salesforce/panel-threads?panel=orgs&limit=20')).json() as { threads?: Array<{ id: string; projectId: string; title?: string }> };
-    return (listed.threads ?? []).find((row) => (row.title ?? '').includes('HUB_PROJECT_SCOPE'));
-  });
+  const thread = await panelThread('HUB_PROJECT_SCOPE');
   expect(thread, 'hub side-panel conversation is indexed under the orgs panel').toBeTruthy();
   expect(thread!.projectId, 'hub side-panel conversation runs in the hub project, not the default one').toBe(ids.dxId);
   expect(thread!.projectId).not.toBe(ids.scratchId);

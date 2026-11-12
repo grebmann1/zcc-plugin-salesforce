@@ -273,18 +273,18 @@ describe('AgentScriptPanel beside the host side panel', () => {
     contextProjectId = null;
     panelScope = vi.fn();
     const first = await mount(QC); await ready(first);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', QC]), view: QC, projectId: 'proj-1' });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: `proj-1/${QC}`, view: QC, projectId: 'proj-1' });
     const second = await mount({ subPath: QC, projectId: 'proj-2' }); await ready(second);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', QC]), view: QC, projectId: 'proj-2' });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: `proj-2/${QC}`, view: QC, projectId: 'proj-2' });
   });
 
   it('isolates no-file assistant drafts for different hub projects without attaching an agent view', async () => {
     contextProjectId = null;
     panelScope = vi.fn();
     const first = await mount(); await ready(first);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-1', null]), projectId: 'proj-1' });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: 'proj-1/Agentforce Studio', projectId: 'proj-1' });
     const second = await mount({ projectId: 'proj-2' }); await ready(second);
-    expect(panelScope).toHaveBeenLastCalledWith({ id: JSON.stringify(['proj-2', null]), projectId: 'proj-2' });
+    expect(panelScope).toHaveBeenLastCalledWith({ id: 'proj-2/Agentforce Studio', projectId: 'proj-2' });
   });
 
   it('opens tools in the host panel and renders them there, keeping their state across tab switches', async () => {

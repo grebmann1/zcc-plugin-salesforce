@@ -259,7 +259,8 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
     // name it so the panel's conversations run there, not in the default
     // project (hosts without project scopes ignore the field).
     const hub = !context.projectId && projectId ? projectId : undefined;
-    const id = hub ? JSON.stringify([hub, activePath]) : activePath;
+    // The host labels the panel with the id's last path segment ("Ask about Support.agent.").
+    const id = hub ? `${hub}/${activePath ?? 'Agentforce Studio'}` : activePath;
     navigateRef.current.setPanelScope?.(id ? { id, ...(activePath ? { view: activePath } : {}), ...(hub ? { projectId: hub } : {}) } : null);
     return () => { navigateRef.current.setPanelScope?.(null); };
   }, [activePath, context.projectId, projectId]);
