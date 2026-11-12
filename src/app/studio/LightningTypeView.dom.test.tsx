@@ -1,12 +1,13 @@
 /** @vitest-environment happy-dom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useLayoutEffect } from 'react';
 
 const rpc = vi.hoisted(() => vi.fn());
 const realtime = vi.hoisted(() => ({ handler: (_payload: unknown) => {} }));
 vi.mock('@zana-ai/zcc-plugin-sdk/app', () => ({ callPluginRpc: rpc, useRealtime: (_channel: string, handler: (payload: unknown) => void) => { realtime.handler = handler; } }));
 const { LightningTypeView } = await import('./LightningTypeView.js');
-const { clearReadCache } = await import('./read-cache.js');
+const { clearReadCache, readCacheKey, rememberRead } = await import('./read-cache.js');
 
 afterEach(() => { cleanup(); rpc.mockReset(); clearReadCache(); });
 
@@ -20,6 +21,18 @@ const READY = {
 };
 
 describe('LightningTypeView', () => {
+  it('keeps a user selection committed before the initial fallback reconciliation effect', async () => {
+    rememberRead(readCacheKey('sf', 'p1', 'lightning-type', 'c__OrderRequest'), READY);
+    rpc.mockResolvedValue({ ok: true, data: READY });
+    function SelectOnCommit() {
+      useLayoutEffect(() => { screen.getByRole('button', { name: 'lightningDesktopGenAi/renderer.json' }).click(); }, []);
+      return <LightningTypeView pluginId="sf" projectId="p1" typeRef="c__OrderRequest" onOpenAgent={vi.fn()} />;
+    }
+    render(<SelectOnCommit />);
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: 'lightningDesktopGenAi/renderer.json' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText(`Source of ${READY.files[1].path}`)).toBeTruthy();
+  });
   it('keeps the selected source path after additions and reordering, with a stable fallback after deletion', async () => {
     rpc.mockResolvedValue({ ok: true, data: READY });
     const ui = render(<LightningTypeView pluginId="sf" projectId="p1" typeRef="c__OrderRequest" onOpenAgent={vi.fn()} />);

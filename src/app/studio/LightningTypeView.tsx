@@ -34,7 +34,10 @@ export function LightningTypeView({ pluginId, projectId, typeRef, usedBy, onOpen
   const selected = selection.scope === key ? selection.path : undefined;
   const shown = data?.files.find(row => row.path === selected) ?? data?.files[0];
   const file = shown?.path;
-  useEffect(() => { setSelection(previous => previous.scope === key && previous.path === file ? previous : { scope: key, path: file }); }, [file, key]);
+  useEffect(() => {
+    // A click can commit before this passive fallback effect. Preserve the newer choice.
+    setSelection(previous => previous !== selection || previous.scope === key && previous.path === file ? previous : { scope: key, path: file });
+  }, [file, key, selection]);
 
   return <section ref={root} className="sf-lt" data-testid="lightning-type-view" aria-label={`Lightning Type ${typeRef}`}>
     <header className="sf-lt-head">

@@ -46,13 +46,22 @@ export function LwcBundleView({ pluginId, projectId, componentRef, usedBy, via, 
   const selected = selection.scope === key ? selection.file : undefined;
   const file = selected === SKETCH && sketch ? SKETCH : data?.files.find(row => row.path === selected)?.path ?? data?.files[0]?.path;
   const shown = file === SKETCH ? undefined : data?.files.find(row => row.path === file);
-  useEffect(() => { setSelection(previous => previous.scope === key && previous.file === file ? previous : { scope: key, file }); }, [file, key]);
+  useEffect(() => {
+    // A click can commit before this passive fallback effect. Preserve the newer choice.
+    setSelection(previous => previous !== selection || previous.scope === key && previous.file === file ? previous : { scope: key, file });
+  }, [file, key, selection]);
   const setFile = (file: string | typeof SKETCH) => setSelection({ scope: key, file });
-  const [copied, setCopied] = useState(false);
+  // Feedback belongs to this exact source; stale effects/completions cannot label another snapshot.
+  const copyContext = useMemo(() => ({}), [file, key, shown?.content]);
+  const [copiedFor, setCopiedFor] = useState<object | null>(null);
+  const copySequence = useRef(0);
+  const copied = copiedFor === copyContext;
   const copy = (content: string) => {
-    void Promise.resolve(navigator.clipboard?.writeText(content)).then(() => setCopied(true), () => undefined);
+    const sequence = ++copySequence.current;
+    void Promise.resolve(navigator.clipboard?.writeText(content)).then(() => {
+      if (sequence === copySequence.current) setCopiedFor(copyContext);
+    }, () => undefined);
   };
-  useEffect(() => { setCopied(false); }, [file, key]);
   return <section ref={root} className="sf-lt" data-testid="lwc-bundle-view" aria-label={`Component ${componentRef}`}>
     <header className="sf-lt-head">
       <div>
