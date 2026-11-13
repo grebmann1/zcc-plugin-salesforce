@@ -42,6 +42,7 @@ const SHA = 'a'.repeat(64);
 const SOURCE = 'start_agent:\n  a\n  b\n';
 const COMMENT = { id: 'c1', path: 'force-app/bots/QC.agent', line: 2, endLine: 2, quote: 'a', body: 'why?', author: { kind: 'user', name: 'You' }, createdAt: 1 };
 const overrides: Record<string, (args?: any) => unknown> = {};
+const navigation: { toCompose: ReturnType<typeof vi.fn>; toThread: ReturnType<typeof vi.fn>; openPanelAgent?: ReturnType<typeof vi.fn> } = { toCompose: vi.fn(), toThread: vi.fn() };
 const rpc = vi.fn(async (_p: string, method: string, args?: any) => {
   if (overrides[method]) return overrides[method](args);
   if (method === 'status') return { dxProject: true, agentScriptDialect: 'agentforce', projectRoot: '/proj' };
@@ -93,6 +94,7 @@ const SNAPSHOT = { type: 'snapshot', content: SOURCE, issues: 1,
   diagnostics: [{ severity: 'error', message: 'bad token', line: 2, column: 1, endLine: 2, endColumn: 4 }] };
 
 beforeEach(() => {
+  navigation.toCompose.mockClear(); navigation.toThread.mockClear(); delete navigation.openPanelAgent;
   localStorage.clear(); rpc.mockClear(); observers.length = 0; width = 1000; realtime = undefined;
   for (const key of Object.keys(overrides)) delete overrides[key];
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width, height: 600, top: 0, left: 0, right: width, bottom: 600, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect);
@@ -103,7 +105,7 @@ beforeEach(() => {
   });
   (globalThis as any).__ZCC_PLUGIN_HOST__ = { callRpc: rpc, useZccNavigate: () => ({ toCompose: vi.fn() }), getSettings: async () => ({ values: { agentScriptDialect: 'agentforce' } }), setSettings: async () => undefined };
   (globalThis as any).__ZCC_PLUGIN_RUNTIME__ = {
-    useZccNavigate: () => ({ toCompose: vi.fn() }),
+    useZccNavigate: () => navigation,
     useSettings: () => ({ values: { agentScriptDialect: 'agentforce', defaultOrg: 'dev' }, isLoading: false }),
     useRealtime: (_c: string, h: (p: unknown) => void) => { realtime = h; }
   };
@@ -323,7 +325,7 @@ describe('AgentScriptPanel failure paths', () => {
     overrides['studio.askAgent'] = () => { throw new Error('boom'); };
     await post(el, { type: 'commentAction', kind: 'open', line: 1, endLine: 1, quote: '' });
     await click(byText(el, 'button', /Address with agent/));
-    expect(banner(el)).toBe('boom');
+    expect(el.querySelector('.sf-cm-feedback[role="alert"]')?.textContent).toBe('boom');
     await post(el, { type: 'askSelection', action: 'explain-selection', startLine: 1, endLine: 2, text: 'a' });
     expect(banner(el)).toBe('boom');
     overrides['studio.askAgent'] = () => { throw 'plain'; };
@@ -337,6 +339,21 @@ describe('AgentScriptPanel failure paths', () => {
     rpc.mockClear();
     await post(el, { type: 'askSelection', action: 'explain-selection', startLine: 1, endLine: 2, text: 'a' });
     expect(rpc.mock.calls.some(c => c[1] === 'studio.askAgent')).toBe(false);
+  });
+
+  it('shows a pending comments handoff, then opens the fallback conversation when the draft panel refuses', async () => {
+    let finish!: (value: unknown) => void;
+    navigation.openPanelAgent = vi.fn(() => false);
+    overrides['studio.draftAgent'] = () => ({ ok: true, prompt: 'Address the comments', title: 'Comments' });
+    overrides['studio.askAgent'] = () => new Promise(resolve => { finish = resolve; });
+    const el = await mount('force-app/bots/QC.agent'); await ready(el);
+    await post(el, { type: 'commentAction', kind: 'open', line: 1, endLine: 1, quote: '' });
+    await click(byText(el, 'button', /Address with agent/));
+    expect(byText(el, 'button', /Preparing/)?.hasAttribute('disabled')).toBe(true);
+    await act(async () => finish({ ok: true, threadId: 'address-thread', title: 'Comments' })); await flush();
+    expect(navigation.toThread).toHaveBeenCalledWith('address-thread');
+    expect(navigation.openPanelAgent).toHaveBeenLastCalledWith({ threadId: 'address-thread', title: 'Comments' });
+    expect(el.querySelector('.sf-cm-feedback[role="status"]')?.textContent).toBe('Agent conversation opened.');
   });
 
   it('reports failed and rejected comment adds, and ignores blank submissions', async () => {

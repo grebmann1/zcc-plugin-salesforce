@@ -98,6 +98,112 @@ describe('run workspaces', () => {
     expect(getStudioRun(owner)).toMatchObject({ runId: 'one', status: 'running', turn: 2 });
   });
 
+  it.each(['simulate', 'rehearse'] as const)('expires removed %s runs after a successful empty list without erasing their workspace', async engine => {
+    updateStudioRun(owner, { runId: 'removed', engine, status: 'running', turn: 3 });
+    writeWorkspaceValue(studioRunKey(owner), 'draft', 'Keep my next question', '');
+    const ended = { ...owner, path: 'Ended.agent' };
+    updateStudioRun(ended, { runId: 'finished', engine, status: 'ended', turn: 4 });
+    render(<Runs />);
+    await waitFor(() => expect(getStudioRun(owner)?.status).toBe('expired'));
+    expect(getStudioRun(owner)).toMatchObject({ runId: 'removed', engine, turn: 3 });
+    expect(readWorkspaceValue(studioRunKey(owner), 'draft', '')).toBe('Keep my next question');
+    expect(getStudioRun(ended)?.status).toBe('ended');
+  });
+
+  it('replaces a removed running ID with the newest retained snapshot for its owner', async () => {
+    updateStudioRun(owner, { runId: 'removed', engine: 'simulate', status: 'running', turn: 1 });
+    rpc.mockResolvedValue({ ok: true, data: [
+      { id: 'older', path: 'A.agent', orgAlias: 'dev', engine: 'preview', turns: [], turnCount: 8, closed: true, createdAt: 10 },
+      { id: 'newest', path: 'A.agent', orgAlias: 'dev', engine: 'preview', turns: [], turnCount: 2, closed: true, createdAt: 30 },
+    ] });
+    render(<Runs />);
+    await waitFor(() => expect(getStudioRun(owner)).toMatchObject({ runId: 'newest', status: 'ended', turn: 2 }));
+  });
+
+  it('does not expire a new run or newer progress when an empty list was requested earlier', async () => {
+    updateStudioRun(owner, { runId: 'one', engine: 'simulate', status: 'active', turn: 0 });
+    const newOwner = { ...owner, path: 'New.agent' };
+    let finish!: (value: unknown) => void;
+    rpc.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    render(<Runs />);
+    act(() => {
+      updateStudioRun(owner, { runId: 'one', engine: 'simulate', status: 'running', turn: 2 });
+      updateStudioRun(newOwner, { runId: 'new', engine: 'rehearse', status: 'running', turn: 0 });
+    });
+    await act(async () => { finish({ ok: true, data: [] }); });
+    expect(getStudioRun(owner)).toMatchObject({ runId: 'one', status: 'running', turn: 2 });
+    expect(getStudioRun(newOwner)).toMatchObject({ runId: 'new', status: 'running', turn: 0 });
+  });
+
+  it.each([null, { ok: false, data: [] }, { ok: true }, { ok: true, data: {} }, { ok: true, data: [null] }])('does not treat a failed or unusable list as authoritative: %s', async result => {
+    updateStudioRun(owner, { runId: 'one', engine: 'simulate', status: 'running', turn: 1 });
+    rpc.mockResolvedValue(result);
+    render(<Runs />);
+    await act(async () => { await Promise.resolve(); });
+    expect(getStudioRun(owner)).toMatchObject({ runId: 'one', status: 'running', turn: 1 });
+  });
+
+  it('preserves remembered runs when disconnected', async () => {
+    updateStudioRun(owner, { runId: 'one', engine: 'simulate', status: 'running', turn: 1 });
+    rpc.mockRejectedValue(Error('Disconnected'));
+    render(<Runs />);
+    await act(async () => { await Promise.resolve(); });
+    expect(getStudioRun(owner)).toMatchObject({ runId: 'one', status: 'running', turn: 1 });
+  });
+
+  it('limits absent-run expiry to this plugin/project lab engines and preserves live org previews', async () => {
+    const protectedOwners: StudioRunOwner[] = [
+      { ...owner, pluginId: 'other' }, { ...owner, projectId: 'other' },
+      { ...owner, view: 'org-preview' }, { ...owner, path: 'Live.agent' },
+    ];
+    for (const scope of protectedOwners) updateStudioRun(scope, { runId: 'protected', engine: scope.path === 'Live.agent' || scope.view === 'org-preview' ? 'live' : 'simulate', status: 'running', turn: 1 });
+    updateStudioRun(owner, { runId: 'removed', engine: 'simulate', status: 'active', turn: 0 });
+    render(<Runs />);
+    await waitFor(() => expect(getStudioRun(owner)?.status).toBe('expired'));
+    for (const scope of protectedOwners) expect(getStudioRun(scope)).toMatchObject({ runId: 'protected', status: 'running', turn: 1 });
+  });
+
+  it('does not reconcile simulated lab metadata into a live preview or live org-preview ID', async () => {
+    const orgOwner = { ...owner, view: 'org-preview' as const };
+    updateStudioRun(owner, { runId: 'live', engine: 'live', status: 'running', turn: 1 });
+    updateStudioRun(orgOwner, { runId: 'org', engine: 'live', status: 'running', turn: 2 });
+    rpc.mockResolvedValue({ ok: true, data: [
+      { id: 'live', path: 'A.agent', orgAlias: 'dev', engine: 'preview', turns: [], turnCount: 7, closed: true },
+      { id: 'org', path: 'A.agent', orgAlias: 'dev', engine: 'preview', turns: [], turnCount: 8, closed: true },
+    ] });
+    render(<Runs />);
+    await act(async () => { await Promise.resolve(); });
+    expect(getStudioRun(owner)).toMatchObject({ runId: 'live', engine: 'live', status: 'running', turn: 1 });
+    expect(getStudioRun(orgOwner)).toMatchObject({ runId: 'org', status: 'running', turn: 2 });
+  });
+
+  it('still reconciles an explicitly live lab snapshot for the matching preview run', async () => {
+    updateStudioRun(owner, { runId: 'live', engine: 'live', status: 'running', turn: 1 });
+    rpc.mockResolvedValue({ ok: true, data: [{ id: 'live', path: 'A.agent', orgAlias: 'dev', engine: 'preview', live: true, turns: [], turnCount: 2, closed: true }] });
+    render(<Runs />);
+    await waitFor(() => expect(getStudioRun(owner)).toMatchObject({ runId: 'live', engine: 'live', status: 'ended', turn: 2 }));
+  });
+
+  it('reconciles simulated org-preview sessions by ID without creating a duplicate preview workspace', async () => {
+    const orgOwner = { ...owner, view: 'org-preview' as const };
+    updateStudioRun(orgOwner, { runId: 'org', engine: 'simulate', status: 'running', turn: 1 });
+    rpc.mockResolvedValue({ ok: true, data: [{ id: 'org', path: 'A.agent', orgAlias: 'dev', engine: 'preview', turns: [], turnCount: 2, closed: true }] });
+    render(<Runs />);
+    await waitFor(() => expect(getStudioRun(orgOwner)).toMatchObject({ runId: 'org', engine: 'simulate', status: 'ended', turn: 2 }));
+    expect(getStudioRun(owner)).toBeNull();
+  });
+
+  it('expires absent simulated org-preview sessions but preserves absent live org previews', async () => {
+    const simulated = { ...owner, view: 'org-preview' as const };
+    const live = { ...simulated, path: 'Live.agent' };
+    updateStudioRun(simulated, { runId: 'removed', engine: 'simulate', status: 'running', turn: 1 });
+    updateStudioRun(live, { runId: 'live', engine: 'live', status: 'running', turn: 1 });
+    render(<Runs />);
+    await waitFor(() => expect(getStudioRun(simulated)?.status).toBe('expired'));
+    expect(getStudioRun(live)).toMatchObject({ runId: 'live', engine: 'live', status: 'running', turn: 1 });
+    expect(getStudioRun(owner)).toBeNull();
+  });
+
   it('restores validated descriptors and saved values after a renderer module reload and rejects forged owner types', async () => {
     updateStudioRun(owner, { runId: 'one', engine: 'simulate', status: 'active', turn: 2 });
     writeWorkspaceValue(studioRunKey(owner), 'draft', 'Reload me', '');

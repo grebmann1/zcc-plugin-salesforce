@@ -197,7 +197,7 @@ export function registerStudioComments(studio: StudioServerContext): void {
     if (typeof content === 'string') return content.length <= SOURCE_MAX ? content : undefined;
     const root = studio.contexts.current()?.settings.projectRoot;
     if (!root || !path) return undefined;
-    try { return readAgentFile(root, path, studio.deps).content; } catch { return undefined; }
+    try { return readAgentFile(root, path, studio.deps, { allowNonDx: true }).content; } catch { return undefined; }
   };
   const guarded = (work: (projectId: string) => Promise<unknown>) => async () => {
     const projectId = projectOf();

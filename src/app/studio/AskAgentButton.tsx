@@ -4,6 +4,7 @@ import { Bot, Sparkles, Unlink } from 'lucide-react';
 import { MAX_STUDIO_REQUEST_LENGTH, STUDIO_AGENT_ACTIONS } from '../../../lib/studio-agent-actions.js';
 import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type StudioThreadLink, type StudioViewState, type ThreadRole } from '../../../lib/studio-contract.js';
 import { CONTEXT_STRIP_STYLES, ContextStrip } from './ContextStrip.js';
+import { handoffStudioAgent, showStudioAgentThread } from './agent-handoff.js';
 
 export const ROLE_LABELS: Record<ThreadRole, string> = { author: 'Author', editor: 'Editor', reviewer: 'Reviewer', tester: 'Tester', assistant: 'Assistant' };
 
@@ -82,6 +83,7 @@ export function AskAgentButton({ pluginId, projectId, path, view, onShareChange 
   const root = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const alive = useRef(true);
+  const asking = useRef(false);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   useEffect(() => {
@@ -114,33 +116,24 @@ export function AskAgentButton({ pluginId, projectId, path, view, onShareChange 
 
   /** A conversation opens in the side panel, or as its own thread when the page has none. */
   const showThread = (threadId: string, title?: string) => {
-    if (!navigate.openPanelAgent?.({ threadId, ...(title ? { title } : {}) })) navigate.toThread(threadId);
+    try { showStudioAgentThread(navigate, threadId, title); setOpen(false); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not open the conversation.'); }
   };
 
   const ask = async (action: string | undefined, text?: string) => {
-    if (!path) return;
+    if (!path || asking.current) return;
+    asking.current = true;
     setBusy(true); setError(null);
     const request = {
       projectId, path, ...(action ? { action } : {}), ...(text ? { prompt: text } : {}),
       ...(action === 'fix-problems' ? { diagnostics: view.diagnostics } : {})
     };
     try {
-      // The side panel's composer takes the brief so the user picks the harness and sends it.
-      if (navigate.openPanelAgent) {
-        const draft = await callPluginRpc(pluginId, STUDIO_RPC.draftAgent, request) as { prompt?: string; title?: string };
-        const message = failure(draft, 'Could not prepare the request.');
-        if (message) { setError(message); return; }
-        if (draft?.prompt && navigate.openPanelAgent({ draft: { prompt: draft.prompt, view: path, ...(projectId ? { projectId } : {}) }, ...(draft.title ? { title: draft.title } : {}) })) {
-          setOpen(false);
-          return;
-        }
-      }
-      const result = await callPluginRpc(pluginId, STUDIO_RPC.askAgent, request) as { threadId?: string; title?: string };
-      const message = failure(result, 'Could not start the agent.');
-      if (message) setError(message);
-      else if (result?.threadId) { setOpen(false); showThread(result.threadId, result.title); void reload(); }
+      const result = await handoffStudioAgent(pluginId, navigate, request);
+      if (alive.current) setOpen(false);
+      if (result.kind === 'thread') void reload();
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : 'Could not start the agent.'); }
-    finally { if (alive.current) setBusy(false); }
+    finally { asking.current = false; if (alive.current) setBusy(false); }
   };
 
   const unlink = async (threadId: string) => {
@@ -177,7 +170,7 @@ export function AskAgentButton({ pluginId, projectId, path, view, onShareChange 
           ? <p className="sf-ask-empty">No agents yet. Agents you start on this file show up here.</p>
           : <ul className="sf-ask-threads">
             {recent.map(thread => <li key={thread.threadId} className="sf-ask-thread">
-              <button type="button" className="sf-ask-thread-open" title="Open this conversation" onClick={() => { setOpen(false); showThread(thread.threadId, thread.title); }}>
+              <button type="button" className="sf-ask-thread-open" title="Open this conversation" onClick={() => showThread(thread.threadId, thread.title)}>
                 <Bot size={14} aria-hidden="true" />
                 <span className="sf-ask-thread-main">
                   <span className="sf-ask-thread-title">{thread.title}</span>

@@ -203,15 +203,24 @@ export function useStudioRuns(pluginId: string, projectId?: string) {
         try {
           const result = await callPluginRpc(pluginId, 'agentLab.list', { projectId, includeClosed: true, summaryOnly: true }) as { ok?: boolean; data?: Array<LabSnapshot & { turnCount?: number }> };
           if (!result?.ok || !Array.isArray(result.data)) return;
+          const listedIds = new Set(result.data.map(snapshot => snapshot.id));
+          const belongsToLab = (run: StudioRunDescriptor) => run.pluginId === pluginId && run.projectId === projectId;
           const reconciled = new Set<string>();
           for (const snapshot of [...result.data].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))) {
-            const known = [...workspaces.values()].flatMap(row => row.descriptor?.pluginId === pluginId && row.descriptor.projectId === projectId && row.descriptor.runId === snapshot.id ? [row.descriptor] : []);
+            const known = [...workspaces.values()].flatMap(row => row.descriptor && belongsToLab(row.descriptor) && row.descriptor.runId === snapshot.id ? [row.descriptor] : []);
             const owners: StudioRunOwner[] = known.length ? known : snapshot.path ? [{ pluginId, projectId, orgAlias: snapshot.orgAlias, path: snapshot.path, view: snapshot.execution ? 'roleplay' : 'preview' }] : [];
             for (const owner of owners) {
               const key = studioRunKey(owner), current = getStudioRun(owner);
-              if (reconciled.has(key) || current && current !== ownersAtRequest.get(key) || current && current.runId !== snapshot.id && ['active', 'running'].includes(current.status) && (snapshot.closed || snapshot.failed)) continue;
+              if (reconciled.has(key) || current && (!belongsToLab(current) || current.engine === 'live' && !snapshot.live || current !== ownersAtRequest.get(key)) || current && listedIds.has(current.runId) && current.runId !== snapshot.id && ['active', 'running'].includes(current.status) && (snapshot.closed || snapshot.failed)) continue;
               reconciled.add(key);
               updateStudioRun(owner, { runId: snapshot.id, engine: snapshot.live ? 'live' : snapshot.engine === 'rehearsal' ? 'rehearse' : 'simulate', status: snapshot.closed || snapshot.failed || snapshot.execution && ['done', 'stopped', 'error'].includes(snapshot.execution.phase) ? 'ended' : snapshot.busy ? 'running' : 'active', turn: snapshot.turnCount ?? snapshot.turns.filter(turn => turn.role === 'user').length });
+            }
+          }
+          // Closed sessions can be removed between polls. Only an authoritative
+          // success can expire unchanged remembered lab runs absent from its list.
+          for (const [key, remembered] of ownersAtRequest) {
+            if (remembered && belongsToLab(remembered) && remembered.engine !== 'live' && ['active', 'running'].includes(remembered.status) && !listedIds.has(remembered.runId) && workspaces.get(key)?.descriptor === remembered) {
+              updateStudioRun(remembered, { runId: remembered.runId, engine: remembered.engine, status: 'expired', turn: remembered.turn });
             }
           }
         } catch { /* A disconnected server must not terminate a remembered run. */ } finally { pending = false; }

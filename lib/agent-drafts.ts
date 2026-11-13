@@ -79,7 +79,7 @@ export function agentDraftSource(input: AgentDraftInput): string {
     // A new draft is a new local identity; never inherit the source's name or metadata target.
     return copyAgentIdentity(input.source, input.apiName);
   }
-  return `# @dialect:agentforce\nconfig:\n    agent_name: ${JSON.stringify(input.apiName)}\n\nsystem:\n    instructions: ${JSON.stringify(input.purpose?.trim() || 'Help the user with clear, concise answers. Ask for missing details and stay within your capabilities.')}\n\nstart_agent welcome:\n    description: ${JSON.stringify(name)}\n    reasoning:\n        instructions: ->\n            | Welcome the user and ask how you can help.\n            | Do not claim to have performed actions that are not available.\n`;
+  return `# @dialect:agentforce\nconfig:\n    agent_name: ${JSON.stringify(input.apiName)}\n\nsystem:\n    instructions: ${JSON.stringify(input.purpose?.trim() || 'Help the user with clear, concise answers. Ask for missing details and stay within your capabilities.')}\n\nstart_agent welcome:\n    description: ${JSON.stringify(name)}\n    reasoning:\n        instructions: ->\n            | Help with the purpose described in your system instructions. Answer in-scope questions directly; ask for missing details when needed.\n            | Welcome the user briefly when appropriate. Do not repeat the welcome in every response.\n            | Do not invent facts or claim to have performed actions that are not available.\n`;
 }
 
 /** Synchronous, bounded staging keeps creation serialized and publishes the pair together. */

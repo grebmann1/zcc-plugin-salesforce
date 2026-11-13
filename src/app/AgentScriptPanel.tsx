@@ -81,6 +81,7 @@ import { PreviewRunReplay } from './preview/PreviewRunReplay.js';
 import type { TraceFocus } from './preview/trace-focus.js';
 import { OperationsPanel } from './panels/OperationsPanel.js';
 import { AskAgentButton } from './studio/AskAgentButton.js';
+import { handoffStudioAgent } from './studio/agent-handoff.js';
 import { isPanelTool, panelToolActionId, studioToolScope, useStudioRegistration, useStudioToolSlots, type PanelTool } from './studio/studio-tool-bridge.js';
 import { CommentsPane } from './studio/CommentsPane.js';
 import { useStudioView } from './studio/useStudioView.js';
@@ -1046,15 +1047,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
     const path = activePathRef.current;
     if (!path) return;
     const request = rpcArgs({ path, ...(action ? { action } : {}), ...extra });
-    // Like the Ask agent menu: the side panel's composer takes the brief so the user picks the harness.
-    const { openPanelAgent } = navigateRef.current;
-    if (openPanelAgent) {
-      const draft = (await callPluginRpc(pluginId, STUDIO_RPC.draftAgent, request)) as { ok?: boolean; error?: string; prompt?: string; title?: string } | null;
-      if (draft?.ok === false) throw new Error(draft.error || 'Could not prepare the request.');
-      if (draft?.prompt && openPanelAgent({ draft: { prompt: draft.prompt, view: path, ...(projectId ? { projectId } : {}) }, ...(draft.title ? { title: draft.title } : {}) })) return;
-    }
-    const result = (await callPluginRpc(pluginId, STUDIO_RPC.askAgent, request)) as { ok?: boolean; error?: string } | null;
-    if (result?.ok === false) throw new Error(result.error || 'Could not start the agent.');
+    return handoffStudioAgent(pluginId, navigateRef.current, { ...request, path, ...(projectId ? { projectId } : {}) });
   }, [pluginId, projectId, rpcArgs]);
   /** Shows an agent's rail tab in the host side panel. False when the host cannot (no panel, or no thread yet for Assistant). */
   const openRail = useCallback((tab: RailTab, path: string | null = activePathRef.current): boolean => {
@@ -1874,7 +1867,7 @@ function AgentScriptWorkspace(props: AgentScriptPanelProps) {
       onResolve={(commentId, note) => { void Promise.resolve(callPluginRpc(pluginId, STUDIO_RPC.commentResolve, { projectId, id: commentId, note })).then(() => loadComments()).catch(err => { if (alive.current) setError(err instanceof Error ? err.message : String(err)); }); }}
       onEdit={updateComment}
       onDelete={deleteComment}
-      onAddressWithAgent={() => { void askAgent('address-comments').catch(err => { if (alive.current) setError(err instanceof Error ? err.message : String(err)); }); }} />;
+      onAddressWithAgent={() => askAgent('address-comments')} />;
     if (id !== 'actions') return null;
     return <div className="af-action-workspace">
       {actionTabs.length > 0 && <div className="af-related-tabs" aria-label="Open agent files">

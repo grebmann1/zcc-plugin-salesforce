@@ -11,6 +11,20 @@ afterEach(async () => { await Promise.all(dirs.splice(0).map(p => rm(p, { recurs
 const description = (name: string) => catalog.tools.find(t => t.name === name)! as unknown as ToolkitDescription;
 
 describe('toolkit input authority', () => {
+  it('rebases child-DX inputs while keeping workspace authority and every path inside the chosen child', async () => {
+    const p = await root(), child = join(p, 'agentforce-drafts'); await mkdir(child); await mkdir(join(child, 'force-app'));
+    await writeFile(join(child, 'force-app', 'hello.js'), '');
+    for (const file of ['force-app/hello.js', 'agentforce-drafts/force-app/hello.js', '@agentforce-drafts/force-app/hello.js', join(child, 'force-app/hello.js')]) {
+      expect(await prepareToolkitInput('sf_lwc', { action: 'file.diagnose', file, workspace: '.' }, p, null, child)).toMatchObject({ file: join(child, 'force-app/hello.js'), workspace: child });
+    }
+    expect(await prepareToolkitInput('sf_lwc', { files: ['force-app/hello.js'], package_dir: 'agentforce-drafts/force-app', workspace: [p] }, p, null, child)).toMatchObject({ files: [join(child, 'force-app/hello.js')], package_dir: join(child, 'force-app'), workspace: [child] });
+    for (const path of ['report.json', 'agentforce-drafts/report.json']) {
+      expect(await prepareToolkitInput('sf_lwc', { output_files: [{ path, content: '{}' }] }, p, null, child)).toMatchObject({ output_files: [{ path: join(child, 'report.json'), content: '{}' }] });
+    }
+    const outside = await root(); await symlink(outside, join(child, 'escape'));
+    for (const input of [{ file: '../private.js' }, { file: join(p, 'private.js') }, { file: 'escape/private.js' }, { workspace: child }, { output_files: [{ path: 42 }] }, { output_files: [{ path: 'escape/report.json' }] }]) await expect(prepareToolkitInput('sf_lwc', input, p, null, child)).rejects.toThrow();
+    await expect(prepareToolkitInput('sf_lwc', {}, p, null, outside)).rejects.toThrow(/inside/);
+  });
   it('confines existing files, new output ancestors and nested Data 360 paths', async () => {
     const p = await root(); await writeFile(join(p, 'a.cls'), '');
     expect(await confinedToolkitPath(p, '@a.cls')).toBe(join(p, 'a.cls'));

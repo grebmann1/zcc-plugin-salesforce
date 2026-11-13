@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CommentsPane } from './CommentsPane.js';
 import type { StudioComment } from '../../../lib/studio-contract.js';
 
@@ -94,4 +94,48 @@ it('hides Edit and Delete without handlers', () => {
   render(<CommentsPane {...props} comments={[c('a', 2)]} />);
   expect(screen.queryByText('Edit')).toBeNull();
   expect(screen.queryByText('Delete')).toBeNull();
+});
+
+it('shows pending handoff and acknowledged draft feedback without resolving comments or duplicating requests', async () => {
+  let finish!: (value: { kind: 'draft' }) => void;
+  const onAddress = vi.fn(() => new Promise<{ kind: 'draft' }>(resolve => { finish = resolve; }));
+  const onResolve = vi.fn();
+  render(<CommentsPane {...props} comments={[c('a', 2)]} onAddressWithAgent={onAddress} onResolve={onResolve} />);
+  const button = screen.getByRole('button', { name: 'Address with agent' });
+  fireEvent.click(button); fireEvent.click(button);
+  expect(onAddress).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('button', { name: 'Preparing…' }).hasAttribute('disabled')).toBe(true);
+  expect(screen.getByRole('status').textContent).toContain('Preparing');
+  await act(async () => finish({ kind: 'draft' }));
+  expect(screen.getByRole('status').textContent).toContain('Choose an agent and send it');
+  expect(screen.getByRole('button', { name: 'Address with agent' }).hasAttribute('disabled')).toBe(false);
+  expect(onResolve).not.toHaveBeenCalled();
+  expect(screen.getByText('Open (1)')).toBeTruthy();
+});
+
+it('shows a local failure and allows retry, then confirms the existing conversation opened', async () => {
+  const onAddress = vi.fn().mockRejectedValueOnce(new Error('Host refused the handoff')).mockRejectedValueOnce('offline').mockResolvedValue({ kind: 'thread', threadId: 't' });
+  render(<CommentsPane {...props} comments={[c('a', 2)]} onAddressWithAgent={onAddress} />);
+  fireEvent.click(screen.getByText('Address with agent'));
+  expect((await screen.findByRole('alert')).textContent).toBe('Host refused the handoff');
+  fireEvent.click(screen.getByText('Address with agent'));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('offline'));
+  fireEvent.click(screen.getByText('Address with agent'));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Agent conversation opened.'));
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('ignores an old file handoff completion and a late failure after unmount', async () => {
+  let finish!: (value: { kind: 'draft' }) => void;
+  let fail!: (error: Error) => void;
+  const onAddress = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+  const { rerender, unmount } = render(<CommentsPane {...props} comments={[c('a', 2), c('b', 3, { path: 'b.agent' })]} onAddressWithAgent={onAddress} />);
+  fireEvent.click(screen.getByText('Address with agent'));
+  rerender(<CommentsPane {...props} path="b.agent" comments={[c('b', 3, { path: 'b.agent' })]} onAddressWithAgent={onAddress} />);
+  await act(async () => finish({ kind: 'draft' }));
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(screen.getByText('Address with agent'));
+  unmount();
+  await act(async () => fail(new Error('late')));
+  expect(onAddress).toHaveBeenCalledTimes(2);
 });

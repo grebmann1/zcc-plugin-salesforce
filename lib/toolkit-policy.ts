@@ -46,8 +46,17 @@ export async function confinedToolkitPath(root: string, supplied: string): Promi
   return resolved;
 }
 
-export async function prepareToolkitInput(name: string, raw: unknown, root: string, org: string | null): Promise<Record<string, any>> {
+export async function prepareToolkitInput(name: string, raw: unknown, root: string, org: string | null, executionRoot = root): Promise<Record<string, any>> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || JSON.stringify(raw).length > 200_000) throw new ToolkitPolicyError('Tool input must be a JSON object of at most 200,000 characters.');
+  executionRoot = await confinedToolkitPath(root, executionRoot);
+  const prefix = relative(root, executionRoot).split(sep).join('/');
+  const pathInsideExecution = (supplied: unknown) => {
+    if (typeof supplied !== 'string') throw new ToolkitPolicyError('Use a concrete path inside this project.');
+    const path = supplied.startsWith('@') ? supplied.slice(1) : supplied;
+    // Managed-child paths are often copied from Studio; ordinary relative paths belong to the selected DX root.
+    const selected = prefix && (path === prefix || path.startsWith(`${prefix}/`)) ? resolve(root, path) : path;
+    return confinedToolkitPath(executionRoot, selected);
+  };
   const input = structuredClone(raw) as Record<string, any>;
   async function visit(object: Record<string, any>, depth = 0): Promise<void> {
     if (depth > 16) throw new ToolkitPolicyError('Tool input is too deeply nested.');
@@ -57,17 +66,17 @@ export async function prepareToolkitInput(name: string, raw: unknown, root: stri
       if (key === 'workspace') {
         const values = Array.isArray(value) ? value : [value];
         if (!values.every(v => typeof v === 'string' && (v === '.' || v === root))) throw new ToolkitPolicyError('Workspace is owned by the registered project.');
-        object[key] = Array.isArray(value) ? value.map(() => root) : root;
+        object[key] = Array.isArray(value) ? value.map(() => executionRoot) : executionRoot;
       } else if (key === 'manifest' && name.startsWith('data360_') && value && typeof value === 'object' && !Array.isArray(value)) {
         await visit(value, depth + 1);
       } else if (key === 'output_files' && Array.isArray(value) && value.every(v => v && typeof v === 'object')) {
-        for (const child of value) { await confinedToolkitPath(root, child.path); await visit(child, depth + 1); }
+        for (const child of value) { child.path = await pathInsideExecution(child.path); await visit(child, depth + 1); }
       } else if (PATH_KEYS.has(key) || /(?:_file|_path|_dir|File|Path|Dir)$/.test(key) || (key === 'path' && name === 'data360_prepare' && input.action.includes('upload_csv')) || (name === 'code_analyzer' && key === 'target') || (name === 'sf_apex' && ['target', 'targets'].includes(key))) {
         const values = Array.isArray(value) ? value : [value];
         for (const path of values) {
           if (typeof path !== 'string') throw new ToolkitPolicyError(`${key} must contain file paths.`);
           if (name === 'sf_apex' && ['target', 'targets'].includes(key) && /^[A-Za-z][A-Za-z0-9_]*$/.test(path)) continue;
-          const canonical = await confinedToolkitPath(root, path);
+          const canonical = await pathInsideExecution(path);
           if (Array.isArray(value)) value[value.indexOf(path)] = canonical;
           else object[key] = canonical;
         }

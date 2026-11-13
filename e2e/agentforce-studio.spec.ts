@@ -116,7 +116,7 @@ const test = base.extend({
       } else if (path.endsWith('/chat-generations')) {
         const system = body.messages[0].content as string;
         const failedJudge = existsSync(join(home, 'simulation-judge-fail'));
-        result = { generationDetails: { generations: [{ content: system.startsWith('Evaluate') ? JSON.stringify({ outcome: failedJudge ? 'fail' : 'pass', reason: failedJudge ? 'The agent did not complete the requested refund.' : 'The agent stayed within scope and asked for the missing order details.', evidence: ['The agent asked for an order number before proceeding.'] }) : system.includes('CUSTOMER') ? 'My order is ORD-1042. Can you check the delivery date?' : 'I can help with that. What is your order number?' }] } };
+        result = { generationDetails: { generations: [{ content: system.startsWith('Evaluate') ? JSON.stringify({ outcome: failedJudge ? 'fail' : 'pass', reason: failedJudge ? 'The agent did not complete the requested refund.' : 'The agent stayed within scope and asked for the missing order details.', evidence: ['The agent asked for an order number before proceeding.'], grounding: { outcome: 'pass', reason: 'Scripted fixture facts match the pinned source.', unsupportedClaims: [] } }) : system.includes('CUSTOMER') ? 'My order is ORD-1042. Can you check the delivery date?' : 'I can help with that. What is your order number?' }] } };
       } else if (path.includes('/einstein/ai-evaluations/runs')) {
         // Testing Center: a run starts NEW, reads IN_PROGRESS once, then COMPLETED with 2 passing and 1 failing case.
         if (req.method === 'POST' && path.endsWith('/runs')) result = { id: '4KB000000000001AAA', status: 'NEW' };
@@ -5376,4 +5376,107 @@ test('Studio picklists: shared scenarios, batch settings and role-play use ancho
   expect(await tests.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
   await testInfo.attach('picker-geometry-and-colors', { body: JSON.stringify(observations, null, 2), contentType: 'application/json' });
   expect(errors).toEqual([]);
+});
+
+test('Comments handoff: pending, failure and prepared draft feedback stay visible in Electron', async ({ app, home }, testInfo) => {
+  const page = app.window;
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(p => p.id === 'salesforce')?.status), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+  const projectId = await page.evaluate(async path => { const added = await window.cc.projects.add(path); if (!added.ok) throw Error(added.message); return added.value.id; }, join(home, 'dx'));
+  await page.evaluate(async id => {
+    await window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' });
+    await window.cc.pluginApps.callRpc('salesforce', 'studio.comments.add', { projectId: id, path: 'force-app/Support.agent', line: 3, endLine: 3, body: 'QA handoff: review this instruction.' });
+    history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
+  }, projectId);
+  await page.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await selectSalesforceSection(page.getByTestId('salesforce-workbench'), 'agentforce');
+  const studio = studioPanel(page);
+  await studio.getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  await openTool(studio, 'Comments');
+  const comments = page.getByTestId('studio-comments-pane');
+  await expect(comments).toContainText('QA handoff: review this instruction.');
+  // Gate the public RPC transport while exercising the compiled component and real host panel.
+  await page.evaluate(() => {
+    const qa = window as unknown as { qaHandoff?: { release(): void; calls: number; restore(): void } };
+    const bridge = (globalThis as unknown as { __ZCC_PLUGIN_HOST__: { callRpc: typeof window.cc.pluginApps.callRpc } }).__ZCC_PLUGIN_HOST__;
+    const original = bridge.callRpc;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const state = { release, calls: 0, restore: () => { bridge.callRpc = original; } };
+    bridge.callRpc = async (...args: Parameters<typeof original>) => {
+      if (args[1] === 'studio.draftAgent') { state.calls++; await gate; return { ok: false, error: 'QA handoff unavailable; retry is safe.' }; }
+      return original(...args);
+    };
+    qa.qaHandoff = state;
+  });
+  await comments.getByRole('button', { name: 'Address with agent', exact: true }).click();
+  await expect(comments.getByRole('button', { name: 'Preparing…', exact: true })).toBeDisabled();
+  await expect(comments.getByRole('status')).toHaveText('Preparing the agent request…');
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('comments-handoff-pending.png'));
+  await page.evaluate(() => (window as unknown as { qaHandoff: { release(): void } }).qaHandoff.release());
+  await expect(comments.getByRole('alert')).toHaveText('QA handoff unavailable; retry is safe.');
+  expect(await page.evaluate(() => (window as unknown as { qaHandoff: { calls: number } }).qaHandoff.calls)).toBe(1);
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('comments-handoff-error.png'));
+  await page.evaluate(() => (window as unknown as { qaHandoff: { restore(): void } }).qaHandoff.restore());
+  await comments.getByRole('button', { name: 'Address with agent', exact: true }).click();
+  await expect(sidePanel(page).getByTestId('thread-command-input')).toContainText('Address the open comments on Support.agent.');
+  await openTool(studio, 'Comments');
+  await expect(comments.getByRole('status')).toContainText('Request ready. Choose an agent');
+  await expect(comments.getByRole('tab', { name: 'Open (1)', exact: true })).toBeVisible();
+  await captureElectronScreenshot(app.electron, page, testInfo.outputPath('comments-handoff-prepared.png'));
+});
+
+test('Studio Active runs: a backend-closed and culled preview disappears without an explicit UI End', async ({ app, home }, testInfo) => {
+  const page = app.window;
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(p => p.id === 'salesforce')?.status), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+  const projectId = await page.evaluate(async path => { const added = await window.cc.projects.add(path); if (!added.ok) throw Error(added.message); return added.value.id; }, join(home, 'dx'));
+  await page.evaluate(async id => {
+    await window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' });
+    history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
+  }, projectId);
+  await page.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  const workbench = page.getByTestId('salesforce-workbench');
+  await selectSalesforceSection(workbench, 'agentforce');
+  await studioIn(page).getByTestId('salesforce-agent-script-file:force-app/Support.agent').click();
+  // Keep the editor on Script: only the tray reconciler observes the backend run.
+  const rpc = (method: string, args: Record<string, unknown>) => page.evaluate(({ projectId, method, args }) => window.cc.pluginApps.callRpc('salesforce', method, { projectId, ...args }), { projectId, method, args });
+  writeFileSync(join(home, 'persistent-preview-hold'), 'hold');
+  let runId: string | undefined;
+  try {
+    const started = await rpc('agentLab.start', { engine: 'preview', source: AGENT_SCRIPT_EXAMPLES[0].source, path: 'force-app/Support.agent', startedByUser: true });
+    expect(started).toMatchObject({ ok: true }); runId = (started as any).data.id;
+    await page.evaluate(({ projectId, id }) => {
+      const qa = window as unknown as { qaCullingSend?: Promise<unknown> };
+      qa.qaCullingSend = window.cc.pluginApps.callRpc('salesforce', 'agentLab.send', { projectId, id, text: 'Persistent preview turn' }).catch(error => ({ error: String(error) }));
+    }, { projectId, id: runId });
+    await expect.poll(async () => (await rpc('agentLab.get', { id: runId }) as any).data?.busy).toBe(true);
+    await workbench.getByRole('button', { name: 'Active runs', exact: true }).click();
+    await expect(workbench.getByRole('region', { name: 'Active run sessions' })).toContainText('Preview · Running');
+    // Hold the next list request so it cannot observe the short closed-before-cull interval.
+    await page.evaluate(() => {
+      const bridge = (globalThis as unknown as { __ZCC_PLUGIN_HOST__: { callRpc: typeof window.cc.pluginApps.callRpc } }).__ZCC_PLUGIN_HOST__;
+      const original = bridge.callRpc;
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const state = { calls: 0, restore: () => { bridge.callRpc = original; release(); } };
+      bridge.callRpc = async (...args: Parameters<typeof original>) => { if (args[1] === 'agentLab.list') { state.calls++; await gate; } return original(...args); };
+      (window as unknown as { qaCulling?: typeof state }).qaCulling = state;
+    });
+    await expect.poll(() => page.evaluate(() => (window as unknown as { qaCulling: { calls: number } }).qaCulling.calls)).toBeGreaterThan(0);
+    expect(await rpc('agentLab.end', { id: runId })).toMatchObject({ ok: true });
+    const replacement = await rpc('agentLab.start', { engine: 'preview', source: AGENT_SCRIPT_EXAMPLES[0].source, path: 'force-app/Orders.agent', startedByUser: true });
+    expect(replacement).toMatchObject({ ok: true });
+    expect(await rpc('agentLab.end', { id: (replacement as any).data.id })).toMatchObject({ ok: true });
+    const listed = await rpc('agentLab.list', { includeClosed: true, summaryOnly: true });
+    expect(listed).toMatchObject({ ok: true });
+    expect((listed as any).data.map((row: { id: string }) => row.id)).not.toContain(runId);
+    await expect(workbench.getByRole('region', { name: 'Active run sessions' })).toContainText('Preview · Running');
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath('tray-before-culled-session-reconciliation.png'));
+    await page.evaluate(() => (window as unknown as { qaCulling: { restore(): void } }).qaCulling.restore());
+    await expect(workbench.getByRole('button', { name: 'Active runs', exact: true })).toHaveCount(0);
+    await captureElectronScreenshot(app.electron, page, testInfo.outputPath('tray-after-culled-session-reconciliation.png'));
+  } finally {
+    await page.evaluate(() => (window as unknown as { qaCulling?: { restore(): void } }).qaCulling?.restore()).catch(() => {});
+    rmSync(join(home, 'persistent-preview-hold'), { force: true });
+    if (runId) await rpc('agentLab.end', { id: runId }).catch(() => {});
+  }
 });

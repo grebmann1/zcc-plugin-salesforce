@@ -8,7 +8,7 @@ import type { SalesforceSdk } from '../lib/sdk-contract.js';
 import type { SalesforceToolProvider, ToolkitRuntime } from '../lib/tool-provider-contract.js';
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const fn of cleanups.splice(0).reverse()) await fn(); });
-async function setup() {
+async function setup(executionWorkspace?: (name: string, workspace: string) => string | Promise<string>) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'sf-adapter-'))); cleanups.push(() => rm(workspace, { recursive: true, force: true }));
   let mode: SalesforceToolProvider = 'both';
   const scope = { projectId: 'p', workspace, orgAlias: 'dev' };
@@ -27,7 +27,7 @@ async function setup() {
   };
   const loadRuntime = vi.fn(async () => runtime);
   const changed = vi.fn();
-  const adapter = new SalesforceToolkitAdapter({ provider: async () => mode, scope: async () => ({ ...scope }), sdk: { connect, confirm } as unknown as SalesforceSdk, loadRuntime, changed });
+  const adapter = new SalesforceToolkitAdapter({ provider: async () => mode, scope: async () => ({ ...scope }), sdk: { connect, confirm } as unknown as SalesforceSdk, loadRuntime, changed, executionWorkspace });
   cleanups.push(() => adapter.dispose());
   return { adapter, scope, org, runtime, connect, confirm, loadRuntime, changed, setMode: (value: SalesforceToolProvider) => { mode = value; } };
 }
@@ -55,6 +55,27 @@ describe('provider boundary', () => {
 });
 
 describe('host-owned execution', () => {
+  it('pins child execution for approvals and resumes while retaining registered-project result ownership', async () => {
+    let selected = 'agentforce-drafts';
+    const f = await setup((name, workspace) => name === 'sf_lwc' ? join(workspace, selected) : workspace);
+    await mkdir(join(f.scope.workspace, selected)); await mkdir(join(f.scope.workspace, 'other'));
+    const result = await f.adapter.invoke('sf_lwc', { action: 'component.inspect', component: 'qaHello', workspace: '.' }, ctx);
+    expect(f.runtime.executeTool).toHaveBeenLastCalledWith('sf_lwc', expect.objectContaining({ workspace: join(f.scope.workspace, selected) }), expect.objectContaining({ workspace: join(f.scope.workspace, selected), allowEffects: false }));
+    expect(await f.adapter.read(result.execution.runId, ctx)).toMatchObject({ data: { value: 'evidence' } });
+    await f.adapter.invoke('sf_lwc', { action: 'component.inspect', component: 'qaHello', output_files: [{ path: 'agentforce-drafts/report.json', content: '{}' }] }, ctx);
+    expect(f.runtime.executeTool).toHaveBeenLastCalledWith('sf_lwc', expect.objectContaining({ output_files: [{ path: join(f.scope.workspace, selected, 'report.json'), content: '{}' }] }), expect.objectContaining({ workspace: join(f.scope.workspace, selected), allowEffects: true }));
+    selected = 'other';
+    expect(await f.adapter.invoke('sf_lwc', { action: 'history.last' }, ctx, result.execution.runId)).toMatchObject({ code: 'scope_mismatch' });
+    f.confirm.mockImplementation(async () => { selected = 'agentforce-drafts'; return { approved: true, reason: 'sandbox' }; });
+    expect(await f.adapter.invoke('sf_lwc', { action: 'test.run', component: 'qaHello' }, ctx)).toMatchObject({ code: 'scope_mismatch' });
+    expect(f.runtime.executeTool).toHaveBeenCalledTimes(2);
+    expect(f.confirm).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'org.write' }), 't');
+  });
+  it('rejects host execution roots outside the registered project before approval or runtime loading', async () => {
+    const f = await setup(() => '/');
+    expect(await f.adapter.invoke('sf_lwc', { action: 'project.scan' }, ctx)).toMatchObject({ code: 'toolkit_failed', error: expect.stringContaining('inside') });
+    expect(f.confirm).not.toHaveBeenCalled(); expect(f.loadRuntime).not.toHaveBeenCalled();
+  });
   it('announces only completed local retrieve results, follows resumes and deduplicates one download', async () => {
     const f = await setup();
     const original = f.runtime.executeTool;

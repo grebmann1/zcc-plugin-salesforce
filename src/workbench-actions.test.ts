@@ -177,7 +177,7 @@ it('reconnects server-owned role-play after its RPC returns without crossing pro
     const judging = JSON.stringify(input).includes('Evaluate a test transcript');
     if (!judging) await heldTurn;
     return { host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: judging
-      ? JSON.stringify({ outcome: 'pass', reason: 'Question answered', evidence: ['The agent replied.'] }) : 'I can help.' }] } } };
+      ? JSON.stringify({ outcome: 'pass', reason: 'Question answered', evidence: ['The agent replied.'], grounding: { outcome: 'pass', reason: 'No unsupported factual claims.', unsupportedClaims: [] } }) : 'I can help.' }] } } };
   });
   const { harness } = await fixture(false, { bootstrap: async () => 'PRIVATE_JWT', request } as unknown as AgentforceTransport);
   const owner = { projectId: 'p', orgAlias: 'dev', path: 'Bot.agent' };
@@ -218,6 +218,10 @@ it('lets an agent read the preview context, manage presets and start a run from 
   expect((await action('contextPresets.list', { path })).presets).toHaveLength(1);
   // studio.start and sf_agent preview.start take the preset in place of contextVariables.
   expect(await action('studio.start', { engine: 'rehearsal', source, path, presetId: saved.preset.id })).toMatchObject({ ok: true, data: { contextVariables: [{ name: 'verified', type: 'Boolean', value: true }] } });
+  const scenario = { persona: 'Customer', goal: 'Check context', opening: 'Context?', criteria: 'Report context', maxTurns: 1, contextVariables: [{ name: 'verified', type: 'Boolean', value: false }] };
+  // A preset explicitly replaces the scenario setup, while invalid nested input never goes unnoticed.
+  expect(await action('studio.start', { engine: 'rehearsal', source, path, scenario, presetId: saved.preset.id })).toMatchObject({ ok: true, data: { contextVariables: [{ name: 'verified', type: 'Boolean', value: true }], scenario: { contextVariables: scenario.contextVariables } } });
+  expect(await action('studio.start', { engine: 'rehearsal', source, path, scenario: { ...scenario, contextVariables: [{ name: 'verified', type: 'Boolean', value: 'false' }] }, presetId: saved.preset.id })).toMatchObject({ ok: false, error: expect.stringContaining('Boolean') });
   expect(await action('studio.start', { engine: 'rehearsal', source, path, presetId: saved.preset.id, contextVariables: [] })).toMatchObject({ ok: false, error: expect.stringContaining('not both') });
   expect(await action('studio.start', { engine: 'rehearsal', source, presetId: saved.preset.id })).toMatchObject({ ok: false, error: expect.stringContaining('agent path') });
   expect(await action('studio.start', { engine: 'rehearsal', source, path, presetId: 'missing' })).toMatchObject({ ok: false, error: expect.stringContaining('contextPresets.list') });

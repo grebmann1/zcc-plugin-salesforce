@@ -1,6 +1,8 @@
-import { basename, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { SalesforceDeps } from './types.js';
 import { listFilesRecursive, parsePackageDirectories, resolveUnderRoot } from './dx-project.js';
+import { DRAFT_PROJECT } from './agent-drafts.js';
+import { confinedToolkitPath } from './toolkit-policy.js';
 
 export type LwcAction = 'scan' | 'inspect' | 'diagnose' | 'test.jest';
 
@@ -20,6 +22,42 @@ export interface LwcComponent {
 }
 
 const ACTIONS: readonly LwcAction[] = ['scan', 'inspect', 'diagnose', 'test.jest'];
+
+/** Only the registered DX root or Studio's known child project can own LWC execution. */
+export function resolveLwcProjectRoot(registeredRoot: string, deps: SalesforceDeps): string | undefined {
+  if (!registeredRoot.trim()) return undefined;
+  try {
+    const root = deps.realpath(registeredRoot);
+    if (deps.stat(root) !== 'dir') return undefined;
+    const manifest = join(root, 'sfdx-project.json');
+    const candidate = deps.exists(manifest) ? root : join(root, DRAFT_PROJECT);
+    const confined = resolveUnderRoot(root, candidate, deps.realpath);
+    // The managed child and its manifest must not redirect to another project, even inside the registered root.
+    if (!confined || confined !== candidate || deps.stat(confined) !== 'dir') return undefined;
+    const config = join(confined, 'sfdx-project.json');
+    return resolveUnderRoot(confined, config, deps.realpath) === config && deps.stat(config) === 'file' ? confined : undefined;
+  } catch { return undefined; }
+}
+
+/** The native toolkit searches ancestors and trusts manifest package paths, so validate both before dispatch. */
+export async function resolveLwcToolkitProjectRoot(registeredRoot: string, deps: SalesforceDeps): Promise<string> {
+  const root = resolveLwcProjectRoot(registeredRoot, deps);
+  if (!root) throw Error('LWC project is not configured. Open a DX project or create a Studio draft in its managed agentforce-drafts child project; project folders and manifests cannot redirect through symbolic links.');
+  const packages = parsePackageDirectories(deps.readFile(join(root, 'sfdx-project.json')) ?? '{}');
+  for (const path of packages) await confinedToolkitPath(root, path);
+  return root;
+}
+
+/** Accept both registered-project and DX-project relative paths, without basename fallback or traversal. */
+export function normalizeLwcPath(registeredRoot: string, projectRoot: string, supplied?: string): string | undefined {
+  if (!supplied) return undefined;
+  const path = supplied.replace(/\\/g, '/');
+  if (/[\0-\x1f]/.test(path) || isAbsolute(path) || /^[a-zA-Z]:/.test(path) || path.split('/').some(part => part === '..' || part === '.')) {
+    throw Error('LWC relativePath must stay inside the DX project.');
+  }
+  const prefix = relative(registeredRoot, projectRoot).split(sep).join('/');
+  return (prefix && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path).replace(/\/+$/, '');
+}
 
 export function parseLwcInput(input: unknown): { ok: true; action: LwcAction; component?: string; relativePath?: string } | { ok: false; error: string } {
   const raw = input && typeof input === 'object' ? (input as LwcInput) : {};
@@ -57,9 +95,9 @@ export function scanLwcComponents(projectRoot: string, deps: SalesforceDeps): Lw
       found.push({
         name,
         dir,
-        hasHtml: deps.exists(`${dir}.html`),
-        hasJs: deps.exists(`${dir}.js`),
-        hasCss: deps.exists(`${dir}.css`),
+        hasHtml: containedLwcFile(dir, 'html', deps) !== null,
+        hasJs: containedLwcFile(dir, 'js', deps) !== null,
+        hasCss: containedLwcFile(dir, 'css', deps) !== null,
         hasMeta: true
       });
     }
@@ -72,15 +110,10 @@ export function findLwcComponent(
   component?: string,
   relativePath?: string
 ): LwcComponent | null {
-  if (component) {
-    const match = components.find((row) => row.name === component);
-    if (match) return match;
-  }
-  if (relativePath) {
-    const normalized = relativePath.replace(/\\/g, '/');
-    return components.find((row) => row.dir.replace(/\\/g, '/').endsWith(normalized) || row.name === basename(normalized)) ?? null;
-  }
-  return null;
+  const normalized = relativePath?.replace(/\\/g, '/');
+  const matches = components.filter(row => (!component || row.name === component) && (!normalized ||
+    row.dir.replace(/\\/g, '/').endsWith(`/${normalized}`) || dirname(row.dir).replace(/\\/g, '/').endsWith(`/${normalized}`)));
+  return (component || relativePath) && matches.length === 1 ? matches[0]! : null;
 }
 
 export function diagnoseLwc(component: LwcComponent): string[] {
@@ -95,8 +128,10 @@ export function diagnoseLwc(component: LwcComponent): string[] {
 }
 
 export function inspectLwc(component: LwcComponent, deps: SalesforceDeps): Record<string, unknown> {
-  const js = deps.readFile(`${component.dir}.js`) ?? '';
-  const html = deps.readFile(`${component.dir}.html`) ?? '';
+  const jsPath = containedLwcFile(component.dir, 'js', deps);
+  const htmlPath = containedLwcFile(component.dir, 'html', deps);
+  const js = jsPath ? deps.readFile(jsPath) ?? '' : '';
+  const html = htmlPath ? deps.readFile(htmlPath) ?? '' : '';
   const apis = [...js.matchAll(/@api\s+([A-Za-z_][A-Za-z0-9_]*)/g)].map((match) => match[1]);
   return {
     name: component.name,
@@ -111,6 +146,12 @@ export function inspectLwc(component: LwcComponent, deps: SalesforceDeps): Recor
     jsChars: js.length,
     htmlChars: html.length
   };
+}
+
+/** Inspect sidecars only after resolving each file inside its own bundle; a file symlink must not bypass the scan. */
+function containedLwcFile(stem: string, extension: string, deps: SalesforceDeps): string | null {
+  const path = resolveUnderRoot(dirname(stem), `${stem}.${extension}`, deps.realpath);
+  return path && deps.stat(path) === 'file' ? path : null;
 }
 
 export function resolveJestBin(projectRoot: string, deps: SalesforceDeps): string | null {
