@@ -101,7 +101,7 @@ import { visualizeFlowSnapshot } from './flow-visualizer.js';
 import { isAgentScriptLspQuery, queryAgentScriptLsp } from './agent-script-lsp.js';
 import { AGENT_SCRIPT_EXAMPLES } from './agent-script-model.js';
 import { envelopeTitle, Guardrail } from './guardrail.js';
-import { diagnoseLwc, findLwcComponent, inspectLwc, parseLwcInput, resolveJestBin, scanLwcComponents } from './lwc.js';
+import { diagnoseLwc, findLwcComponent, inspectLwc, normalizeLwcPath, parseLwcInput, resolveJestBin, resolveLwcProjectRoot, resolveLwcToolkitProjectRoot, scanLwcComponents } from './lwc.js';
 import { createNodeDeps } from './node-deps.js';
 import { formatOrgRoster, orgRosterInstructions } from './org-list.js';
 import { OrgLoginService } from './org-login-service.js';
@@ -270,6 +270,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
   const selectedProvider = async () => toolProvider((await settings.get()).toolProvider);
   const toolkit = new SalesforceToolkitAdapter({
     sdk, provider: selectedProvider, loadRuntime: loadToolkit,
+    executionWorkspace: (name, workspace) => name === 'sf_lwc' ? resolveLwcToolkitProjectRoot(workspace, deps) : workspace,
     changed: scope => zcc.realtime.publish(STUDIO_CHANGED_CHANNEL, { ...scope, kind: 'files' }),
     scope: async ctx => {
       const project = (await zcc.sdk.projects.list()).find(project => project.id === ctx.projectId);
@@ -1424,10 +1425,13 @@ async function runLwc(
   const parsed = parseLwcInput(input);
   if (!parsed.ok) return fail('invalid_input', parsed.error);
   const snapshot = await readSettings();
-  if (!snapshot.projectRoot || !isDxProject(snapshot.projectRoot, deps.exists)) {
-    return fail('not_configured', 'Set DX project root to a folder that contains sfdx-project.json.');
+  const projectRoot = resolveLwcProjectRoot(snapshot.projectRoot, deps);
+  if (!projectRoot) {
+    return fail('not_configured', 'Open a DX project or create a Studio draft in its managed agentforce-drafts child project.');
   }
-  const projectRoot = deps.realpath(snapshot.projectRoot);
+  let relativePath: string | undefined;
+  try { relativePath = normalizeLwcPath(deps.realpath(snapshot.projectRoot), projectRoot, parsed.relativePath); }
+  catch (error) { return fail('path_refused', error instanceof Error ? error.message : 'LWC path must stay inside the DX project.'); }
   const components = scanLwcComponents(projectRoot, deps);
   if (parsed.action === 'scan') {
     return {
@@ -1436,7 +1440,10 @@ async function runLwc(
       data: components.map((row) => ({ name: row.name, dir: row.dir, hasJs: row.hasJs, hasHtml: row.hasHtml, hasMeta: row.hasMeta }))
     };
   }
-  const component = findLwcComponent(components, parsed.component, parsed.relativePath);
+  if (parsed.component && !relativePath && components.filter(row => row.name === parsed.component).length > 1) {
+    return fail('ambiguous_component', `Multiple packages contain ${parsed.component}. Select one with relativePath.`);
+  }
+  const component = findLwcComponent(components, parsed.component, relativePath);
   if (!component) return fail('not_found', `LWC component not found: ${parsed.component ?? parsed.relativePath}`);
   if (parsed.action === 'inspect') {
     return { ok: true, summary: `Inspected ${component.name}`, data: inspectLwc(component, deps) };

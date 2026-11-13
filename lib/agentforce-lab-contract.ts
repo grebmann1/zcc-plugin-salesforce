@@ -1,4 +1,4 @@
-import type { PreviewContextVariable } from './preview-context.js';
+import { parsePreviewContext, type PreviewContextVariable } from './preview-context.js';
 export type LabEngine = 'preview' | 'rehearsal';
 // Salesforce-managed (Azure OpenAI) GPT-4o mini: orgs often disable the direct OpenAI, Bedrock and Vertex providers.
 export const DEFAULT_LAB_MODEL = 'sfdc_ai__DefaultGPT4OmniMini';
@@ -16,6 +16,8 @@ export interface LabScenario {
   opening: string;
   criteria: string;
   maxTurns: number;
+  /** Saved scenario setup, inherited only when start has no explicit contextVariables. */
+  contextVariables?: PreviewContextVariable[];
 }
 export interface LabVerdict {
   outcome: 'pass' | 'fail' | 'inconclusive';
@@ -73,7 +75,8 @@ export function parseLabScenario(value: unknown): LabScenario {
   return {
     ...(row.origin !== undefined ? { origin: parseScenarioOrigin(row.origin) } : {}),
     persona: labText(row.persona, 'Persona', 2000), goal: labText(row.goal, 'Goal', 2000),
-    opening: labText(row.opening, 'Opening message', 4000), criteria: labText(row.criteria, 'Success criteria', 4000), maxTurns: Number(row.maxTurns)
+    opening: labText(row.opening, 'Opening message', 4000), criteria: labText(row.criteria, 'Success criteria (string)', 4000), maxTurns: Number(row.maxTurns),
+    ...(row.contextVariables !== undefined ? { contextVariables: parsePreviewContext(row.contextVariables) } : {})
   };
 }
 export function parseScenarioOrigin(value: unknown): NonNullable<LabScenario['origin']> {
@@ -83,7 +86,7 @@ export function parseScenarioOrigin(value: unknown): NonNullable<LabScenario['or
 }
 export function parseLabVerdict(text: string): LabVerdict {
   const row = labRecord(JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim()));
-  if (!['pass', 'fail', 'inconclusive'].includes(String(row.outcome))) throw new Error('The evaluator did not return a valid verdict.');
+  if (typeof row.outcome !== 'string' || !['pass', 'fail', 'inconclusive'].includes(row.outcome)) throw new Error('The evaluator did not return a valid verdict.');
   const reason = labText(row.reason, 'Evaluator explanation', 4000);
   if (!Array.isArray(row.evidence) || row.evidence.length === 0 || row.evidence.length > 8) throw new Error('The evaluator returned no usable evidence.');
   return { outcome: row.outcome as LabVerdict['outcome'], reason, evidence: row.evidence.map(e => labText(e, 'Evidence', 2000)) };

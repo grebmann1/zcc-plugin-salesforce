@@ -25,7 +25,7 @@ export function providerTools(provider: SalesforceToolProvider, salesforceReady:
 }
 export interface ToolkitScope { projectId: string; workspace: string; orgAlias: string; }
 interface Retrieval { jobId: string; output: string; notified: boolean; }
-interface SavedRun { projectId: string; workspace: string; org: string | null; runFile: string; resultFile: string; directory: string; retrieval?: Retrieval; }
+interface SavedRun { projectId: string; workspace: string; executionWorkspace: string; org: string | null; runFile: string; resultFile: string; directory: string; retrieval?: Retrieval; }
 
 /** Approval line, e.g. "sf_metadata deploy.start · 6 source paths on dev"; the card renders the details. */
 export function toolkitSummary(name: string, input: Record<string, unknown>, orgAlias?: string): string {
@@ -45,6 +45,8 @@ export class SalesforceToolkitAdapter {
     scope(context: SalesforceToolCallContext): Promise<ToolkitScope>;
     sdk: SalesforceSdk;
     loadRuntime(): Promise<ToolkitRuntime>;
+    /** A host-selected execution root; the registered workspace remains the authority for results and project identity. */
+    executionWorkspace?(name: string, workspace: string): string | Promise<string>;
     changed?(scope: { projectId: string; path?: string }): void;
   }) {}
 
@@ -74,16 +76,18 @@ export class SalesforceToolkitAdapter {
       if (!description) return failure('unknown_tool', 'Use sf_tools list for supported tool names.');
       const scope = await this.deps.scope(context);
       const workspace = await realpath(scope.workspace);
-      const preliminary = await prepareToolkitInput(name, raw, workspace, scope.orgAlias || null);
-      const local = isLocalToolkitCall(name, preliminary);
+      const executionRoot = async () => confinedToolkitPath(workspace, await this.deps.executionWorkspace?.(name, workspace) ?? workspace);
+      const executionWorkspace = await executionRoot();
+      const executionInput = await prepareToolkitInput(name, raw, workspace, scope.orgAlias || null, executionWorkspace);
+      const local = isLocalToolkitCall(name, executionInput);
       if (!local && !scope.orgAlias) return failure('org_required', 'Select an org for this project with sf_workbench context.select.');
       const org = local ? null : await this.deps.sdk.connect({ alias: scope.orgAlias });
       // Pin the username rather than an alias which could be rebound during approval.
-      const input: Record<string, any> = { ...preliminary, ...(org ? { target_org: org.username } : {}) };
+      const input: Record<string, any> = { ...executionInput, ...(org ? { target_org: org.username } : {}) };
       const saved = resumeId ? this.runs.get(resumeId) : undefined;
-      if (resumeId && (!saved || saved.projectId !== scope.projectId || saved.workspace !== workspace || saved.org !== (org?.orgId ?? null))) return failure('scope_mismatch', 'Resume belongs to another project/org or has expired.');
+      if (resumeId && (!saved || saved.projectId !== scope.projectId || saved.workspace !== workspace || saved.executionWorkspace !== executionWorkspace || saved.org !== (org?.orgId ?? null))) return failure('scope_mismatch', 'Resume belongs to another project/org or has expired.');
       const effects = toolkitRequiresApproval(description, input);
-      const fingerprint = createHash('sha256').update(JSON.stringify({ name, input, workspace, orgId: org?.orgId ?? null, resumeId })).digest('hex');
+      const fingerprint = createHash('sha256').update(JSON.stringify({ name, input, workspace, executionWorkspace, orgId: org?.orgId ?? null, resumeId })).digest('hex');
       const summary = toolkitSummary(name, input, org?.alias);
       const decision = await this.deps.sdk.confirm({
         ...(effects ? { kind: 'org.write' as const } : {}),
@@ -96,7 +100,8 @@ export class SalesforceToolkitAdapter {
       if (await this.deps.provider() === 'builtin') return failure('provider_disabled', 'Toolkit tools were disabled while this operation was being approved.');
       const current = await this.deps.scope(context);
       if (current.projectId !== scope.projectId || await realpath(current.workspace) !== workspace || current.orgAlias !== scope.orgAlias) return failure('scope_mismatch', 'Project/org changed while approving. Run the operation again.');
-      await prepareToolkitInput(name, preliminary, workspace, scope.orgAlias || null);
+      if (await executionRoot() !== executionWorkspace) return failure('scope_mismatch', 'The execution project changed while approving. Run the operation again.');
+      await prepareToolkitInput(name, executionInput, executionWorkspace, scope.orgAlias || null);
       const runtime = await this.deps.loadRuntime();
       this.root ??= mkdtemp(join(tmpdir(), 'zcc-salesforce-tools-'));
       const root = await this.root;
@@ -105,7 +110,7 @@ export class SalesforceToolkitAdapter {
       const before = name === 'sf_flow' && input.action === 'fix.apply' ? await fileRevision(workspace, input.file, controller.signal) : null;
       controller.signal.throwIfAborted();
       const result = await runtime.executeTool(name, input, {
-        workspace, artifactDir: directory, timeoutMs: 120_000, signal: controller.signal,
+        workspace: executionWorkspace, artifactDir: directory, timeoutMs: 120_000, signal: controller.signal,
         allowEffects: effects && decision.approved, ...(saved ? { resume: saved.runFile } : {})
       });
       controller.signal.throwIfAborted();
@@ -123,7 +128,7 @@ export class SalesforceToolkitAdapter {
         const resultFile = await confinedToolkitPath(directory, result.execution.resultFile);
         const id = result.execution.runId;
         if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)) throw Error('Invalid toolkit run identity.');
-        this.runs.set(id, { projectId: scope.projectId, workspace, org: org?.orgId ?? null, runFile, resultFile, directory, ...(retrieval ? { retrieval } : {}) });
+        this.runs.set(id, { projectId: scope.projectId, workspace, executionWorkspace, org: org?.orgId ?? null, runFile, resultFile, directory, ...(retrieval ? { retrieval } : {}) });
         retained = true;
       }
       controller.signal.throwIfAborted();

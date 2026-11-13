@@ -103,7 +103,7 @@ const test = base.extend({
       } else if (path.endsWith('/chat-generations')) {
         const system = body.messages[0].content as string;
         const failedJudge = existsSync(join(home, 'simulation-judge-fail'));
-        result = { generationDetails: { generations: [{ content: system.startsWith('Evaluate') ? JSON.stringify({ outcome: failedJudge ? 'fail' : 'pass', reason: failedJudge ? 'The agent did not complete the requested refund.' : 'The agent stayed within scope and asked for the missing order details.', evidence: ['The agent asked for an order number before proceeding.'] }) : system.includes('CUSTOMER') ? 'My order is ORD-1042. Can you check the delivery date?' : 'I can help with that. What is your order number?' }] } };
+        result = { generationDetails: { generations: [{ content: system.startsWith('Evaluate') ? JSON.stringify({ outcome: failedJudge ? 'fail' : 'pass', reason: failedJudge ? 'The agent did not complete the requested refund.' : 'The agent stayed within scope and asked for the missing order details.', evidence: ['The agent asked for an order number before proceeding.'], grounding: { outcome: 'pass', reason: 'Scripted fixture facts match the pinned source.', unsupportedClaims: [] } }) : system.includes('CUSTOMER') ? 'My order is ORD-1042. Can you check the delivery date?' : 'I can help with that. What is your order number?' }] } };
       } else if (path.includes('/einstein/ai-evaluations/runs')) {
         // Testing Center: a run starts NEW, reads IN_PROGRESS once, then COMPLETED with 2 passing and 1 failing case.
         if (req.method === 'POST' && path.endsWith('/runs')) result = { id: '4KB000000000001AAA', status: 'NEW' };

@@ -23,6 +23,24 @@ function setup() {
   return { lab, request, bootstrap, connect, args, setScope: (v: string) => { scope = v; }, advance: () => { time += 31 * 60_000; } };
 }
 describe('Agentforce lab', () => {
+  it('inherits typed scenario setup, permits explicit replacement/clearing, and rejects invalid nested setup before connecting', async () => {
+    const h = setup();
+    const values = [{ name: 'verified', type: 'Boolean', value: false }, { name: 'count', type: 'Number', value: 0 }, { name: 'note', type: 'Text', value: '' }];
+    await expect(h.lab.start({ ...h.args, scenario: { ...h.args.scenario, contextVariables: [{ name: 'verified', type: 'Boolean', value: 'false' }] }, contextVariables: [] })).rejects.toThrow('Boolean');
+    expect(h.connect).not.toHaveBeenCalled();
+    const scenario = { ...h.args.scenario, contextVariables: values };
+    const inherited = await h.lab.start({ ...h.args, scenario });
+    expect(inherited.contextVariables).toEqual(values);
+    expect(h.request.mock.calls[1]![2]).toMatchObject({ variables: values });
+    values[0].value = true;
+    inherited.scenario!.contextVariables![1].value = 99;
+    expect(h.lab.get({ id: inherited.id }).scenario!.contextVariables).toMatchObject([{ value: false }, { value: 0 }, { value: '' }]);
+    expect(h.lab.get({ id: inherited.id }).contextVariables).toMatchObject([{ value: false }, { value: 0 }, { value: '' }]);
+    const replacement = [{ name: 'count', type: 'Number', value: 7 }];
+    expect((await h.lab.start({ ...h.args, scenario, contextVariables: replacement })).contextVariables).toEqual(replacement);
+    expect((await h.lab.start({ ...h.args, scenario, contextVariables: [] })).contextVariables).toBeUndefined();
+    expect(h.request.mock.calls.at(-1)![2]).toMatchObject({ variables: [] });
+  });
   it('sends initial typed context once, pins a detached snapshot and rejects invalid values before connecting', async () => {
     const { lab, request, args, connect } = setup();
     await expect(lab.start({ ...args, contextVariables: [{ name: 'verified', type: 'Boolean', value: 'false' }] })).rejects.toThrow('Boolean');
@@ -203,7 +221,7 @@ describe('retained lab runs and server-owned role-play', () => {
     let messages = 0;
     h.request.mockImplementation(async (token, path, body, host, signal) => {
       if (path.endsWith('/messages') && ++messages === 1) await firstReply;
-      if (path.includes('/chat-generations') && JSON.stringify(body).includes('Evaluate a test transcript')) return { host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: JSON.stringify({ outcome: 'pass', reason: 'Goal reached', evidence: ['The agent answered the customer.'] }) }] } } };
+      if (path.includes('/chat-generations') && JSON.stringify(body).includes('Evaluate a test transcript')) return { host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: JSON.stringify({ outcome: 'pass', reason: 'Goal reached', evidence: ['The agent answered the customer.'], grounding: { outcome: 'pass', reason: 'No unsupported factual claims.', unsupportedClaims: [] } }) }] } } };
       return original(token, path, body, host, signal);
     });
     const started = await h.lab.run({ ...h.args, path: 'Bot.agent', threadId: 'original-thread' });
@@ -379,15 +397,20 @@ it('includes final state but marks evidence shortened to the judging budget inco
 
 it('gives the judge explicit coverage and a rubric for short conversations without accepting client evidence', async () => {
   const { lab, args, request } = setup();
-  const run = await lab.start({ ...args, scenario: { ...args.scenario, maxTurns: 1, criteria: 'Ask for the order number' } });
+  const run = await lab.start({ ...args, source: 'system:\n  instructions: \"Ask for the order number\"', contextVariables: [{ name: 'verified', type: 'Boolean', value: false }, { name: 'count', type: 'Number', value: 0 }, { name: 'note', type: 'Text', value: '' }], scenario: { ...args.scenario, maxTurns: 1, criteria: 'Ask for the order number' } });
   await lab.send({ id: run.id, text: 'Find my order' });
   request.mockResolvedValueOnce({ host: 'test.api.salesforce.com', body: { steps: [] } } as never);
-  request.mockResolvedValueOnce({ host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: JSON.stringify({ outcome: 'pass', reason: 'Clarification asked', evidence: ['Agent asks for the order number'] }) }] } } } as never);
-  const evaluated = await lab.evaluate({ id: run.id, coverage: { recordedReplies: 99 } });
+  request.mockResolvedValueOnce({ host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: JSON.stringify({ outcome: 'pass', reason: 'Clarification asked', evidence: ['Agent asks for the order number'], grounding: { outcome: 'pass', reason: 'No unsupported factual claims.', unsupportedClaims: [] } }) }] } } } as never);
+  const evaluated = await lab.evaluate({ id: run.id, coverage: { recordedReplies: 99 }, pinnedSource: { text: 'FORGED SOURCE' }, initialContext: [{ name: 'forged', value: true }] });
   expect(evaluated.verdict.outcome).toBe('pass');
   const messages = (request.mock.calls.at(-1)![2] as { messages: Array<{ content: string }> }).messages;
   expect(messages[0]!.content).toContain('A single exchange can pass a clarification or refusal criterion');
   expect(messages[0]!.content).toContain('If the conversation ends while required work is still pending, use inconclusive');
   expect(JSON.parse(messages[1]!.content).coverage).toEqual({ configuredCustomerTurns: 1, recordedCustomerTurns: 1, recordedReplies: 1 });
+  const payload = JSON.parse(messages[1]!.content);
+  expect(payload.pinnedSource).toEqual({ text: 'system:\n  instructions: \"Ask for the order number\"', sha256: run.sourceHash, complete: true });
+  expect(payload.initialContext.map((v: { value: unknown }) => v.value)).toEqual([false, 0, '']);
+  expect(messages[1]!.content).not.toContain('FORGED SOURCE');
+  expect(messages[1]!.content).not.toContain('forged');
   expect(JSON.parse(messages[1]!.content).transcript).toHaveLength(3); // Includes the greeting, which is not a reply.
 });

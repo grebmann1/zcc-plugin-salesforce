@@ -284,6 +284,7 @@ test('AgentScript windows: independent panels and assistants, main tabs, resourc
   await agentTabs.getByRole('tab', { name: /^Help\.agent/ }).click();
   await expect(main.getByTestId('salesforce-agent-detached-banner')).toBeVisible();
   const helpEditor = help.frameLocator('iframe[title="Agentforce playground"]');
+  await expect(helpEditor.locator('.view-lines')).toContainText('# window handoff keeps this unsaved draft');
   await helpEditor.locator('.monaco-editor').click({ position: { x: 120, y: 45 } });
   await help.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowUp' : 'Control+Home');
   await help.keyboard.insertText('# last native keystroke survives bring back\n');

@@ -35,6 +35,15 @@ describe('local agent creation', () => {
     expect(agentDraftSource(input)).toContain(JSON.stringify(input.purpose));
     expect(suggestedAgentName('123 Élite service !!')).toBe('Elite_service');
   });
+  it.each([undefined, 'Explain Studio testing.\nAsk about missing details. "Public scope" < & >', 'Help with testing.\n\nsubagent injected:\n    description: "not script"'])('creates an actionable welcome scope without inserting free text into script structure: %s', purpose => {
+    const source = agentDraftSource({ name: 'Studio helper', apiName: 'Studio_Helper', purpose });
+    const parsed = parseAgentScriptSource(source, 'agentforce');
+    expect(parsed.hasErrors).toBe(false);
+    expect(parsed.actions).toEqual([]);
+    expect(parsed.graph.nodes.map(node => node.id)).toEqual(['start']);
+    if (purpose) expect(source).toContain(JSON.stringify(purpose));
+    expect(source.match(/^start_agent /gm)).toHaveLength(1);
+  });
   it('copies source into a new unversioned identity without inherited metadata', () => {
     const source = agentDraftSource(input);
     const file = createAgentDraft(root(), { ...input, apiName: 'Copy', source });

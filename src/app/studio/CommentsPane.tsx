@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { STUDIO_LIMITS, type StudioComment } from '../../../lib/studio-contract.js';
+import type { StudioAgentHandoff } from './agent-handoff.js';
 
 /** Review comments for the open file: open/resolved tabs, jump to line, resolve with a note, edit, delete, hand off to the agent. */
 export interface CommentsPaneProps {
@@ -11,7 +12,7 @@ export interface CommentsPaneProps {
   onResolve?(id: string, note: string): void;
   onEdit?(id: string, body: string): void;
   onDelete?(id: string): void;
-  onAddressWithAgent?(): void;
+  onAddressWithAgent?(): void | Promise<StudioAgentHandoff | void>;
 }
 
 const STYLES = `
@@ -34,6 +35,8 @@ const STYLES = `
 .sf-cm-edit { width: 100%; box-sizing: border-box; min-height: 48px; resize: vertical; border: 1px solid var(--sf-border); background: transparent; color: var(--sf-text); border-radius: 6px; padding: 4px 6px; font: inherit; }
 .sf-cm-input { flex: 1; min-width: 0; border: 1px solid var(--sf-border); background: transparent; color: var(--sf-text); border-radius: 6px; padding: 2px 6px; font: inherit; }
 .sf-cm-empty { color: var(--sf-muted); padding: 12px 4px; }
+.sf-cm-feedback { margin: 0; color: var(--sf-muted); }
+.sf-cm-feedback[role=alert] { color: var(--sf-danger); }
 `;
 
 export function CommentsPane({ path, comments, onReveal, onResolve, onEdit, onDelete, onAddressWithAgent }: CommentsPaneProps) {
@@ -43,10 +46,32 @@ export function CommentsPane({ path, comments, onReveal, onResolve, onEdit, onDe
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [addressing, setAddressing] = useState(false);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const [addressStatus, setAddressStatus] = useState<string | null>(null);
+  const addressAttempt = useRef(0);
+  const addressPending = useRef(false);
+  useEffect(() => {
+    addressPending.current = false; setAddressing(false); setAddressError(null); setAddressStatus(null);
+    return () => { addressAttempt.current++; addressPending.current = false; };
+  }, [path]);
   const scoped = comments.filter(row => !path || row.path === path);
   const open = scoped.filter(row => !row.resolved);
   const resolved = scoped.filter(row => row.resolved);
   const shown = (tab === 'open' ? open : resolved).slice().sort((a, b) => a.line - b.line);
+  const address = async () => {
+    if (addressPending.current || !onAddressWithAgent || open.length === 0) return;
+    const attempt = ++addressAttempt.current;
+    addressPending.current = true; setAddressing(true); setAddressError(null); setAddressStatus(null);
+    try {
+      const result = await onAddressWithAgent();
+      if (addressAttempt.current === attempt) setAddressStatus(result?.kind === 'draft' ? 'Request ready. Choose an agent and send it in the conversation panel.' : 'Agent conversation opened.');
+    } catch (error) {
+      if (addressAttempt.current === attempt) setAddressError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (addressAttempt.current === attempt) { addressPending.current = false; setAddressing(false); }
+    }
+  };
   const submit = (id: string) => {
     const text = note.trim();
     if (!text) return;
@@ -67,8 +92,11 @@ export function CommentsPane({ path, comments, onReveal, onResolve, onEdit, onDe
         <button type="button" role="tab" className="sf-cm-tab" aria-selected={tab === 'open'} onClick={() => setTab('open')}>Open ({open.length})</button>
         <button type="button" role="tab" className="sf-cm-tab" aria-selected={tab === 'resolved'} onClick={() => setTab('resolved')}>Resolved ({resolved.length})</button>
         <span className="sf-cm-spacer" />
-        <button type="button" className="sf-cm-btn is-primary" disabled={open.length === 0 || !onAddressWithAgent} onClick={() => onAddressWithAgent?.()}>Address with agent</button>
+        <button type="button" className="sf-cm-btn is-primary" disabled={addressing || open.length === 0 || !onAddressWithAgent} aria-busy={addressing} onClick={() => void address()}>{addressing ? 'Preparing…' : 'Address with agent'}</button>
       </div>
+      {addressing && <p className="sf-cm-feedback" role="status">Preparing the agent request…</p>}
+      {addressError && <p className="sf-cm-feedback" role="alert">{addressError}</p>}
+      {addressStatus && <p className="sf-cm-feedback" role="status">{addressStatus}</p>}
       {shown.length === 0 && <div className="sf-cm-empty">{tab === 'open' ? 'No open comments. Click the editor gutter or select text to add one.' : 'Nothing resolved yet.'}</div>}
       {shown.map(comment => (
         <article key={comment.id} className={`sf-cm-card${comment.resolved ? ' is-resolved' : ''}`}>
