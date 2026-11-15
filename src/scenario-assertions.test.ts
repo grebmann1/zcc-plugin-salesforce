@@ -1,11 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { actionEvidence } from '../lib/agentforce-trace.js';
-import { extraAssertions, parseExtraAssertions } from '../lib/scenario-assertions.js';
+import { extraAssertions, parseExtraAssertions, parseRuntimePrerequisites, runtimePrerequisiteLabels } from '../lib/scenario-assertions.js';
 import type { ActionAssertion, TraceStep } from '../lib/studio-contract.js';
 
 const check: ActionAssertion = { action: 'Lookup', side: 'output', field: 'status', operator: 'equals', value: 'Found' };
 const action = (value: unknown): TraceStep => ({ kind: 'action', label: 'Lookup', actionEvidence: { input: {}, output: actionEvidence(value) } });
 describe('scenario evidence assertions', () => {
+  it('describes runtime requirements with exact typed values in both detail readers', () => {
+    expect(runtimePrerequisiteLabels(undefined)).toEqual([]);
+    expect(runtimePrerequisiteLabels({ stateChecks: [{ variable: 'ready', value: false }, { variable: 'count', value: 0 }] })).toEqual(['Final ready equals false', 'Final count equals 0']);
+    expect(runtimePrerequisiteLabels({ actionChecks: [check] })).toEqual(['Lookup output.status equals "Found"']);
+  });
+  it('strictly validates runtime setup without coercing typed values or dropping bad checks', () => {
+    const checks = { stateChecks: [{ variable: 'ready', value: false }, { variable: 'count', value: 0 }], actionChecks: [check] };
+    expect(parseRuntimePrerequisites(checks)).toEqual(checks);
+    for (const value of [null, [], {}, { stateChecks: [] }, { maxLatencyMs: 100 }, { actionChecks: [null] }, { stateChecks: [{ variable: 'ready', value: {} }] }]) expect(() => parseRuntimePrerequisites(value)).toThrow();
+  });
   it('preserves valid checks and rejects malformed requests rather than dropping expectations', () => {
     expect(parseExtraAssertions({})).toEqual({});
     expect(parseExtraAssertions({ maxLatencyMs: 1000, actionChecks: [check] })).toEqual({ maxLatencyMs: 1000, actionChecks: [check] });

@@ -379,8 +379,23 @@ it('imports bounded text into an editable draft and rejects oversized files', as
   fireEvent.change(upload, { target: { files: [{ name: 'plan.md', size: 8, text: async () => 'A plan' }] } }); await screen.findByLabelText('Content'); expect((screen.getByLabelText('File name') as HTMLInputElement).value).toBe('plan.md'); fireEvent.click(x.button('Cancel'));
   fireEvent.change(screen.getByLabelText('Import text file'), { target: { files: [{ name: 'bad.md', size: 2, text: async () => { throw Error('Cannot read'); } }] } }); await screen.findByText('Cannot read');
 });
-it('does not store reports beyond the server limit', async () => {
-  suites[0].lastResults!.a.reply = 'x'.repeat(50001); const x = setup('artifacts'); await x.ready(); fireEvent.click(x.button('Save evaluation report')); await screen.findByText('This report exceeds the 50000 character file limit.'); expect(resources.artifacts).toEqual([]);
+it('partitions large reports atomically and preserves complete results in every part', async () => {
+  for (const result of Object.values(suites[0].lastResults!)) result.conversation = [{ role: 'agent', message: 'full evidence '.repeat(1900) }];
+  const x = setup('artifacts'); await x.ready(); fireEvent.click(x.button('Save evaluation report'));
+  await screen.findByText(/Evaluation report saved in/);
+  expect(resources.artifacts.length).toBeGreaterThan(1);
+  expect(resources.artifacts.every(part => part.content.length <= 50000)).toBe(true);
+  expect(resources.artifacts.flatMap(part => JSON.parse(part.content))).toHaveLength(2);
+});
+it('offers a full download when one result exceeds the workspace limit', async () => {
+  suites[0].lastResults!.a.reply = 'x'.repeat(50001); const x = setup('artifacts'); await x.ready(); fireEvent.click(x.button('Save evaluation report')); await screen.findByText(/A result exceeds the workspace file limit/); expect(resources.artifacts).toEqual([]);
+  expect(x.button('Download evaluation report')).toBeTruthy();
+});
+it('does not partially save when there are too few artifact slots for all report parts', async () => {
+  resources.artifacts = Array.from({ length: 29 }, (_, i) => ({ id: `file-${i}`, name: `File ${i}`, content: '' }));
+  for (const result of Object.values(suites[0].lastResults!)) result.reply = 'x'.repeat(26000);
+  const x = setup('artifacts'); await x.ready(); fireEvent.click(x.button('Save evaluation report'));
+  await screen.findByText(/insufficient room/); expect(resources.artifacts).toHaveLength(29);
 });
 
 it('applies editor and sharing preferences through the parent callbacks', async () => {

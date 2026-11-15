@@ -6,6 +6,14 @@ const expectAll = { topic: 'Quotes', actions: ['Price', 'Submit'], contains: ['q
 const at = { runId: 'r', at: 1 };
 
 describe('caseChecks', () => {
+  it('suspends dependent checks when runtime setup is blocked but exposes forbidden actions', () => {
+    const checks = caseChecks({ ...expectAll, forbiddenActions: ['Delete'] }, { ...at, outcome: 'fail', setupBlocked: true, conversation: [{ role: 'agent', message: 'No edits allowed' }], observed: { traced: true, traceComplete: true, topics: ['Quotes'], actions: ['Delete'] }, assertions: [{ label: 'Setup: status equals Draft', outcome: 'inconclusive', actual: 'Approved' }] });
+    expect(checks.find(c => c.kind === 'action')).toMatchObject({ state: 'na', actual: 'Required runtime setup was not established' });
+    expect(checks.find(c => c.kind === 'contains')?.state).toBe('na');
+    expect(checks.find(c => c.kind === 'forbidden')).toMatchObject({ state: 'ko', actual: 'Called Delete' });
+    expect(checks.at(-1)).toMatchObject({ expected: 'Setup: status equals Draft', actual: 'Approved', state: 'na' });
+    expect(caseChecks({ forbiddenActions: ['Delete'] }, { ...at, outcome: 'fail', setupBlocked: true, notes: ['Forbidden action "Delete" called.'], observed: { traced: true, actions: ['Other'], topics: [] } })[0]).toMatchObject({ state: 'ko', actual: 'Called Delete' });
+  });
   it('marks every check not run without a result', () => {
     expect(caseChecks(expectAll).map(c => [c.kind, c.state, c.actual])).toEqual([
       ['topic', 'na', 'Not run'], ['action', 'na', 'Not run'], ['action', 'na', 'Not run'], ['contains', 'na', 'Not run'], ['criteria', 'na', 'Not run']

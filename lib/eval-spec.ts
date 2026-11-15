@@ -32,7 +32,7 @@ function outcomeText(expect: ScenarioCase['expect']): string {
  */
 export function suiteToEvalSpec(cases: readonly ScenarioCase[], meta: { apiName: string; name: string; from: string }, replay: Record<string, ConversationMessage[]> = {}): { text: string; multiTurn: string[] } {
   if (cases.some(c => c.contextVariables?.length)) throw new EvalSpecError('This suite uses preview context overrides. Run it with Simulate; exporting to an org evaluation spec would lose those values.');
-  if (cases.some(c => c.expect.maxLatencyMs !== undefined || c.expect.actionChecks?.length || c.expect.forbiddenActions?.length || c.expect.stateChecks?.length)) throw new EvalSpecError('Latency and action-field assertions, forbidden actions and final-state checks currently run in Simulate. Org export would lose those checks.');
+  if (cases.some(c => c.runtimePrerequisites || c.expect.maxLatencyMs !== undefined || c.expect.actionChecks?.length || c.expect.forbiddenActions?.length || c.expect.stateChecks?.length)) throw new EvalSpecError('Runtime setup, latency and action-field assertions, forbidden actions and final-state checks currently run in Simulate. Org export would lose those checks.');
   const lines = [
     `${GENERATED_SPEC_MARKER} from ${meta.from}. Edits here are overwritten: change the scenario suite instead.`,
     `name: ${quote(meta.name)}`,

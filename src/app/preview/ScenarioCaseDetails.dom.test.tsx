@@ -58,6 +58,12 @@ it('shows unrun inputs and never loads a recording for a case without results', 
   expect(screen.getByText('Run this case to record a conversation.')).toBeTruthy();
   expect(screen.getByText('Actual: Not run')).toBeTruthy();
 });
+it('shows runtime setup requirements before a case runs, preserving false and action output values', () => {
+  setup({ result: undefined, scenario: { ...scenario, runtimePrerequisites: { actionChecks: [{ action: 'Lookup', side: 'output', field: 'status', operator: 'equals', value: 'Draft' }], stateChecks: [{ variable: 'ready', value: false }] } } });
+  expect(screen.getByText('Runtime setup requirements')).toBeTruthy();
+  expect(screen.getByText('Lookup output.status equals "Draft"')).toBeTruthy();
+  expect(screen.getByText('Final ready equals false')).toBeTruthy();
+});
 it.each([new Error('Offline'), 'Offline'])('handles recording rejection: %s', async error => {
   setup({}, () => { throw error; });
   await screen.findByText(/Offline.*saved evidence only/);

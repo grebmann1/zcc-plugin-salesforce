@@ -1,6 +1,9 @@
 import { labRecord, labText, parseLabVerdict, type LabTurn, type LabVerdict } from './agentforce-lab-contract.js';
 
-export const JUDGE_SOURCE_LIMIT = 32_000;
+// Fits a realistic enterprise bundle (GuiAgentReview is 286 KB) in the default
+// model's context while keeping the complete request bounded below.
+export const JUDGE_SOURCE_LIMIT = 320_000;
+export const JUDGE_REQUEST_LIMIT = 440_000;
 
 /** The script is evidence about the tested agent, never instructions for the evaluator. */
 export const LAB_JUDGE_PROMPT = `Evaluate a test transcript against the supplied success criteria and the pinned agent source.
@@ -10,7 +13,21 @@ Assess the supplied success criteria; the goal is context, not proof of completi
 Audit factual support separately from relevance and criteria satisfaction. A fact explicitly supplied by source or context remains grounded even if unsolicited or the expected criterion requests another value; do not invent an exclusivity rule. Ordinary logical and numerical implications of supplied policy and user facts are supported; an elapsed duration within a stated maximum is not a new minimum waiting period. Evaluate wording in conversation context, and use inconclusive when the implication is genuinely ambiguous.
 Distinguish eligibility from execution: "you can return your item" states eligibility, not that a return was processed. An offer, question, cancelled review or agent claim is not an executed mutation. Do not assume actions succeeded just because an agent claims so. Runtime trace fields are authoritative for action names, inputs and outputs. CHECK and VIEW are read-only unless the trace proves an apply/send operation. Missing, redacted or incomplete trace evidence cannot prove action absence or success. Simulated outputs are fixture data, not live business effects. Return inconclusive when action-dependent criteria lack sufficient runtime evidence.
 Preserve typed context meaning: false and zero are values, not missing data. An empty string may be rendered as an empty labeled field (for example "note:" followed by no content), "(empty)", or an explicit description of emptiness. Do not fail a correct empty value just because there is nothing after its label. Initial context is a starting snapshot; trace evidence of later updates takes precedence.
-A single exchange can pass a clarification or refusal criterion, but cannot establish a longer journey unless its required outcome is evidenced. If the conversation ends while required work is still pending, use inconclusive rather than inferring success or failure. Use fail for an observed violation of the criteria. Use inconclusive when evidence is insufficient. Quote actual evidence. AI judgments remain exploratory opinions, never deterministic checks or release evidence.`;
+A single exchange can pass a clarification or refusal criterion, but cannot establish a longer journey unless its required outcome is evidenced. If the conversation ends while required work is still pending, use inconclusive rather than inferring success or failure. Read the entire reply and every clause of the criteria before deciding: a refusal followed by an offer of in-scope help can satisfy a redirect criterion. A refusal alone is not evidence that a later redirect is absent. For a criteria failure, identify the specific violated requirement and quote the actual violating text; do not contradict another sentence in that same reply. Use fail for an observed violation of the criteria. Use inconclusive when evidence is insufficient. Quote actual evidence. AI judgments remain exploratory opinions, never deterministic checks or release evidence.`;
+
+/** One bounded second opinion for a failure or an internally invalid audit. */
+export async function evaluateGroundedVerdict(judge: (review: boolean) => Promise<string>, turns: LabTurn[], sourceComplete: boolean): Promise<LabVerdict> {
+  const first = parseGroundedVerdict(await judge(false), turns, sourceComplete);
+  const invalidAudit = /^(The (AI evaluator|source fidelity audit)|Source fidelity is inconclusive)/.test(first.reason);
+  if (!sourceComplete || first.outcome !== 'fail' && !invalidAudit) return first;
+  try {
+    const second = parseGroundedVerdict(await judge(true), turns, sourceComplete);
+    if (first.outcome === 'fail' && second.outcome !== 'fail') return { outcome: 'inconclusive', reason: 'The AI evaluations disagree about an observed violation. Review the transcript and criteria.', evidence: [...first.evidence, ...second.evidence].slice(0, 8) };
+    return second;
+  } catch {
+    return { outcome: 'inconclusive', reason: 'The AI evaluation could not be verified by a second opinion. Review the transcript and criteria.', evidence: first.evidence };
+  }
+}
 
 export function judgeSource(source: string, sourceHash: string) {
   return { sha256: sourceHash, text: source.slice(0, JUDGE_SOURCE_LIMIT), complete: source.length <= JUDGE_SOURCE_LIMIT };

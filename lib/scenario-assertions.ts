@@ -34,6 +34,17 @@ export function parseExtraAssertions(value: unknown): Pick<ScenarioCase['expect'
 
 export const actionCheckLabel = (c: ActionAssertion) => `${c.action} ${c.side}.${c.field} ${c.operator} ${JSON.stringify(c.value)}`;
 
+export function parseRuntimePrerequisites(value: unknown): NonNullable<ScenarioCase['runtimePrerequisites']> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key !== 'actionChecks' && key !== 'stateChecks')) throw Error('Runtime prerequisites need actionChecks or stateChecks.');
+  const checks = parseExtraAssertions(value);
+  if (!checks.actionChecks?.length && !checks.stateChecks?.length) throw Error('Runtime prerequisites need at least one check.');
+  return checks;
+}
+
+export function runtimePrerequisiteLabels(checks: ScenarioCase['runtimePrerequisites']): string[] {
+  return [...(checks?.actionChecks?.map(actionCheckLabel) ?? []), ...(checks?.stateChecks?.map(stateCheckLabel) ?? [])];
+}
+
 /** Every invocation must satisfy a check. Redacted, absent or truncated evidence is inconclusive. */
 export function extraAssertions(expect: ScenarioCase['expect'], steps: TraceStep[], latencies: Array<number | undefined>, completeTrace = true): AssertionResult[] {
   const results: AssertionResult[] = [];

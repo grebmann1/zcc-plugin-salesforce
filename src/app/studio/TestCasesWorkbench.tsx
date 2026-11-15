@@ -5,6 +5,7 @@ import type { CaseOutcome, CaseResult, ScenarioCase, SuiteEval, SuiteProgress } 
 import { caseChecks, failureReason } from '../../../lib/case-checks.js';
 import { TEST_CASES_STYLES } from './test-cases-styles.js';
 import { ConversationScope } from './ConversationScope.js';
+import { runtimePrerequisiteLabels } from '../../../lib/scenario-assertions.js';
 import { useStudioSplit } from './StudioResize.js';
 
 export type CaseStatus = CaseOutcome | 'stopped' | 'not-run' | 'setup' | 'running' | 'queued';
@@ -14,7 +15,7 @@ const SYMBOL: Record<CaseStatus, string> = { pass: '✓', fail: '✕', inconclus
 
 export function caseStatus(result?: CaseResult): CaseStatus {
   if (!result) return 'not-run';
-  if (result.setupBlocked) return 'setup';
+  if (result.setupBlocked && result.outcome !== 'fail') return 'setup';
   // Older saved attempts predate the explicit cancellation flag. Match only
   // the known AbortError text, not arbitrary transport or evaluation failures.
   if (result.stopped || result.outcome === 'inconclusive' && result.notes?.some(note => /^This operation was aborted\.?$/.test(note))) return 'stopped';
@@ -144,11 +145,12 @@ export function TestCasesWorkbench(props: Props) {
         <div ref={content} className="sf-cases-content" id={`${prefix}-content`} role="tabpanel" aria-labelledby={`${prefix}-${tab}`} tabIndex={0}>
           {tab === 'Variables' && props.renderVariables?.(selected)}
           {selected.prerequisites?.length ? <div className="sf-cases-callout"><strong>Setup required</strong><p>{selected.prerequisites.join('; ')}</p><label><input type="checkbox" checked={prepared.includes(selected.id)} onChange={e => props.onPreparedChange(selected.id, e.target.checked)} /> I prepared this case for this session</label><p className="sf-tp-sub">Message replay does not submit forms or complete asynchronous work. Simulated results do not prove live delivery.</p></div> : null}
+          {selected.runtimePrerequisites && <div className="sf-cases-callout"><strong>Runtime setup requirements</strong><ul>{runtimePrerequisiteLabels(selected.runtimePrerequisites).map(label => <li key={label}>{label}</li>)}</ul><p>Unmet setup leaves dependent expectations unassessed. Observed forbidden actions still fail.</p></div>}
           {tab === 'Result' && <>
             {status === 'stopped' ? <div className="sf-cases-callout is-stopped"><strong>This case was stopped</strong><p>You stopped the run before this case finished. There is no verdict for this attempt.</p></div>
               : pending ? <div className="sf-cases-callout"><strong>{status === 'running' ? 'This case is running' : 'Waiting to run'}</strong><p>The result will appear here when this attempt finishes.</p></div>
               : !evidence ? <div className="sf-cases-callout"><strong>This case has not run yet</strong><p>Run this case to see the agent’s reply and its assessment.</p></div>
-              : <><div className={`sf-cases-callout is-${status}`}><strong>{LABEL[status]}</strong><p>{status === 'fail' && reason ? reason : status === 'inconclusive' ? reason || 'There was not enough evidence to reach a verdict. Review the checks or run this case again.' : status === 'setup' ? 'Prepare the required context before replaying this case.' : 'The recorded response met this case’s expectations.'}</p></div>
+              : <><div className={`sf-cases-callout is-${status}`}><strong>{LABEL[status]}</strong><p>{status === 'fail' && reason ? reason : status === 'inconclusive' ? reason || 'There was not enough evidence to reach a verdict. Review the checks or run this case again.' : status === 'setup' ? reason || 'Prepare the required context before replaying this case.' : 'The recorded response met this case’s expectations.'}</p></div>
                 {coverage}
                 {assessment.length > 0 && <><h4>Assessment</h4><ul className="sf-cases-checks">{assessment.map(check => <li key={`${check.kind}:${check.target}`}><span className={`sf-cases-check-mark is-${check.state}`} aria-label={check.state === 'ok' ? 'Passed' : check.state === 'ko' ? 'Failed' : 'Not assessed'}>{check.state === 'ok' ? '✓' : check.state === 'ko' ? '✕' : '–'}</span><div><strong>AI assessment</strong>{!summarized(check.actual) && <p>{check.actual}</p>}{evidence.judgeEvidence?.length ? <ul aria-label="AI assessment evidence">{evidence.judgeEvidence.map((item, index) => <li key={index}>{item}</li>)}</ul> : null}</div></li>)}</ul></>}
                 {evidence.reply && <><h4>Agent reply</h4><p className="sf-cases-message">{evidence.reply}</p></>}

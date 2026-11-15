@@ -4,6 +4,7 @@ import type { LabSnapshot, LabTurn } from '../../../lib/agentforce-lab-contract.
 import { STUDIO_RPC, type CaseResult, type ScenarioCase, type TurnTrace } from '../../../lib/studio-contract.js';
 import { caseChecks } from '../../../lib/case-checks.js';
 import { TracePanel } from './TracePanel.js';
+import { runtimePrerequisiteLabels } from '../../../lib/scenario-assertions.js';
 
 export const SCENARIO_DETAIL_STYLES = `
 .sf-case-detail { min-width:0; color:var(--sf-text); font-size:12px; user-select:text; -webkit-user-select:text; }
@@ -79,6 +80,7 @@ export function ScenarioCaseDetails({ pluginId, projectId, scenario, result, onC
     <div className="sf-case-detail-head"><h3>{scenario.name}</h3><button type="button" autoFocus onClick={onClose}>Close details</button></div>
     <p><strong>{result ? { pass: 'Passed', fail: 'Failed', inconclusive: 'Inconclusive' }[result.outcome] : 'Not run'}</strong></p>
     {scenario.prerequisites?.length ? <><h4>Setup required</h4><ul>{scenario.prerequisites.map((text, i) => <li key={i}>{text}</li>)}</ul></> : null}
+    {scenario.runtimePrerequisites && <><h4>Runtime setup requirements</h4><ul>{runtimePrerequisiteLabels(scenario.runtimePrerequisites).map(label => <li key={label}>{label}</li>)}</ul></>}
     <h4>Case inputs</h4><ol>{scenario.utterances.map((text, i) => <li key={i}>{text}</li>)}</ol>
     <h4>Expected vs actual</h4>
     {checks.length ? checks.map((check, i) => <div key={i} className={`sf-case-check is-${check.state}`}>
