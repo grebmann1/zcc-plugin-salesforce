@@ -4839,8 +4839,9 @@ test('Studio demo fixes: complete large-source judging, runtime setup and multip
   const destination = join(home, 'complete-evaluation.json');
   await nativeWindow.evaluate((win, destination) => { win.webContents.session.once('will-download', (_event, item) => item.setSavePath(destination)); }, destination);
   await files.getByRole('button', { name: 'Download evaluation report', exact: true }).click();
-  await expect.poll(() => existsSync(destination)).toBe(true);
-  expect(JSON.parse(readFileSync(destination, 'utf8'))).toEqual(exported);
+  await expect.poll(() => {
+    try { return JSON.parse(readFileSync(destination, 'utf8')); } catch { return null; }
+  }).toEqual(exported);
 });
 
 test('Q4 tool workflows: evaluate, replay, investigate, edit resources, import and download', async ({ app, home }, testInfo) => {
