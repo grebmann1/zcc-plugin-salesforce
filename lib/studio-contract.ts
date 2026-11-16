@@ -47,6 +47,8 @@ export interface TurnTrace { runId: string; turn: number; planId?: string; avail
 export interface ScenarioCase {
   /** External forms, initial records or async completion that message replay cannot create. */
   prerequisites?: string[];
+  /** Runtime fixture requirements, checked from trace evidence before dependent expectations. */
+  runtimePrerequisites?: { actionChecks?: ActionAssertion[]; stateChecks?: StateAssertion[] };
   contextVariables?: import('./preview-context.js').PreviewContextVariable[];
   id: string; name: string; utterances: string[]; expect: { topic?: string; actions?: string[]; forbiddenActions?: string[]; contains?: string[]; criteria?: string; maxLatencyMs?: number; actionChecks?: ActionAssertion[]; stateChecks?: StateAssertion[] };
   /** Set when the case was pinned from a Preview conversation. */

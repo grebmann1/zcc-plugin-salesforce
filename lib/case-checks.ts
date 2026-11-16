@@ -34,7 +34,7 @@ export function caseChecks(expect: ScenarioCase['expect'], result?: CaseResult):
   for (const action of expect.actions ?? []) checks.push({ kind: 'action', target: action, expected: `Calls ${action}`, ...reached('action', action, result) });
   for (const action of expect.forbiddenActions ?? []) {
     const seen = result?.observed?.actions ?? [];
-    const called = action === '*' ? seen.length > 0 : seen.includes(action);
+    const called = (action === '*' ? seen.length > 0 : seen.includes(action)) || Boolean(result?.notes?.includes(`Forbidden action "${action}" called.`));
     checks.push({ kind: 'forbidden', target: action, expected: `Never calls ${action}`, actual: !result ? 'Not run' : called ? `Called ${action === '*' ? seen.join(', ') : action}` : result.observed?.traced && result.observed.traceComplete === true ? 'Not called' : 'Complete runtime trace unavailable', state: called ? 'ko' : result?.observed?.traced && result.observed.traceComplete === true ? 'ok' : 'na' });
   }
   for (const text of expect.contains ?? []) {
@@ -57,7 +57,8 @@ export function caseChecks(expect: ScenarioCase['expect'], result?: CaseResult):
     const evidence = result?.assertions?.find(a => a.label === label);
     checks.push({ kind: 'assertion', target: label, expected: label, actual: evidence?.actual ?? (result ? 'Not recorded' : 'Not run'), state: evidence ? STATE[evidence.outcome] : 'na' });
   }
-  return checks;
+  for (const evidence of result?.assertions?.filter(check => check.label.startsWith('Setup: ')) ?? []) checks.push({ kind: 'assertion', target: evidence.label, expected: evidence.label, actual: evidence.actual, state: 'na' });
+  return result?.setupBlocked ? checks.map(check => check.kind === 'forbidden' || check.target.startsWith('Setup: ') ? check : { ...check, actual: 'Required runtime setup was not established', state: 'na' }) : checks;
 }
 
 /** Why a run did not pass, in one line: judge notes first, the AI reason labelled. */

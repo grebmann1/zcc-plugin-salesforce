@@ -14,6 +14,7 @@ import { BUILDER_TOOL_CATALOG } from './builder-tool-catalog.js';
 import type { AgentScriptTool } from '../AgentScriptTools.js';
 import { StudioToolHeader } from './StudioToolHeader.js';
 import { readComparisonHandle, writeComparisonHandle, forgetComparisonHandle } from './comparison-recovery.js';
+import { evaluationReportParts } from '../../../lib/evaluation-report.js';
 
 export interface EditorPreferences { lines: boolean; wrap: boolean }
 export interface BuilderToolsProps {
@@ -30,6 +31,10 @@ type Reply = { ok?: boolean; error?: string; resources?: BuilderResources; suite
 const failure = (value: unknown) => value instanceof Error ? value.message : String(value);
 const stamp = (at?: number) => at ? new Date(at).toLocaleString() : 'Time unavailable';
 const id = () => crypto.randomUUID();
+function downloadReport(name: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = name.replace(/[\\/]/g, '_'); link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 interface ComparisonRun {
   suiteId: string; suitePath: string; source: string; cases: string; setupKey: string; caseDefinitions: ScenarioCase[];
@@ -390,15 +395,22 @@ export function BuilderTools(props: BuilderToolsProps) {
       if (saved) { setCreating(false); setNotice(artifact.id ? 'File updated in this project’s workspace.' : 'File saved to this project’s workspace.'); }
     }}><fieldset className="sf-builder-form-fields" disabled={data.saving}><label>File name<input autoFocus required maxLength={120} value={artifact.name} onChange={e => setArtifact({ ...artifact, name: e.target.value })} /></label><label>Content<textarea aria-label="Content" rows={16} maxLength={BUILDER_LIMITS.content} value={artifact.content} onChange={e => setArtifact({ ...artifact, content: e.target.value })} /></label><p className="sf-builder-note">{artifact.content.length.toLocaleString()} / {BUILDER_LIMITS.content.toLocaleString()} characters</p></fieldset></form> : chosen ? <>
       <pre className="sf-builder-file">{chosen.content || 'This file is empty.'}</pre><div className="sf-builder-filters"><button onClick={() => {
-        const url = URL.createObjectURL(new Blob([chosen.content], { type: 'text/plain;charset=utf-8' }));
-        const link = document.createElement('a'); link.href = url; link.download = chosen.name.replace(/[\\/]/g, '_'); link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        downloadReport(chosen.name, chosen.content);
       }}><Download size={14} aria-hidden="true" />Download file</button><button onClick={() => onAskAgent(`Review this project workspace file, ${chosen.name}:\n${chosen.content.slice(0, 10000)}`)}>Discuss with Assistant</button></div>
     </> : <>
       <div className="sf-builder-filters"><label className="sf-builder-upload" aria-disabled={!data.canSave || data.resources.artifacts.length >= BUILDER_LIMITS.artifacts}><span>Import text file</span><input type="file" accept=".txt,.md,.json,.yaml,.yml,.csv" disabled={!data.canSave || data.resources.artifacts.length >= BUILDER_LIMITS.artifacts} onChange={async e => {
         const file = e.target.files?.[0]; e.target.value = ''; if (!file) return; begin();
         if (file.size > BUILDER_LIMITS.content) { data.setError('Choose a text file smaller than 50 KB.'); return; }
         try { const content = await file.text(); if (mounted.current) { setArtifact({ id: '', name: file.name, content }); setCreating(true); } } catch (err) { if (mounted.current) data.setError(failure(err)); }
-      }} /></label><button disabled={!data.canSave || !rows.length || data.resources.artifacts.length >= BUILDER_LIMITS.artifacts} onClick={async () => { if (await saveArtifact('Evaluation results.json', JSON.stringify(rows, null, 2))) setNotice('Evaluation report saved.'); }}>Save evaluation report</button></div>
+      }} /></label><button disabled={!data.canSave || !rows.length || data.resources.artifacts.length >= BUILDER_LIMITS.artifacts} onClick={async () => {
+        begin();
+        try {
+          const parts = evaluationReportParts(rows);
+          const resources = { ...data.resources, artifacts: [...data.resources.artifacts, ...parts.map(part => ({ ...part, id: id() }))] };
+          if (resources.artifacts.length > BUILDER_LIMITS.artifacts || JSON.stringify(resources).length > BUILDER_LIMITS.bytes) throw Error('The workspace has insufficient room for this report. Use Download evaluation report to keep its complete evidence.');
+          if (await data.save(resources)) setNotice(parts.length === 1 ? 'Evaluation report saved.' : `Evaluation report saved in ${parts.length} files. Each file contains complete results.`);
+        } catch (err) { data.setError(failure(err)); }
+      }}>Save evaluation report</button><button disabled={!rows.length} onClick={() => downloadReport('Evaluation results.json', JSON.stringify(rows, null, 2))}>Download evaluation report</button></div>
       <p className="sf-builder-note">Plans and reports saved with this project. AgentScript, Apex, and Flow source files remain in the explorer.</p>
       <div className="sf-builder-filters"><input type="search" aria-label="Search workspace files" placeholder="Search files…" value={query} onChange={e => setQuery(e.target.value)} /></div>{resultCount(matchingArtifacts.length, 'file')}
       <div className="sf-builder-list">{matchingArtifacts.map(row => <button className="sf-builder-row" key={row.id} data-resource-id={row.id} onClick={() => { begin(); setSelected(row.id); }}><span><strong>{row.name}</strong><small>{row.content.length.toLocaleString()} characters</small></span><span aria-hidden="true">→</span></button>)}</div>

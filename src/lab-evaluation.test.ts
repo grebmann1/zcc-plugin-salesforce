@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { JUDGE_SOURCE_LIMIT, LAB_JUDGE_PROMPT, judgeSource, parseGroundedVerdict } from '../lib/lab-evaluation.js';
+import { JUDGE_SOURCE_LIMIT, LAB_JUDGE_PROMPT, judgeSource, parseGroundedVerdict, evaluateGroundedVerdict } from '../lib/lab-evaluation.js';
 import type { LabTurn } from '../lib/agentforce-lab-contract.js';
 
 const turns: LabTurn[] = [{ role: 'user', text: 'Can I return this in store?' }, { role: 'agent', text: 'You can return your item. Bring it to our store.\nnote:\nverified: False\ncount: 0' }];
@@ -7,6 +7,31 @@ const audit = { outcome: 'pass', reason: 'All policy claims are supported.', uns
 const response = (grounding: unknown = audit, outcome = 'pass') => JSON.stringify({ outcome, reason: 'Eligibility explained.', evidence: ['You can return your item.'], grounding });
 
 describe('source-grounded exploratory evaluation', () => {
+  it('includes an entire enterprise-sized script, including policy near its end', () => {
+    const text = '#'.repeat(286_000) + '\nPolicy at the end';
+    expect(judgeSource(text, 'pinned')).toEqual({ text, complete: true, sha256: 'pinned' });
+  });
+  it('does not retain a false failure when an independent opinion finds a correct refusal and redirect', async () => {
+    const seen: LabTurn[] = [{ role: 'agent', text: "I cannot plan holidays, but I can help with BTnet quotes." }];
+    const calls: boolean[] = [];
+    const result = await evaluateGroundedVerdict(async review => { calls.push(review); return response(audit, review ? 'pass' : 'fail'); }, seen, true);
+    expect(calls).toEqual([false, true]); expect(result).toMatchObject({ outcome: 'inconclusive', reason: expect.stringContaining('disagree') });
+  });
+  it('keeps corroborated failures and retries invalid audits once without relaxing grounding', async () => {
+    expect((await evaluateGroundedVerdict(async () => response(audit, 'fail'), turns, true)).outcome).toBe('fail');
+    let count = 0;
+    expect((await evaluateGroundedVerdict(async () => response(++count === 1 ? { ...audit, outcome: 'fail' } : audit), turns, true)).outcome).toBe('pass');
+    expect(count).toBe(2);
+    count = 0;
+    expect((await evaluateGroundedVerdict(async () => { count++; return response({ ...audit, outcome: 'fail' }); }, turns, true)).outcome).toBe('inconclusive');
+    expect(count).toBe(2);
+  });
+  it('bounds second opinions, handles their errors and never retries incomplete source or valid passes', async () => {
+    for (const [outcome, complete] of [['pass', true], ['fail', false]] as const) {
+      let count = 0; await evaluateGroundedVerdict(async () => { count++; return response(audit, outcome); }, turns, complete); expect(count).toBe(1);
+    }
+    expect((await evaluateGroundedVerdict(async review => { if (review) throw Error('offline'); return response(audit, 'fail'); }, turns, true))).toMatchObject({ outcome: 'inconclusive', reason: expect.stringContaining('could not be verified') });
+  });
   it('retains valid pass and fail opinions without replacing deterministic checks', () => {
     expect(parseGroundedVerdict(response(), turns, true)).toMatchObject({ outcome: 'pass', reason: 'Eligibility explained.' });
     expect(parseGroundedVerdict(response(audit, 'fail'), turns, true)).toMatchObject({ outcome: 'fail', reason: 'Eligibility explained.' });

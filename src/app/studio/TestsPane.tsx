@@ -5,7 +5,7 @@ import { callPluginRpc, experimental_requestApproval, useRealtime } from '@zana-
 import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type CaseOutcome, type CaseResult, type ScenarioCase, type ScenarioSuite } from '../../../lib/studio-contract.js';
 import { agentSuitePath } from '../../../lib/graph-coverage.js';
 import { referenceVisible } from './useReferenceRefresh.js';
-import { parseExtraAssertions, actionCheckLabel, stateCheckLabel } from '../../../lib/scenario-assertions.js';
+import { parseExtraAssertions, parseRuntimePrerequisites, actionCheckLabel, stateCheckLabel } from '../../../lib/scenario-assertions.js';
 import { SuiteComparisonView } from './SuiteComparisonView.js';
 import type { SuiteComparison } from '../../../lib/studio-contract.js';
 import { TestCasesWorkbench, caseStatus, type CaseFilter } from './TestCasesWorkbench.js';
@@ -445,13 +445,17 @@ export function TestsPane(props: TestsPaneProps) {
     const name = field('name');
     const utterances = field('utterances').split('\n').map(line => line.trim()).filter(Boolean);
     if (!name || !utterances.length) { setNotice({ tone: 'error', text: 'A case needs a name and at least one utterance.' }); return; }
-    let extras: ReturnType<typeof parseExtraAssertions>;
-    try { extras = parseExtraAssertions({ ...(field('latency') ? { maxLatencyMs: Number(field('latency')) } : {}), ...(field('actionChecks') ? { actionChecks: JSON.parse(field('actionChecks')) } : {}), ...(field('stateChecks') ? { stateChecks: JSON.parse(field('stateChecks')) } : {}) }); }
+    let extras: ReturnType<typeof parseExtraAssertions>, runtimePrerequisites: ScenarioCase['runtimePrerequisites'];
+    try {
+      extras = parseExtraAssertions({ ...(field('latency') ? { maxLatencyMs: Number(field('latency')) } : {}), ...(field('actionChecks') ? { actionChecks: JSON.parse(field('actionChecks')) } : {}), ...(field('stateChecks') ? { stateChecks: JSON.parse(field('stateChecks')) } : {}) });
+      if (field('runtimePrerequisites')) runtimePrerequisites = parseRuntimePrerequisites(JSON.parse(field('runtimePrerequisites')));
+    }
     catch (error) { setNotice({ tone: 'error', text: error instanceof Error ? error.message : String(error) }); return; }
     const existing = suite?.cases ?? [];
     const next: ScenarioCase = {
       id: uniqueId(name, new Set(existing.map(c => c.id))), name, utterances,
       ...(field('prerequisites') ? { prerequisites: field('prerequisites').split('\n').map(s => s.trim()).filter(Boolean) } : {}),
+      ...(runtimePrerequisites ? { runtimePrerequisites } : {}),
       expect: {
         ...extras,
         ...(field('topic') ? { topic: field('topic') } : {}),
@@ -622,6 +626,8 @@ export function TestsPane(props: TestsPaneProps) {
           <label>Maximum response latency (ms)<input name="latency" type="number" min={1} max={300000} /></label>
           <label className="is-wide">Action field checks (JSON)<textarea name="actionChecks" rows={2} maxLength={8000} placeholder={'[{"action":"LookupOrder","side":"output","field":"status","operator":"equals","value":"Found"}]'} /></label>
           <label className="is-wide">Final state checks (JSON)<textarea name="stateChecks" rows={2} maxLength={8000} placeholder={'[{"variable":"orderExists","value":false}]'} /></label>
+          <label className="is-wide">Runtime setup checks (JSON)<textarea name="runtimePrerequisites" rows={2} maxLength={16000} placeholder={'{"stateChecks":[{"variable":"quote_status","value":"Draft"}]}'} /></label>
+          <p className="is-wide sf-tp-foot">Runtime setup checks verify fixture action outputs or final state. Unmet or missing setup makes dependent checks Unclear. Observed forbidden actions still fail.</p>
           <p className="is-wide sf-tp-foot">Action checks use equals, contains, less_than or greater_than. Missing or private evidence is Unclear. Latency and field checks run in Simulate.</p>
           <label className="is-wide">Criteria for the AI judge<input name="criteria" maxLength={4000} /></label>
           <div className="sf-tp-bar is-wide"><button type="submit" className="sf-tp-btn is-primary" disabled={running}>Add case</button>

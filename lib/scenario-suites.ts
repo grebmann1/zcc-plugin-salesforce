@@ -14,7 +14,7 @@ import { AgentFilesError, sha256Hex } from './agent-files.js';
 import { resolveUnderRoot } from './dx-project.js';
 import { agentSuitePath } from './graph-coverage.js';
 import { EvalSpecError, GENERATED_SPEC_MARKER, evalSpecCases, suiteToEvalSpec } from './eval-spec.js';
-import { extraAssertions, parseExtraAssertions } from './scenario-assertions.js';
+import { extraAssertions, parseExtraAssertions, parseRuntimePrerequisites } from './scenario-assertions.js';
 import { parsePreviewContext } from './preview-context.js';
 import { FixLoopError, FixLoops, type FixLoop } from './fix-loop.js';
 import { STUDIO_CHANGED_CHANNEL, STUDIO_RPC, type CaseObserved, type CaseOutcome, type CaseResult, type ScenarioCase, type ScenarioSuite, type ScorerEvaluation, type SuiteComparison, type TraceStep, type SuiteEval, type SuiteProgress, type TurnTrace } from './studio-contract.js';
@@ -121,6 +121,7 @@ export function parseScenarioCase(value: unknown, index: number): ScenarioCase {
     id: text(row.id, 80).replace(/[^A-Za-z0-9_.-]/g, '_') || `case-${index + 1}`,
     ...(row.contextVariables !== undefined ? { contextVariables: parsePreviewContext(row.contextVariables) } : {}),
     ...(Array.isArray(row.prerequisites) && row.prerequisites.length ? { prerequisites: strings(row.prerequisites, 10, 500) } : {}),
+    ...(row.runtimePrerequisites !== undefined ? { runtimePrerequisites: parseRuntimePrerequisites(row.runtimePrerequisites) } : {}),
     name: text(row.name, 200) || `Case ${index + 1}`,
     utterances,
     expect: { ...(topic ? { topic } : {}), ...(actions.length ? { actions } : {}), ...(Array.isArray(expect.forbiddenActions) ? { forbiddenActions: strings(expect.forbiddenActions, 20, 200) } : {}), ...(contains.length ? { contains } : {}), ...(criteria ? { criteria } : {}), ...parseExtraAssertions(expect) },
@@ -314,7 +315,7 @@ export class ScenarioSuites {
   async writeSpec(input: { agentPath: string; apiName: string; source?: string }): Promise<{ suite: SuiteEntry; specPath: string; absolute: string; text: string; multiTurn: string[] }> {
     const suite = (await this.list(input.agentPath))[0];
     if (!suite) throw new AgentFilesError('not_found', 'This agent has no scenario suite yet. Add a case first.');
-    const unprepared = suite.cases.filter(c => c.prerequisites?.length && (!suite.lastResults?.[c.id] || suite.lastResults[c.id]!.setupBlocked || suite.lastResults[c.id]!.caseHash !== sha256Hex(JSON.stringify(c)) || input.source && suite.lastResults[c.id]!.sourceHash !== sha256Hex(input.source)));
+    const unprepared = suite.cases.filter(c => (c.prerequisites?.length || c.runtimePrerequisites) && (!suite.lastResults?.[c.id] || suite.lastResults[c.id]!.setupBlocked || suite.lastResults[c.id]!.caseHash !== sha256Hex(JSON.stringify(c)) || input.source && suite.lastResults[c.id]!.sourceHash !== sha256Hex(input.source)));
     if (unprepared.length) throw new AgentFilesError('invalid_input', `Prepare and run these cases in Simulate before exporting an org replay: ${unprepared.map(c => c.name).join(', ')}.`);
     const specPath = specPathForSuite(suite.path);
     const replay = Object.fromEntries(suite.cases.flatMap(c => {
@@ -501,6 +502,19 @@ export class ScenarioSuites {
           if (topic && !trace.truncated) topicByPlan.set(planId, topic);
           for (const step of trace.steps) { if (step.kind === 'topic') topics.add(step.label); if (step.kind === 'action') actions.add(step.label); }
         }
+      }
+      if (responses.some(t => !t.planId)) completeTrace = false;
+      const prerequisites = c.runtimePrerequisites ? extraAssertions(c.runtimePrerequisites, steps, [], completeTrace && traced) : [];
+      if (prerequisites.some(check => check.outcome !== 'pass')) {
+        detail.setupBlocked = true;
+        detail.observed = { topics: [...topics], actions: [...actions], traced, traceComplete: completeTrace && traced };
+        // Missing fixture support suspends dependent assertions, never an
+        // observed forbidden action. AI opinions cannot override this gate.
+        const safety = judgeCase({ forbiddenActions: c.expect.forbiddenActions }, { agentText: '', ...detail.observed });
+        detail.outcome = detail.deterministic = safety.outcome === 'fail' ? 'fail' : 'inconclusive';
+        detail.notes = [...safety.notes.filter(note => note.startsWith('Forbidden action')), ...prerequisites.filter(check => check.outcome !== 'pass').map(check => `Runtime setup required: ${check.label}: ${check.actual}`), ...safety.notes.filter(note => note !== 'No expectations to check.' && !note.startsWith('Forbidden action'))];
+        detail.assertions = prerequisites.map(check => ({ ...check, label: `Setup: ${check.label}`, outcome: 'inconclusive' }));
+        return detail;
       }
       let ai: { outcome: Outcome; reason: string } | undefined;
       if (c.expect.criteria) {

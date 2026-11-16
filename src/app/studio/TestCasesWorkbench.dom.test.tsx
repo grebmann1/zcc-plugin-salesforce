@@ -6,6 +6,10 @@ import { TestCasesWorkbench, caseStatus } from './TestCasesWorkbench.js';
 import type { CaseResult, ScenarioCase } from '../../../lib/studio-contract.js';
 
 afterEach(cleanup);
+it('keeps an observed safety failure visible even when runtime setup was blocked', () => {
+  expect(caseStatus({ outcome: 'fail', setupBlocked: true, runId: 'r', at: 1 })).toBe('fail');
+  expect(caseStatus({ outcome: 'inconclusive', setupBlocked: true, runId: 'r', at: 1 })).toBe('setup');
+});
 const cases: ScenarioCase[] = [
   { id: 'quote', name: 'Quote journey', utterances: ['Create a quote', 'MX75 please'], expect: { criteria: 'Ask for missing details.', topic: 'Quote_Creation', actions: ['ParseInput'] }, pinned: { runId: 'saved-1', at: 1 } },
   { id: 'billing', name: 'Billing stays in scope', utterances: ['Update billing'], expect: { forbiddenActions: ['*'] } },

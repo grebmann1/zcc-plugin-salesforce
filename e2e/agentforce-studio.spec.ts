@@ -4787,6 +4787,63 @@ test('Q4 Experiments: prerequisites, agent navigation, retained results, report 
   expect(errors).toEqual([]);
 });
 
+test('Studio demo fixes: complete large-source judging, runtime setup and multipart report download', async ({ app, home }) => {
+  test.setTimeout(240_000);
+  const page = app.window;
+  await page.setViewportSize({ width: 1680, height: 1050 });
+  const source = AGENT_SCRIPT_EXAMPLES[0].source + '\n# ' + 'x'.repeat(286000) + '\n# COMPLETE_POLICY_TAIL\n';
+  writeFileSync(join(home, 'dx/force-app/Large.agent'), source);
+  writeFileSync(join(home, 'preview-trace-fixture'), '1');
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(p => p.id === 'salesforce')?.status), { timeout: 30000 }).toMatch(/running|needs-configuration/);
+  const projectId = await page.evaluate(async path => { const added = await window.cc.projects.add(path); if (!added.ok) throw Error(added.message); return added.value.id; }, join(home, 'dx'));
+  await page.evaluate(async id => {
+    await window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' });
+    history.pushState({}, '', `/projects/${id}`); window.dispatchEvent(new PopStateEvent('popstate'));
+  }, projectId);
+  const rpc = (method: string, args: object = {}): Promise<any> => page.evaluate(({ projectId, method, args }) => window.cc.pluginApps.callRpc('salesforce', method, { projectId, ...args }), { projectId, method, args });
+  const started = await rpc('agentLab.start', { source, path: 'force-app/Large.agent', engine: 'preview', scenario: { persona: 'Customer', goal: 'Ask for an order number', opening: 'Find an order', criteria: 'Ask for an order number', maxTurns: 1 } });
+  expect(started).toMatchObject({ ok: true, data: { id: expect.any(String) } });
+  await rpc('agentLab.send', { id: started.data.id, text: 'Find an order' });
+  expect(await rpc('agentLab.evaluate', { id: started.data.id })).toMatchObject({ ok: true, data: { verdict: { outcome: 'pass' } } });
+  await rpc('agentLab.end', { id: started.data.id });
+  const requests = JSON.parse(readFileSync(join(home, 'sfap-requests.json'), 'utf8'));
+  const judged = requests.find((row: any) => row.path.endsWith('/chat-generations') && row.body.messages[0].content.startsWith('Evaluate'));
+  expect(JSON.parse(judged.body.messages[1].content).pinnedSource).toMatchObject({ text: source, complete: true });
+  const cases = [
+    { id: 'blocked', name: 'Editable quote fixture', utterances: ['Find an order'], runtimePrerequisites: { stateChecks: [{ variable: 'quote_status', value: 'Draft' }] }, expect: { actions: ['ApplyDiscount'], criteria: 'Apply the requested discount' } },
+    ...Array.from({ length: 16 }, (_, i) => ({ id: `long-${i}`, name: `Complete evidence ${i}`, utterances: ['Long response'], expect: { contains: ['Complete response'] } }))
+  ];
+  expect(await rpc('studio.suites.save', { agentPath: 'force-app/Large.agent', cases })).toMatchObject({ ok: true });
+  expect(await rpc('studio.suites.run', { agentPath: 'force-app/Large.agent' })).toMatchObject({ ok: true });
+  const savedSuite = (await rpc('studio.suites.list')).suites.find((s: any) => s.path === 'tests/Large.scenario.json');
+  expect(savedSuite.lastResults.blocked).toMatchObject({ outcome: 'inconclusive', setupBlocked: true });
+  await page.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await selectSalesforceSection(page.getByTestId('salesforce-workbench'), 'agentforce');
+  const studio = studioPanel(page);
+  await studio.getByTestId('salesforce-agent-script-file:force-app/Large.agent').click();
+  await openTool(studio, 'Evals');
+  const evals = sidePanel(page).getByTestId('studio-tests-pane');
+  await evals.getByTestId('tests-row-blocked').click();
+  await expect(evals).toContainText('Setup required');
+  await expect(evals).toContainText('Runtime setup required');
+  await openTool(studio, 'Files');
+  const files = sidePanel(page).getByTestId('studio-builder-artifacts');
+  await files.getByRole('button', { name: 'Save evaluation report', exact: true }).click();
+  await expect(files).toContainText('Each file contains complete results.');
+  const artifacts = (await rpc('studio.builder.get')).resources.artifacts;
+  expect(artifacts.length).toBeGreaterThan(1);
+  expect(artifacts.every((part: any) => part.content.length <= 50000)).toBe(true);
+  const exported = artifacts.flatMap((part: any) => JSON.parse(part.content));
+  expect(exported).toHaveLength(17);
+  const nativeWindow = await app.electron.browserWindow(page);
+  const destination = join(home, 'complete-evaluation.json');
+  await nativeWindow.evaluate((win, destination) => { win.webContents.session.once('will-download', (_event, item) => item.setSavePath(destination)); }, destination);
+  await files.getByRole('button', { name: 'Download evaluation report', exact: true }).click();
+  await expect.poll(() => {
+    try { return JSON.parse(readFileSync(destination, 'utf8')); } catch { return null; }
+  }).toEqual(exported);
+});
+
 test('Q4 tool workflows: evaluate, replay, investigate, edit resources, import and download', async ({ app, home }, testInfo) => {
   test.setTimeout(240_000);
   const page = app.window;

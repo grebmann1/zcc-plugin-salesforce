@@ -902,6 +902,42 @@ it('does not accept an AI pass as proof of an unobserved lookup, or partial trac
   expect(judgeCase({ forbiddenActions: ['*'] }, { ...seen, traceComplete: false }).outcome).toBe('fail');
 });
 
+describe('runtime fixture prerequisites', () => {
+  const runtimePrerequisites = { actionChecks: [{ action: 'CheckStatus', side: 'output' as const, field: 'status', operator: 'equals' as const, value: 'Draft' }] };
+  const c = { ...caseA, runtimePrerequisites, expect: { actions: ['ApplyDiscount'], forbiddenActions: ['DeleteQuote'], criteria: 'Apply a discount on an editable quote' } };
+  const make = async (steps: TurnTrace['steps'], complete = true) => {
+    const h = store();
+    await h.suites.save({ agentPath: 'A.agent', cases: [c] });
+    h.lab.trace.mockResolvedValue({ runId: 'r', turn: 1, available: true, truncated: !complete, steps });
+    return h;
+  };
+  const status = (value: string): TurnTrace['steps'][number] => ({ kind: 'action', label: 'CheckStatus', actionEvidence: { input: {}, output: { status: value } } });
+  const input = { path: 'tests/A.scenario.json', source: 'source', engine: 'preview' as const };
+  it.each([[], [status('Approved')], [status('Draft'), status('Approved')]].map(steps => ({ steps })))('marks unmet or unavailable fixture setup unclear, without invoking the AI judge: $steps', async ({ steps }) => {
+    const h = await make(steps);
+    const run = await h.suites.run(input);
+    expect(run.results.refund).toMatchObject({ outcome: 'inconclusive', deterministic: 'inconclusive', setupBlocked: true, assertions: [{ outcome: 'inconclusive' }] });
+    expect(run.results.refund.notes![0]).toContain('Runtime setup required');
+    expect(h.lab.evaluate).not.toHaveBeenCalled(); expect(h.lab.end).toHaveBeenCalledOnce();
+    await expect(h.suites.writeSpec({ agentPath: 'A.agent', apiName: 'A', source: 'source' })).rejects.toThrow();
+  });
+  it('does not accept partial traces as proof of fixture setup', async () => {
+    const h = await make([status('Draft')], false);
+    expect((await h.suites.run(input)).results.refund).toMatchObject({ setupBlocked: true, outcome: 'inconclusive' });
+  });
+  it('still fails observed forbidden actions when setup is missing', async () => {
+    const h = await make([status('Approved'), { kind: 'action', label: 'DeleteQuote' }], false);
+    expect((await h.suites.run(input)).results.refund).toMatchObject({ setupBlocked: true, outcome: 'fail', deterministic: 'fail' });
+  });
+  it('runs normal assertions when runtime setup is established and preserves the schema on save', async () => {
+    const h = await make([status('Draft'), { kind: 'action', label: 'ApplyDiscount' }]);
+    expect((await h.suites.list())[0].cases[0].runtimePrerequisites).toEqual(runtimePrerequisites);
+    const run = await h.suites.run(input);
+    expect(run.results.refund).toMatchObject({ outcome: 'pass', deterministic: 'pass' });
+    expect(run.results.refund.setupBlocked).toBeUndefined(); expect(h.lab.evaluate).toHaveBeenCalledOnce();
+  });
+});
+
 it('cancels the active session, saves completed cases and starts no remaining cases', async () => {
   const controller = new AbortController();
   let release!: () => void;

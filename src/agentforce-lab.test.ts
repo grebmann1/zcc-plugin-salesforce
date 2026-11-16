@@ -395,6 +395,27 @@ it('includes final state but marks evidence shortened to the judging budget inco
   expect(JSON.stringify(evidence.steps).length).toBeLessThan(6100);
 });
 
+it('sends a complete 286 KB source to the judge, including the final policy', async () => {
+  const { lab, args, request } = setup();
+  const source = '#'.repeat(286_000) + '\nFinal policy: do not invent discounts.';
+  const run = await lab.start({ ...args, source }); await lab.send({ id: run.id, text: 'Help' });
+  const base = request.getMockImplementation()!;
+  request.mockImplementation(async (...input) => input[1].endsWith('/chat-generations') ? { host: 'test.api.salesforce.com', body: { generationDetails: { generations: [{ content: JSON.stringify({ outcome: 'pass', reason: 'Asked for details', evidence: ['order'], grounding: { outcome: 'pass', reason: 'Grounded', unsupportedClaims: [] } }) }] } } } : base(...input));
+  expect((await lab.evaluate({ id: run.id })).verdict.outcome).toBe('pass');
+  const payload = JSON.parse((request.mock.calls.at(-1)![2] as { messages: Array<{ content: string }> }).messages[1].content);
+  expect(payload.pinnedSource).toEqual({ text: source, sha256: run.sourceHash, complete: true });
+});
+
+it('refuses an oversized complete request without clipping conversation evidence or calling the judge', async () => {
+  const { lab, args, request } = setup();
+  const run = await lab.start({ ...args, source: '#'.repeat(320_000), scenario: { ...args.scenario, maxTurns: 5 } });
+  const base = request.getMockImplementation()!;
+  request.mockImplementation(async (...input) => input[1].endsWith('/messages') ? { host: 'test.api.salesforce.com', body: { messages: [{ message: 'x'.repeat(32000), planId: 'plan1' }] } } : base(...input));
+  for (let i = 0; i < 4; i++) await lab.send({ id: run.id, text: 'Continue' });
+  expect((await lab.evaluate({ id: run.id })).verdict).toMatchObject({ outcome: 'inconclusive', reason: expect.stringContaining('request budget') });
+  expect(request.mock.calls.some(call => call[1].endsWith('/chat-generations'))).toBe(false);
+});
+
 it('gives the judge explicit coverage and a rubric for short conversations without accepting client evidence', async () => {
   const { lab, args, request } = setup();
   const run = await lab.start({ ...args, source: 'system:\n  instructions: \"Ask for the order number\"', contextVariables: [{ name: 'verified', type: 'Boolean', value: false }, { name: 'count', type: 'Number', value: 0 }, { name: 'note', type: 'Text', value: '' }], scenario: { ...args.scenario, maxTurns: 1, criteria: 'Ask for the order number' } });

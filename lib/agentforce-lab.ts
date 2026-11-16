@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentforceTransport, type SfapHost } from './agentforce-transport.js';
 import { DEFAULT_LAB_MODEL, labRecord, labText, parseLabScenario, type LabEngine, type LabExecution, type LabScenario, type LabSnapshot, type LabTurn } from './agentforce-lab-contract.js';
-import { LAB_JUDGE_PROMPT, judgeSource, parseGroundedVerdict } from './lab-evaluation.js';
+import { JUDGE_REQUEST_LIMIT, LAB_JUDGE_PROMPT, judgeSource, evaluateGroundedVerdict } from './lab-evaluation.js';
 import type { ResolvedOrg } from './types.js';
 import { AGENT_SOURCE_MAX, type TurnTrace } from './studio-contract.js';
 import { REHEARSAL_TRACE_REASON, TraceCache, normalizeTrace, unavailableTrace } from './agentforce-trace.js';
@@ -203,8 +203,10 @@ export class AgentforceLab {
         evidence.push({ planId: turn.planId, complete: trace.available && !trace.truncated && selected.length === steps.length, reason: selected.length < steps.length ? 'Runtime evidence shortened to the judging budget.' : trace.reason, steps: selected });
       }
       const pinnedSource = judgeSource(s.source, s.sourceHash);
-      const text = await this.model(s, LAB_JUDGE_PROMPT, [{ role: 'user', content: JSON.stringify({ criteria: s.scenario.criteria, goal: s.scenario.goal, engine: s.engine, pinnedSource, initialContext: s.contextVariables, coverage: { configuredCustomerTurns: s.scenario.maxTurns, recordedCustomerTurns: s.turns.filter(turn => turn.role === 'user').length, recordedReplies: s.turns.filter((turn, index) => turn.role === 'agent' && s.turns[index - 1]?.role === 'user').length }, transcript: s.turns, runtimeEvidence: evidence }) }]);
-      return { verdict: parseGroundedVerdict(text, s.turns, pinnedSource.complete), session: this.snapshot(s) };
+      const content = JSON.stringify({ criteria: s.scenario.criteria, goal: s.scenario.goal, engine: s.engine, pinnedSource, initialContext: s.contextVariables, coverage: { configuredCustomerTurns: s.scenario.maxTurns, recordedCustomerTurns: s.turns.filter(turn => turn.role === 'user').length, recordedReplies: s.turns.filter((turn, index) => turn.role === 'agent' && s.turns[index - 1]?.role === 'user').length }, transcript: s.turns, runtimeEvidence: evidence });
+      if (content.length > JUDGE_REQUEST_LIMIT) return { verdict: { outcome: 'inconclusive' as const, reason: 'The complete evaluation evidence exceeds the request budget. Review this conversation in smaller scenarios.', evidence: [] }, session: this.snapshot(s) };
+      const verdict = await evaluateGroundedVerdict(review => this.model(s, LAB_JUDGE_PROMPT + (review ? '\nIndependently verify this evaluation. Check every clause against the entire reply. Return inconclusive unless an alleged violation is actually evidenced; verify every unsupported quote occurs verbatim in an agent reply.' : ''), [{ role: 'user', content }]), s.turns, pinnedSource.complete);
+      return { verdict, session: this.snapshot(s) };
     });
   }
 
