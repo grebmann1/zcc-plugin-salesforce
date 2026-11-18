@@ -17,7 +17,7 @@ export const ASK_AGENT_STYLES = `${CONTEXT_STRIP_STYLES}
 .sf-ask-trigger:hover:not(:disabled) { border-color:var(--sf-accent); }
 .sf-ask-trigger:disabled { opacity:.5; cursor:default; }
 .sf-ask-pop { position:absolute; z-index:20; top:calc(100% + 6px); right:0; width:min(340px,90vw); max-height:min(560px,70vh); overflow:auto; display:flex; flex-direction:column; border:1px solid var(--sf-border); border-radius:8px; background:var(--sf-elevated); color:var(--sf-text); font-size:12px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
-.sf-ask-pop .sf-asst-ctx { border-radius:8px 8px 0 0; }
+.sf-ask-pop .sf-asst-ctx { position:sticky; top:0; z-index:1; flex-shrink:0; border-radius:8px 8px 0 0; }
 .sf-ask-section { display:flex; flex-direction:column; gap:2px; padding:6px; }
 .sf-ask-section + .sf-ask-section { border-top:1px solid var(--sf-border); }
 .sf-ask-label { margin:4px 6px; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--sf-muted); }

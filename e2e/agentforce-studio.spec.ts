@@ -390,6 +390,59 @@ async function openTool(studio: Locator, name: string) {
   }
 }
 
+test('Ask agent keeps its context header and sharing control pinned while scrolling', async ({ app, home }, testInfo) => {
+  const page = app.window;
+  await expect.poll(() => page.evaluate(async () => (await window.cc.pluginApps.list()).find(p => p.id === 'salesforce')?.status), { timeout: 30_000 }).toMatch(/running|needs-configuration/);
+  const projectId = await page.evaluate(async path => {
+    const added = await window.cc.projects.add(path); if (!added.ok) throw Error(added.message); return added.value.id;
+  }, join(home, 'dx'));
+  // Fixture conversation rows exercise a full menu without launching agents.
+  await page.evaluate(async ({ projectId, path }) => {
+    const bridge = (globalThis as unknown as { __ZCC_PLUGIN_HOST__: { callRpc: typeof window.cc.pluginApps.callRpc } }).__ZCC_PLUGIN_HOST__;
+    const original = bridge.callRpc;
+    bridge.callRpc = async (...args: Parameters<typeof original>) => args[0] === 'salesforce' && args[1] === 'studio.threads'
+      ? { ok: true, threads: Array.from({ length: 5 }, (_, index) => ({ threadId: `header-${index}`, title: `Review conversation ${index + 1}`, role: 'reviewer', path, lastActivityAt: Date.now() - index * 1000 })) }
+      : original(...args);
+    await window.cc.pluginApps.setSettings('salesforce', { defaultOrg: 'studio' });
+    history.pushState({}, '', `/projects/${projectId}`); window.dispatchEvent(new PopStateEvent('popstate'));
+  }, { projectId, path: toolbarFile });
+  await page.getByRole('navigation', { name: 'dx navigation' }).getByRole('button', { name: 'Salesforce', exact: true }).click();
+  await selectSalesforceSection(page.getByTestId('salesforce-workbench'), 'agentforce');
+  const studio = studioIn(page);
+  await studio.getByTestId(`salesforce-agent-script-file:${toolbarFile}`).click();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    for (const width of [1440, 760]) {
+      await page.setViewportSize({ width, height: 760 });
+      await studio.getByRole('button', { name: 'Ask agent', exact: true }).click();
+      const menu = studio.getByRole('dialog', { name: 'Ask an agent', exact: true });
+      const header = menu.getByTestId('studio-context-strip');
+      const toggle = header.getByRole('switch', { name: 'Share what I am viewing with the agent' });
+      await expect(menu.getByText('Review conversation 5', { exact: true })).toHaveCount(1);
+      const before = (await header.boundingBox())!;
+      expect(await menu.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
+      await menu.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await expect.poll(() => menu.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+      const after = (await header.boundingBox())!;
+      expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+      expect(Math.abs(after.height - before.height)).toBeLessThan(1);
+      expect(await menu.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+      // The pinned header must paint above the scrolled actions and accept clicks.
+      expect(await toggle.evaluate(el => {
+        const box = el.getBoundingClientRect();
+        return el.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      })).toBe(true);
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+      await expect(header).toContainText('nothing (sharing is off)');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      await page.screenshot({ path: testInfo.outputPath(`ask-agent-pinned-header-${theme}-${width}.png`) });
+      await page.keyboard.press('Escape');
+    }
+  }
+});
+
 test('Agentforce document toolbar and focused explorer: long paths, save state and narrow light/dark layouts', async ({ app, home }, testInfo) => {
   const page = app.window;
   expect(await page.evaluate(() => window.cc.extensions.install({ kind: 'bundled', id: 'salesforce' }))).toMatchObject({ ok: true });
