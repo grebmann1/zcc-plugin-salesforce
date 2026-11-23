@@ -31,8 +31,10 @@ export class Guardrail {
   }
 
   async mediate(request: GuardrailRequest): Promise<GuardrailDecision> {
-    const kind = request.kind ?? orgReadEnvelope(request.orgKind);
-    if (!kind) return { approved: true, reason: 'submitted' };
+    const kind = request.kind;
+    // Reads run without a prompt on every org kind, including large and ALL ROWS queries (still row-capped).
+    if (!kind || !confirms(kind)) return { approved: true, reason: 'submitted' };
+    if (kind === 'org.compute' && !isConfirmingOrg(request.orgKind)) return { approved: true, reason: 'submitted' };
     if (!request.threadId) return { approved: false, reason: 'headless' };
 
     const envelope: SafetyEnvelope = {
@@ -51,6 +53,11 @@ export class Guardrail {
     if (decision.approved && reusesSession(kind)) this.session.set(key, true);
     return decision;
   }
+}
+
+/** Kinds that ask the operator. Org reads and bounded or unbounded SOQL reads do not. */
+export function confirms(kind: EnvelopeKind): boolean {
+  return kind !== 'org.production.read' && kind !== 'org.unknown.read' && kind !== 'soql.unbounded';
 }
 
 export function reusesSession(kind: EnvelopeKind): boolean {
@@ -85,6 +92,8 @@ export function envelopeTitle(kind: EnvelopeKind): string {
       return 'Confirm Salesforce write';
     case 'apex.anonymous':
       return 'Confirm anonymous Apex';
+    case 'org.compute':
+      return 'Confirm Agentforce run';
     case 'soql.unbounded':
       return 'Confirm unbounded SOQL';
     case 'soql.export':

@@ -250,7 +250,7 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     return null;
   }
 
-  /** Reads the agent's versions through the guardrail: sandboxes pass, others need a read grant. */
+  /** Reads the agent's versions through the guardrail, which passes reads on every org kind. */
   async function listVersions(org: PublicOrgView, apiName: string): Promise<ReleaseVersion[] | ToolFailure> {
     const sdk = readSdk();
     const decision = await sdk.confirm({
@@ -288,8 +288,8 @@ export function createReleaseService(options: ReleaseServiceOptions) {
     if ('ok' in source) return source;
     const org = await options.sdk.connect();
     const lastPublish = await options.kv.get<{ revision: string; at: number }>(publishRecordKey(org.orgId, source.apiName));
-    const confirming = isConfirmingOrg(org.kind);
-    const readUntil = confirming ? options.grants.until(options.scope(), org.orgId) : null;
+    // Reading versions needs no approval on any org kind; a grant only reports when one was given.
+    const readUntil = isConfirmingOrg(org.kind) ? options.grants.until(options.scope(), org.orgId) : null;
     const base = {
       org: { alias: org.alias, orgId: org.orgId, kind: org.kind },
       agent: {
@@ -301,7 +301,6 @@ export function createReleaseService(options: ReleaseServiceOptions) {
       },
       readUntil
     };
-    if (confirming && readUntil === null) return { ok: true, data: { ...base, needsReadApproval: true, versions: [] } };
     const versions = await listVersions(org, source.apiName);
     if (!Array.isArray(versions)) {
       // Publishing does not depend on a version list. Keep the source and target

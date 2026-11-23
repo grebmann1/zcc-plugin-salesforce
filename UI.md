@@ -138,8 +138,10 @@ it does not read the consumer plugin's settings.
   and deployment reports work directly against the selected org, including
   production. They use read-only endpoints and existing page/output caps;
   loading all rows and exporting still have confirmation in the panel.
-  Agent tool calls retain their production/unknown-org and unbounded-query
-  approval rules. Anonymous Apex and writes retain their server approval rules.
+  Agent tool reads, including queries of any size, run without approval on
+  every org kind. Agentforce preview, rehearsal and eval runs confirm once per
+  thread on production or unknown orgs. Anonymous Apex, exports and writes
+  retain their server approval rules.
   A project tab never manufactures an agent or a thread approval.
 - The portable `/sdk` service remains available for lower-level integrations.
   Pass its explicit alias options when implementing a consumer's own project

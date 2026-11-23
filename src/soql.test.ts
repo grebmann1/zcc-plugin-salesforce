@@ -91,6 +91,16 @@ describe('bare COUNT() queries', () => {
     expect(plan('query.run', 'SELECT COUNT() FROM Account')).toMatchObject({ ok: true, plan: { unbounded: true } });
   });
 
+  it('treats a requested run limit as the bound, since applyLimit writes it into the query', () => {
+    const grouped = 'SELECT CALENDAR_YEAR(CloseDate) y, COUNT(Id) n FROM Opportunity GROUP BY CALENDAR_YEAR(CloseDate)';
+    expect(parseSoqlInput({ action: 'query.run', query: grouped, limit: 50 })).toMatchObject({ ok: true, plan: { unbounded: false, limit: 50 } });
+    expect(parseSoqlInput({ action: 'query.run', query: `${grouped} LIMIT 500`, limit: 50 })).toMatchObject({ ok: true, plan: { unbounded: false } });
+    expect(parseSoqlInput({ action: 'query.run', query: `${grouped} LIMIT 50`, limit: 500 })).toMatchObject({ ok: true, plan: { envelope: 'soql.unbounded' } });
+    expect(parseSoqlInput({ action: 'query.run', query: grouped })).toMatchObject({ ok: true, plan: { envelope: 'soql.unbounded' } });
+    // A bare COUNT() runs as written, so a requested limit does not bound it.
+    expect(parseSoqlInput({ action: 'query.run', query: 'SELECT COUNT() FROM Account', limit: 50 })).toMatchObject({ ok: true, plan: { envelope: 'soql.unbounded' } });
+  });
+
   it('keeps the LIMIT written in the query apart from the run limit', () => {
     expect(parseSoqlInput({ action: 'query.run', query: 'SELECT COUNT() FROM Account LIMIT 5', limit: 50 })).toMatchObject({ ok: true, plan: { limit: 50, queryLimit: 5 } });
     expect(parseSoqlInput({ action: 'query.run', query: 'SELECT Id FROM Account' })).toMatchObject({ ok: true, plan: { limit: 200, queryLimit: null } });

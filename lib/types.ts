@@ -33,6 +33,8 @@ export type OrgKind = 'production' | 'sandbox' | 'scratch' | 'unknown';
 export type EnvelopeKind =
   | 'org.production.read'
   | 'org.unknown.read'
+  /** Spends Salesforce model or eval capacity: confirms once per thread on production and unknown orgs only. */
+  | 'org.compute'
   | 'org.write'
   | 'apex.anonymous'
   | 'soql.unbounded'

@@ -414,37 +414,26 @@ describe('opening a version read-only', () => {
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ code: 'api_error' });
   });
 
-  it('needs the read approval on production before it reads the org', async () => {
-    const { call, approveAndRun, state, sf, queries } = await setup('production');
+  it('reads a version on production without a read approval', async () => {
+    const { call, state } = await setup('production');
     state.bundles = BUNDLES;
-    await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ ok: false, code: 'read_required' });
-    expect(sf).toEqual([]);
-    expect(queries).toEqual([]);
-    await approveAndRun({ action: 'org.read' });
     await expect(call(RELEASE_RPC.versionSource, { versionNumber: 1 })).resolves.toMatchObject({ ok: true, data: { content: 'version one' } });
   });
 });
 
 describe('release RPCs on production', () => {
-  it('reads versions only after a read approval, which also opens Compile', async () => {
-    const { call, approveAndRun, prepare, queries } = await setup('production');
-    const locked = await call(RELEASE_RPC.state);
-    expect(locked.data).toMatchObject({ needsReadApproval: true, readUntil: null, versions: [] });
-    expect(queries).toEqual([]);
-    await expect(call(RELEASE_RPC.prepare, { action: 'agent.activate', versionNumber: 2 })).resolves.toMatchObject({ code: 'read_required' });
-    await expect(call('agentScript.compile', { path: PATH })).resolves.toMatchObject({ ok: false, code: 'refused' });
-    // A click on Compile is its own approval, so it reads without asking anywhere.
-    await expect(call('agentScript.compile', { path: PATH, startedByUser: true })).resolves.toMatchObject({ ok: true });
-    // So is a click on Open in Builder.
-    await expect(call('agentBuilder.open', { path: PATH })).resolves.toMatchObject({ ok: false, code: 'refused' });
-    await expect(call('agentBuilder.open', { path: PATH, startedByUser: true })).resolves.toMatchObject({ ok: true });
+  it('reads versions, compiles and opens Builder on production without a read approval', async () => {
+    const { call, approveAndRun, prepare } = await setup('production');
+    const open = await call(RELEASE_RPC.state);
+    expect(open.data).toMatchObject({ needsReadApproval: false, readUntil: null });
+    expect(open.data.versions).toHaveLength(2);
+    await expect(call('agentScript.compile', { path: PATH })).resolves.toMatchObject({ ok: true });
+    await expect(call('agentBuilder.open', { path: PATH })).resolves.toMatchObject({ ok: true });
+    // The org.read sheet still exists for older Studio builds and still issues a grant.
     const read = await prepare({ action: 'org.read' });
     expect(read.binding).toEqual({ action: 'org.read', target: ORG_ID, targetLabel: 'dev (production)', subject: 'MyBot versions' });
     await expect(approveAndRun({ action: 'org.read' })).resolves.toMatchObject({ ok: true, data: { readUntil: expect.any(Number) } });
-    const open = await call(RELEASE_RPC.state);
-    expect(open.data).toMatchObject({ needsReadApproval: false, readUntil: expect.any(Number) });
-    expect(open.data.versions).toHaveLength(2);
-    await expect(call('agentScript.compile', { path: PATH })).resolves.toMatchObject({ ok: true });
+    expect((await call(RELEASE_RPC.state)).data).toMatchObject({ readUntil: expect.any(Number) });
   });
 
   it('needs typed alias and passing eval evidence to activate', async () => {

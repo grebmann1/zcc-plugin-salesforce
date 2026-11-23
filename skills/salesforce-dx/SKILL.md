@@ -28,11 +28,11 @@ The Salesforce plugin's **Data** tab runs interactive REST/Tooling queries in SO
 
 ## `sf_soql`
 
-Agents keep using this tool. It is bounded and confirm-gated; it is not the Explorer UI.
+Agents keep using this tool. It is row-capped and confirms only exports; it is not the Explorer UI.
 
 - `schema.search` / `schema.describe` before writing queries
 - `query.validate` then `query.sample` (bounded) then `query.run`
-- Unbounded queries, `ALL ROWS` / QueryAll, and exports require operator confirmation
+- Queries run without confirmation on every org kind, including `ALL ROWS` / QueryAll and queries with no LIMIT (still capped at the run limit). Exports require operator confirmation
 
 ## `sf_apex`
 
@@ -50,7 +50,7 @@ Agents keep using this tool. It is bounded and confirm-gated; it is not the Expl
 
 - Edit `.agent` files in the Agentforce Studio (Monaco + Agent Script LSP: diagnostics, hover, completions, go-to-definition, topic graph, dialects, examples). Use the thread's **Agent** side panel (File, Preview, Tests, Graph) to review and run previews; its control API supports simulated previews only. Edits there are proposals, and the Studio is the only editor. `zcc sf lint [path]` lints a confined bundle.
 - `diagnose` runs the Agent Script language service on a confined `.agent` file. Default `query` is `diagnostics`. Position queries (`hover`, `complete`, `definition`) need 0-based `line` and `column`. `symbols` returns the outline.
-- `compile` / `inspect` a confined `.agent` authoring bundle. The Studio's **Compile** button runs the same compile on the saved file and lists the result under Problems. When the local compiler is missing, the `sf agent validate` fallback compiles in the org, so a production or unknown org asks first.
+- `compile` / `inspect` a confined `.agent` authoring bundle. The Studio's **Compile** button runs the same compile on the saved file and lists the result under Problems. When the local compiler is missing, the `sf agent validate` fallback compiles in the org, which only reads the org and runs without a prompt.
 - `preview.start` / `preview.send` / `preview.end` for live preview; compact digest + artifact
 - `eval.run` with a confined YAML/JSON `specPath` (`sf agent test run-eval`) or an org `aiEvaluationDefinitionName` (Connect Testing API)
 - `lifecycle.list` / `lifecycle.publish` (inactive version, no retrieve) / `lifecycle.activate` / `lifecycle.deactivate` (`apiName`; its users lose the agent until a version is activated again)
