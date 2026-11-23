@@ -8,7 +8,7 @@ Workbench: sf_workbench capabilities describes draft.create, org sources, deploy
 
 Change authority: repository source for local edits; live org evidence for org facts. Do not invent schema.
 
-Safety: allow_mutation, allow_untested, and similar flags are intent, never approval. Anonymous Apex, unbounded SOQL, exports, Agentforce publish/activate, and production/unknown orgs wait for operator confirmation. Headless execution is fail-closed.
+Safety: allow_mutation, allow_untested, and similar flags are intent, never approval. Anonymous Apex, SOQL exports, org writes, Agentforce publish/activate/deactivate and Live preview wait for operator confirmation. Agentforce preview, rehearsal and eval runs confirm once per thread on production or unknown orgs. Reads, including SOQL queries of any size, run without confirmation. Headless execution is fail-closed.
 
 Proof-first: run targeted Apex tests, LWC Jest, or sf_agent eval.run for the files you changed. Do not run org-wide tests. Do not activate an agent without eval evidence unless the operator confirms untested activation.
 

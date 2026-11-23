@@ -116,17 +116,17 @@ it('uses input files for large CLI writes and family actions with the same revis
   expect((await cli(['action', 'files.write', '--input-file', 'write.json'], '')).exitCode).toBe(2);
   expect((await cli(['--help'])).stdout).toContain('--input-file');
 });
-it('mediates org reads and UI reads but permits offline local drafts', async () => {
-  const { action, request, exec, harness } = await fixture(true);
+it('runs org reads and UI reads without a prompt on an org that is not a known sandbox', async () => {
+  const { action, harness, zcc } = await fixture(true);
+  const confirmation = vi.spyOn(zcc.ui, 'requestInput');
   expect(await action('draft.create', { name: 'Offline', apiName: 'Offline' })).toMatchObject({ ok: true });
-  expect(await action('source.list')).toMatchObject({ ok: false, code: 'refused' });
-  expect(await action('records.get', { objectName: 'Account', recordId: '001000000000001' })).toMatchObject({ code: 'refused' });
+  expect(await action('source.list')).not.toMatchObject({ code: 'refused' });
+  expect(await action('records.get', { objectName: 'Account', recordId: '001000000000001' })).not.toMatchObject({ code: 'refused' });
   const view = await harness.callRpc('control.register', { projectId: 'p', surface: 'data', commands: ['record.open'] }) as any;
-  expect(await action('ui.command', { viewId: view.viewId, command: 'record.open', input: {} })).toMatchObject({ code: 'refused' });
-  expect(request).not.toHaveBeenCalled();
-  expect(exec.mock.calls.some(([args]) => args.includes('metadata'))).toBe(false);
+  expect(await action('ui.command', { viewId: view.viewId, command: 'record.open', input: {} })).not.toMatchObject({ code: 'refused' });
+  expect(confirmation).not.toHaveBeenCalled();
 });
-it('gates Agentforce lab runs on an org that is not a known sandbox, like every other org read', async () => {
+it('gates Agentforce lab runs on an org that is not a known sandbox, since they spend model capacity', async () => {
   const bootstrap = vi.fn(async () => 'JWT');
   const { harness, zcc } = await fixture(true, { bootstrap, request: vi.fn() } as unknown as AgentforceTransport);
   const start = (extra: Record<string, unknown> = {}) =>
@@ -137,7 +137,7 @@ it('gates Agentforce lab runs on an org that is not a known sandbox, like every 
   const confirmation = vi.spyOn(zcc.ui, 'requestInput');
   const cancelled = start({ threadId: 'thread' });
   await vi.waitFor(() => expect(confirmation).toHaveBeenCalledOnce());
-  expect(confirmation.mock.calls[0]![0]).toMatchObject({ threadId: 'thread', payload: { kind: 'org.unknown.read', orgAlias: 'dev', summary: expect.stringContaining('Rehearse') } });
+  expect(confirmation.mock.calls[0]![0]).toMatchObject({ threadId: 'thread', payload: { kind: 'org.compute', orgAlias: 'dev', summary: expect.stringContaining('Rehearse') } });
   harness.cancelInteraction();
   expect(await cancelled).toMatchObject({ ok: false, error: 'Operator cancelled the rehearse run.' });
   expect(bootstrap).not.toHaveBeenCalled();
@@ -153,7 +153,7 @@ it('treats a Start click in the Studio as the approval, but never an agent claim
   const { harness, zcc, action } = await fixture(true, { bootstrap, request: vi.fn() } as unknown as AgentforceTransport);
   const confirmation = vi.spyOn(zcc.ui, 'requestInput');
   const source = 'config:\n  agent_name: Help';
-  // An agent cannot forge the click: sf_workbench drops the flag, so the org gate still refuses.
+  // An agent cannot forge the click: sf_workbench drops the flag, so the compute gate still refuses.
   expect(await action('studio.start', { engine: 'rehearsal', source, startedByUser: true })).toMatchObject({ ok: false, code: 'refused' });
   expect(bootstrap).not.toHaveBeenCalled();
   expect(await harness.callRpc('agentLab.start', { projectId: 'p', engine: 'rehearsal', source, startedByUser: true })).toMatchObject({ ok: true });
@@ -233,27 +233,18 @@ it('lets an agent read the preview context, manage presets and start a run from 
   expect(await action('contextPresets.remove', { path, id: saved.preset.id, expectedRevision: 1 })).toEqual({ ok: true, id: saved.preset.id });
   expect((await action('contextPresets.list', { path })).presets).toEqual([]);
 });
-it('compiles from the Studio button behind the same org gate as every other org read', async () => {
+it('compiles from the Studio button without a prompt, even on an org that is not a known sandbox', async () => {
   const { action, harness, zcc, exec } = await fixture(true);
   const draft = await action('draft.create', { name: 'Help', apiName: 'Help' });
   const compile = (extra: Record<string, unknown> = {}) =>
     harness.callRpc('agentScript.compile', { projectId: 'p', path: draft.file.path, ...extra }) as Promise<any>;
   const validations = () => exec.mock.calls.filter(([args]) => args[0] === 'agent' && args[1] === 'validate');
-  expect(await harness.callRpc('agentScript.compile', { projectId: 'p' })).toMatchObject({ ok: false, code: 'invalid_input' });
-  // sf agent validate runs in the org: with no thread to ask in, an org that is not a known sandbox is refused first.
-  expect(await compile()).toMatchObject({ ok: false, code: 'refused', error: expect.stringContaining('Compile beside a thread') });
-  expect(validations()).toHaveLength(0);
   const confirmation = vi.spyOn(zcc.ui, 'requestInput');
-  const denied = compile({ threadId: 'thread' });
-  await vi.waitFor(() => expect(confirmation).toHaveBeenCalledOnce());
-  expect(confirmation.mock.calls[0]![0]).toMatchObject({ threadId: 'thread', payload: { kind: 'org.unknown.read', orgAlias: 'dev', summary: 'Compile Help with sf agent validate on dev (unknown)', preview: 'Help' } });
-  harness.cancelInteraction();
-  expect(await denied).toMatchObject({ ok: false, code: 'refused', error: 'Operator cancelled compile.' });
-  expect(validations()).toHaveLength(0);
-  const approved = compile({ threadId: 'thread' });
-  await vi.waitFor(() => expect(confirmation).toHaveBeenCalledTimes(2));
-  harness.submitInteraction({ approved: true });
-  expect(await approved).toMatchObject({ ok: true, summary: 'Compiled Help (cli)' });
+  expect(await harness.callRpc('agentScript.compile', { projectId: 'p' })).toMatchObject({ ok: false, code: 'invalid_input' });
+  // sf agent validate only reads the org, so it runs headless as well as beside a thread.
+  expect(await compile()).toMatchObject({ ok: true, summary: 'Compiled Help (cli)' });
+  expect(await compile({ threadId: 'thread' })).toMatchObject({ ok: true, summary: 'Compiled Help (cli)' });
+  expect(confirmation).not.toHaveBeenCalled();
   expect(validations()[0]![0]).toEqual(['agent', 'validate', 'authoring-bundle', '--json', '--api-name', 'Help', '--target-org', 'dev']);
 });
 it('compiles on a sandbox from the Studio button without asking', async () => {
@@ -370,24 +361,16 @@ it('asks before an agent-driven Live preview on the Preview API, and explains th
   exec.mockImplementationOnce(async () => ({ code: 1, stderr: '', stdout: JSON.stringify({ status: 1, message: "Cannot read properties of undefined (reading 'replace')" }) }));
   expect(await harness.callRpc('agentPreview.start', { projectId: 'p', path: draft.file.path, startedByUser: true })).toMatchObject({ ok: false, code: 'preview_failed', error: expect.stringContaining('no default_agent_user') });
 });
-it('asks before opening Agentforce Builder on an org that is not a known sandbox', async () => {
+it('opens Agentforce Builder without a prompt on an org that is not a known sandbox', async () => {
   const { action, harness, zcc, exec } = await fixture(true);
   const draft = await action('draft.create', { name: 'Help', apiName: 'Help' });
   const open = (extra: Record<string, unknown> = {}) => harness.callRpc('agentBuilder.open', { projectId: 'p', path: draft.file.path, ...extra }) as Promise<any>;
   const opens = () => exec.mock.calls.filter(([args]) => args[0] === 'org' && args[1] === 'open');
-  expect(await open()).toMatchObject({ ok: false, code: 'refused', error: expect.stringContaining('Open it beside a thread') });
   const confirmation = vi.spyOn(zcc.ui, 'requestInput');
-  const denied = open({ threadId: 'thread' });
-  await vi.waitFor(() => expect(confirmation).toHaveBeenCalledOnce());
-  expect(confirmation.mock.calls[0]![0]).toMatchObject({ threadId: 'thread', payload: { summary: 'Open Help in Agentforce Builder on dev (unknown)' } });
-  harness.cancelInteraction();
-  expect(await denied).toMatchObject({ ok: false, code: 'refused', error: 'Operator cancelled opening Agentforce Builder.' });
-  expect(opens()).toHaveLength(0);
-  const approved = open({ threadId: 'thread' });
-  await vi.waitFor(() => expect(confirmation).toHaveBeenCalledTimes(2));
-  harness.submitInteraction({ approved: true });
-  expect(await approved).toMatchObject({ ok: true });
-  expect(opens()).toHaveLength(1);
+  expect(await open()).toMatchObject({ ok: true });
+  expect(await open({ threadId: 'thread' })).toMatchObject({ ok: true });
+  expect(opens()).toHaveLength(2);
+  expect(confirmation).not.toHaveBeenCalled();
 });
 it('runs bounded queries, stores real results and refuses cross-project presentation', async () => {
   const { action, harness, request } = await fixture();
@@ -397,19 +380,15 @@ it('runs bounded queries, stores real results and refuses cross-project presenta
   expect(await harness.callRpc('query.result', { projectId: 'p', resultId: result.resultId })).toMatchObject({ ok: true });
   expect(await harness.callRpc('query.result', { projectId: 'other', resultId: result.resultId })).toMatchObject({ ok: false });
   expect(await action('query.execute', { query: 'DELETE FROM Account' })).toMatchObject({ ok: false });
-  expect(await action('query.execute', { query: 'SELECT Id FROM Account' })).toMatchObject({ ok: false, code: 'refused' });
+  // A query with no LIMIT is still capped by the run limit, and needs no prompt.
+  expect(await action('query.execute', { query: 'SELECT Id FROM Account' })).toMatchObject({ ok: true });
 });
-it('runs an approved bare COUNT() query execute without an added LIMIT', async () => {
-  const { action, harness, request, zcc } = await fixture();
+it('runs a bare COUNT() query execute without an added LIMIT or a prompt', async () => {
+  const { action, request, zcc } = await fixture();
   const confirmation = vi.spyOn(zcc.ui, 'requestInput');
   const sent = () => (request.mock.calls.at(-1)![1] as { query: { q: string } }).query.q;
-  const run = async (query: string) => {
-    const pending = action('query.execute', { query }, { ...ctx, threadId: 'thread' });
-    await vi.waitFor(() => expect(confirmation).toHaveBeenCalledOnce());
-    harness.submitInteraction({ approved: true });
-    return pending;
-  };
-  expect(await run('SELECT COUNT() FROM Account')).toMatchObject({ ok: true });
+  expect(await action('query.execute', { query: 'SELECT COUNT() FROM Account' }, { ...ctx, threadId: 'thread' })).toMatchObject({ ok: true });
+  expect(confirmation).not.toHaveBeenCalled();
   expect(sent()).toBe('SELECT COUNT() FROM Account');
   expect(await action('query.execute', { query: 'SELECT COUNT() FROM Account LIMIT 5' })).toMatchObject({ ok: true });
   expect(sent()).toBe('SELECT COUNT() FROM Account LIMIT 5');

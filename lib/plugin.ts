@@ -242,6 +242,7 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
       orgAlias: org.alias,
       orgId: org.orgId,
       orgKind: org.kind,
+      kind: 'org.compute',
       summary: `${verb} an Agentforce draft on ${org.alias} (${org.kind}). This makes Salesforce model calls in that org.`
     });
     if (mediated.approved) return;
@@ -861,7 +862,9 @@ export async function createSalesforcePlugin(zcc: ZccPluginApi, deps: Salesforce
       const uiReadsOrg = action === 'ui.command' && uiCommandReadsOrg(data.command, data.input as Record<string, unknown> | undefined);
       const [method, policy] = WORKBENCH_ACTIONS[action];
       if (policy === 'org' || uiReadsOrg || (policy === 'conditional' && data.origin === 'org')) {
-        const { mediated } = await mediateOrgRead(ctx, sdk, `Salesforce ${action}`);
+        // A Preview the agent drives through the panel spends model capacity, like sf_agent preview.start.
+        const compute = COMPUTE_ACTIONS.has(action) || (action === 'ui.command' && (data.command === 'preview.start' || data.command === 'preview.send'));
+        const { mediated } = await mediateOrgRead(ctx, sdk, `Salesforce ${action}`, compute ? 'org.compute' : undefined);
         if (!mediated.approved) return { ok: false, code: 'refused', error: `Operator ${mediated.reason} ${action}.` };
       }
       if (action === 'suites.compare') data.compare = true;
@@ -1673,6 +1676,9 @@ async function loadAgentBundles(
   };
 }
 
+/** Workbench actions that spend Salesforce model capacity; reads and listings run without a prompt. */
+const COMPUTE_ACTIONS: ReadonlySet<string> = new Set(['studio.start', 'studio.send', 'studio.next', 'studio.evaluate', 'suites.run']);
+
 async function mediateOrgRead(
   ctx: PluginAgentToolContext,
   sdk: SalesforceSdk,
@@ -1836,12 +1842,12 @@ async function runAgentPreview(
   const viaLab = verb === 'start' ? labSource !== null && lacksDefaultAgentUser(labSource) : Boolean(plan.sessionId && previewLab?.sessions.has(plan.sessionId));
   const label = resolved.identity?.apiName ?? plan.sessionId ?? '';
   const live = plan.live || resolved.identity?.flag === 'api-name';
-  // Ending only closes the session and runs no actions, so it keeps the org read gate but needs no Live approval.
+  // Ending only closes the session and runs no actions, so it needs no approval. Start and send spend model capacity.
   const { org, mediated } = startedByUser ? { org: await sdk.connect(), mediated: { approved: true, reason: 'submitted' } } : await mediateOrgRead(
     ctx,
     sdk,
     (connected) => `${live ? 'Live ' : ''}${plan.action} ${label} on ${connected.alias} (${connected.kind})`,
-    live && verb !== 'end' ? 'agent.preview.live' : undefined,
+    live && verb !== 'end' ? 'agent.preview.live' : verb === 'end' ? undefined : 'org.compute',
     { preview: label }
   );
   if (!mediated.approved) {
@@ -1963,6 +1969,8 @@ async function runEvalSpecFile(
     ctx,
     sdk,
     (connected) => `eval.run ${spec.label} on ${connected.alias} (${connected.kind})`
+,
+    'org.compute'
   );
   if (!mediated.approved) return fail('refused', `Operator ${mediated.reason} eval.run.`);
   const result = await sdk.execSf(runEvalArgs(specFile, org.alias), agentCliOpts(spec.cwd));
@@ -2007,6 +2015,8 @@ async function runAgentEvalDefinition(
     ctx,
     sdk,
     (connected) => `eval.run ${definition} on ${connected.alias} (${connected.kind})`
+,
+    'org.compute'
   );
   if (!mediated.approved) return fail('refused', `Operator ${mediated.reason} eval.run.`);
   const created = await sdk.request(EVAL_RUNS_PATH, {

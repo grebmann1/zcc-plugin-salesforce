@@ -348,21 +348,13 @@ describe('salesforce family tools', () => {
     harness.setSettings({ defaultOrg: 'dev' });
     const soql = harness.agentTools.find((row) => row.name === 'sf_soql')!;
     const confirmation = vi.spyOn(zcc.ui, 'requestInput');
-    const run = async (action: string, query: string) => {
-      const before = confirmation.mock.calls.length;
-      const pending = soql.execute({ action, query }, ctx);
-      await vi.waitFor(() => expect(confirmation).toHaveBeenCalledTimes(before + 1));
-      harness.submitInteraction({ approved: true });
-      return pending as Promise<any>;
-    };
+    const run = async (action: string, query: string) => soql.execute({ action, query }, ctx) as Promise<any>;
 
     const counted = await run('query.run', 'SELECT COUNT() FROM Account');
     expect(counted).toMatchObject({ ok: true, summary: 'Count: 1234', data: { totalSize: 1234 } });
     expect(requests.at(-1)!.query).toEqual({ q: 'SELECT COUNT() FROM Account' });
-    expect(confirmation.mock.calls.at(-1)![0]).toMatchObject({ payload: { preview: 'SELECT COUNT() FROM Account' } });
 
     await run('query.sample', 'SELECT COUNT() FROM Lead');
-    expect(confirmation.mock.calls.at(-1)![0]).toMatchObject({ payload: { kind: 'soql.unbounded', preview: 'SELECT COUNT() FROM Lead' } });
     expect(requests.at(-1)!.query).toEqual({ q: 'SELECT COUNT() FROM Lead' });
 
     const noTotal = await run('query.run', 'SELECT COUNT() FROM Contact');
@@ -371,6 +363,7 @@ describe('salesforce family tools', () => {
     const ordinary = await soql.execute({ action: 'query.run', query: 'SELECT Id FROM Account LIMIT 5' }, ctx);
     expect(ordinary).toMatchObject({ ok: true, summary: '1 row(s); showing 1' });
     expect(requests.at(-1)!.query).toEqual({ q: 'SELECT Id FROM Account LIMIT 5' });
+    expect(confirmation).not.toHaveBeenCalled();
   });
 
   it('includes exact sObjects in a large org and honors schema search limits', async () => {
@@ -446,15 +439,15 @@ describe('salesforce family tools', () => {
     });
   });
 
-  it('requires confirmation for production reads and SOQL export', async () => {
+  it('reads production without confirmation and confirms SOQL export', async () => {
     const { zcc, harness } = createFakePluginHost({ pluginId: 'salesforce', listProjects: async () => [{ id: 'p1', name: 'DX', path: '/proj' }] });
     await createSalesforcePlugin(zcc, mockDeps({ kind: 'production' }));
     harness.setSettings({ defaultOrg: 'dev' });
     const soql = harness.agentTools.find((row) => row.name === 'sf_soql')!;
-    const pending = soql.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 1' }, ctx);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    harness.submitInteraction({ approved: true });
-    await expect(pending).resolves.toMatchObject({ ok: true });
+    const confirmation = vi.spyOn(zcc.ui, 'requestInput');
+    await expect(soql.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 1' }, ctx)).resolves.toMatchObject({ ok: true });
+    await expect(soql.execute({ action: 'query.run', query: 'SELECT Id FROM Account' }, ctx)).resolves.toMatchObject({ ok: true });
+    expect(confirmation).not.toHaveBeenCalled();
 
     const { zcc: zcc2, harness: harness2 } = createFakePluginHost({ pluginId: 'salesforce', listProjects: async () => [{ id: 'p1', name: 'DX', path: '/proj' }] });
     await createSalesforcePlugin(zcc2, mockDeps());
@@ -469,13 +462,13 @@ describe('salesforce family tools', () => {
     await createSalesforcePlugin(zcc3, mockDeps({ kind: 'production' }));
     harness3.setSettings({ defaultOrg: 'dev' });
     const soql3 = harness3.agentTools.find((row) => row.name === 'sf_soql')!;
-    const denied = soql3.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 1' }, ctx);
+    const denied = soql3.execute({ action: 'query.export', query: 'SELECT Id FROM Account LIMIT 1' }, ctx);
     await new Promise((resolve) => setTimeout(resolve, 0));
     harness3.submitInteraction({ approved: false });
     await expect(denied).resolves.toMatchObject({ code: 'refused' });
   });
 
-  it('serves standalone production browsing without a thread while agent reads still require approval', async () => {
+  it('serves production browsing and agent reads without a thread', async () => {
     const { zcc, harness } = createFakePluginHost({ pluginId: 'salesforce', listProjects: async () => [{ id: 'p1', name: 'DX', path: '/proj' }] });
     await createSalesforcePlugin(zcc, mockDeps({ kind: 'production' }));
     harness.setSettings({ defaultOrg: 'dev' });
@@ -492,7 +485,7 @@ describe('salesforce family tools', () => {
     await expect(harness.callRpc('soql.query', { ...scope, soql: 'DELETE FROM Account' })).resolves.toMatchObject({ ok: false, code: 'invalid_input' });
     await expect(harness.callRpc('soql.queryMore', { ...scope, nextRecordsUrl: 'https://evil.example/records' })).resolves.toMatchObject({ ok: false });
     const tool = harness.agentTools.find(row => row.name === 'sf_soql')!;
-    await expect(tool.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 5' }, { ...ctx, threadId: '' })).resolves.toMatchObject({ ok: false, code: 'refused' });
+    await expect(tool.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 5' }, { ...ctx, threadId: '' })).resolves.toMatchObject({ ok: true });
   });
 
   it('fails closed when requestInput throws and when the CLI org lookup fails', async () => {
@@ -504,7 +497,7 @@ describe('salesforce family tools', () => {
     };
     const soql = harness.agentTools.find((row) => row.name === 'sf_soql')!;
     await expect(
-      soql.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 1' }, ctx)
+      soql.execute({ action: 'query.export', query: 'SELECT Id FROM Account LIMIT 1' }, ctx)
     ).resolves.toMatchObject({ ok: false, code: 'refused' });
 
     const { zcc: zcc2, harness: harness2 } = createFakePluginHost({ pluginId: 'salesforce', listProjects: async () => [{ id: 'p1', name: 'DX', path: '/proj' }] });

@@ -638,16 +638,13 @@ describe('salesforce plugin behavior', () => {
     await expect(pending).resolves.toMatchObject({ ok: false, code: 'refused' });
   });
 
-  it('fails closed without a thread id', async () => {
+  it('reads production without a thread but fails closed for an export', async () => {
     const { zcc, harness } = createFakePluginHost({ pluginId: 'salesforce', listProjects: async () => [{ id: 'p1', name: 'DX project', path: '/tmp/dx' }] });
     await createSalesforcePlugin(zcc, mockDeps('production'));
     harness.setSettings({ defaultOrg: 'dev' });
     const tool = harness.agentTools.find((row) => row.name === 'sf_soql');
-    await expect(
-      tool!.execute(
-        { action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 5' },
-        { threadId: '', projectId: 'p1', signal: AbortSignal.abort() }
-      )
-    ).resolves.toMatchObject({ ok: false, code: 'refused' });
+    const headless = { threadId: '', projectId: 'p1', signal: AbortSignal.abort() };
+    await expect(tool!.execute({ action: 'query.sample', query: 'SELECT Id FROM Account LIMIT 5' }, headless)).resolves.toMatchObject({ ok: true });
+    await expect(tool!.execute({ action: 'query.export', query: 'SELECT Id FROM Account LIMIT 5' }, headless)).resolves.toMatchObject({ ok: false, code: 'refused' });
   });
 });

@@ -60,11 +60,13 @@ export function parseSoqlInput(input: unknown): { ok: true; plan: SoqlPlan } | {
     const bareCount = isBareCountQuery(inspection.normalized);
     const defaultLimit = action === 'query.sample' ? QUERY_SAMPLE_LIMIT : QUERY_RUN_MAX_LIMIT;
     const limit = clampLimit(requestedLimit ?? inspection.limit ?? defaultLimit, action);
+    // applyLimit writes the requested limit into the query, except for a bare COUNT(), which runs as written.
+    const effectiveLimit = bareCount ? inspection.limit : (requestedLimit ?? inspection.limit);
     const unbounded =
       action === 'query.export'
       || inspection.allRows
       || ((action !== 'query.sample' || bareCount)
-        && (inspection.limit === null || (inspection.limit ?? 0) > QUERY_RUN_MAX_LIMIT))
+        && (effectiveLimit === null || effectiveLimit > QUERY_RUN_MAX_LIMIT))
       || (requestedLimit !== undefined && requestedLimit > QUERY_RUN_MAX_LIMIT);
     const envelope: EnvelopeKind | undefined =
       action === 'query.export'
